@@ -109,6 +109,17 @@ for LLM Applications for threats.
 - [ ] The design can be tested: each NFR's check is possible with the
       proposed components.
 - [ ] Failure behaviour is designed for every external dependency.
+- [ ] Every list or name that appears in more than one document (reason
+      codes, statuses, flags, settings and their units, steps) is the same
+      in each. Added after Gate 2 of M1, where most Medium findings were
+      such a list drifting.
+- [ ] For every rule said to be enforced by code: name each input to that
+      rule which the model or a customer controls. If there is one, the
+      rule is not enforced by code alone. Added after a guardrail claim
+      proved false.
+- [ ] Every new name in a requirement (a state, a reason, a mark, a field)
+      exists in the state machines, the data model and the API. Added after
+      an emergency mark was specified in a criterion and nowhere else.
 
 ## Gate 3 — AI behaviour
 
