@@ -113,17 +113,17 @@ M0 Inception met its exit criteria on 2026-11-16; see
   items added to the Gate 2 checklist.
 - 2026-11-17 — Retro and README fix merged as #258 and #260. AWS AI-DLC
   evaluated (#59) in ADR 0013: borrow four practices, install nothing.
+- 2026-11-17 — M2 planned: ten units of work, issues #262 to #271, in
+  `docs/plans/m2-walking-skeleton.md`. Open review findings sorted into the
+  milestone that builds their subject. `AGENTS.md` gains the unit loop and
+  the halt rule.
 
 ## Next
 
-1. Maintainer reads ADR 0013 and merges it, or says to install AI-DLC
-   instead.
-2. Plan M2: cut it into units of work with their order, triage the open
-   review findings into milestones, and name the CI checks of the first
-   pull request.
-3. M2, the walking skeleton. Before the boundary test of ADR 0012 is
-   switched on, the places where the core still names bookings must be
-   removed (#237, #253).
+1. Maintainer merges ADR 0013 (#59) and the M2 plan, which is stacked on it.
+2. Maintainer answers two questions before the first code commit: whose git
+   identity commits carry, and squash or merge commits (#7, OQ-11).
+3. M2 unit U1: monorepo tooling and the local check (#262).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
    each channel assumption re-read in full (threat model A7).
