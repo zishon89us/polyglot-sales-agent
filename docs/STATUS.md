@@ -45,12 +45,17 @@ M0 Inception met its exit criteria on 2026-11-16; see
   with `design/state-machines.md` (#126): transition tables for eight
   machines and one order of checks for inbound messages. Thirteen decisions
   were made there and applied to the requirements; it resolves #118, #119,
-  #123 and #124. Version 1.0 now has 214 acceptance criteria.
+  #123 and #124.
+- 2026-11-16 — Independent verification of the state machines: 33 findings,
+  4 High. All four fixed. The handover machine now has an executable model
+  that explores event sequences and asserts its invariants. 27 findings
+  tracked as issues #128 to #147. Version 1.0 now has 219 acceptance
+  criteria.
 
 ## Next
 
-1. Narrow verification of the state machines (running), then the maintainer
-   merges the state-machines pull request.
+1. Re-verification of the four High fixes to the state machines (running),
+   then the maintainer merges pull request #127.
 2. ADRs (#38), then architecture (#39), data model (#40), threat model (#42),
    eval plan (#43), guardrail policy (#44) and API (#41). The output-check
    findings #120 to #122 are settled in the guardrail policy.
@@ -80,7 +85,7 @@ requirements in detail.
 
 Decided on 2026-11-16 (`adr/0001-positioning-and-v1-scope.md`): the project
 is a portfolio and reference implementation. Version 1.0 is the core engine,
-the dashboard and the `booking` pack, with 36 stories and 214 acceptance
+the dashboard and the `booking` pack, with 36 stories and 219 acceptance
 criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 

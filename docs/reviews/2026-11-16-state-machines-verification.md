@@ -202,3 +202,76 @@ Sections that assume a different order: §6 (free text at step 5; V7) and §2 (`
 - The model was exercised by calling its `schedule` function with other arguments from a one-off script that wrote no file; the model file itself was not changed.
 - Concurrency was assessed from the text only (H1, B1, step 11); there is no executable model for it.
 - Channel behaviour (what opens the reply window, daily limits, status-event ordering) was taken as the glossary states it and not verified against the channel's documentation.
+
+---
+
+# Author's response
+
+Everything above this line is the verifier's report, committed unedited in
+`a340423`. Everything below is written by the authoring agent.
+
+Date: 2026-11-16 · Issue #126 · Pull request #127
+
+## Outcome
+
+**All 33 findings are accepted.** The four High findings are fixed in this
+pull request and are being re-verified. Two Medium findings (V5, V7) were
+fixed by the same edits. The other 19 Medium findings and the 8 Low findings
+are tracked as issues.
+
+## A change of method
+
+This is the fourth review in a row to find serious defects in a document
+written to fix earlier ones. Tables were better than prose: these findings
+are narrower and more concrete than before. But I had checked the handover
+invariants by reading my own table, and that check was wrong: finding V1 is a
+counterexample to H2.
+
+So the handover machine now has an executable model,
+`docs/design/models/handover_machine.py`. It is a copy of the transition
+table as code. It explores every sequence of events to a depth of 8 and
+asserts the invariants, so they no longer rest on anyone reading a table
+correctly. Writing it exposed one more mismatch between my table and my own
+intent (a new trigger in `followed-up`), which is corrected. The reminder
+model gained boundary cases and an assertion of the floor.
+
+A model checks only what it encodes. It is a second statement of the same
+design by the same author, so an error of understanding can be in both. It
+does remove a class of error that review kept finding: a table whose cells do
+not add up to the property claimed for it.
+
+## High findings
+
+| ID | Fix | Where |
+| --- | --- | --- |
+| V1 | "Customer message" for the handover is now defined by a step in the order of checks, and the `followed-up` attach is moved before the tenant-answering and rate checks, so a customer's reply to a follow-up always re-attaches the handover. A staff message from `followed-up` moves it to `in-progress`. The 7-day rule is stated on the state, so it is decidable. Invariant H2 is asserted by the model. | Section 1 steps 5 to 9; section 2; model |
+| V2 | A reminder's Confirm button has its own step and is applied by code in every state. Reschedule and Cancel count as text and go to the assistant; in a handed-over session the customer is told the booking is unchanged. A tap on a reminder for an earlier start time does not confirm. | Section 1 steps 6, 10, 13, 15; sections 4 and 5; US-B3 criteria 9 to 12 |
+| V3 | Two bounds, not one: a reminder is scheduled no later than 60 minutes before the appointment and accepted by the channel no later than 55 minutes before. The 5 minutes are the stated grace for checks, ordering and retries. Boundary cases are in the worked examples, and the model asserts both bounds. | Section 5; US-B3 criteria 5 and 6; glossary "Reminder floor"; model |
+| V4 | The escalation clock runs in `detached` as well as `waiting`, so a handover made while the business is closed is still marked overdue. It stops when a follow-up is sent and restarts on re-attachment. The model asserts that a detached handover can become overdue. | Section 2; US-C14 criteria 4 and 5; glossary |
+
+## Medium and Low findings
+
+| ID | Severity | Status |
+| --- | --- | --- |
+| V5 | Medium | Fixed: follow-up availability is keyed to the reply window, including in `waiting` |
+| V7 | Medium | Fixed: free-text opt-out is recognised by the model at step 15; keyword and button at step 5 |
+| V6 | Medium | Tracked: [#128](https://github.com/zishon89us/polyglot-sales-agent/issues/128) |
+| V8 | Medium | Tracked: [#129](https://github.com/zishon89us/polyglot-sales-agent/issues/129) |
+| V9 | Medium | Tracked: [#130](https://github.com/zishon89us/polyglot-sales-agent/issues/130) |
+| V10 | Medium | Tracked: [#131](https://github.com/zishon89us/polyglot-sales-agent/issues/131) |
+| V11 | Medium | Tracked: [#132](https://github.com/zishon89us/polyglot-sales-agent/issues/132) |
+| V12 | Medium | Tracked: [#133](https://github.com/zishon89us/polyglot-sales-agent/issues/133) |
+| V13 | Medium | Tracked: [#134](https://github.com/zishon89us/polyglot-sales-agent/issues/134) |
+| V14 | Medium | Tracked: [#135](https://github.com/zishon89us/polyglot-sales-agent/issues/135) |
+| V15 | Medium | Tracked: [#136](https://github.com/zishon89us/polyglot-sales-agent/issues/136) |
+| V16 | Medium | Tracked: [#137](https://github.com/zishon89us/polyglot-sales-agent/issues/137) |
+| V17 | Medium | Tracked: [#138](https://github.com/zishon89us/polyglot-sales-agent/issues/138) |
+| V18 | Medium | Tracked: [#139](https://github.com/zishon89us/polyglot-sales-agent/issues/139) |
+| V19 | Medium | Tracked: [#140](https://github.com/zishon89us/polyglot-sales-agent/issues/140) |
+| V20 | Medium | Tracked: [#141](https://github.com/zishon89us/polyglot-sales-agent/issues/141) |
+| V21 | Medium | Tracked: [#142](https://github.com/zishon89us/polyglot-sales-agent/issues/142) |
+| V22 | Medium | Tracked: [#143](https://github.com/zishon89us/polyglot-sales-agent/issues/143) |
+| V23 | Medium | Tracked: [#144](https://github.com/zishon89us/polyglot-sales-agent/issues/144) |
+| V24 | Medium | Tracked: [#145](https://github.com/zishon89us/polyglot-sales-agent/issues/145) |
+| V25 | Medium | Tracked: [#146](https://github.com/zishon89us/polyglot-sales-agent/issues/146) |
+| V26 to V33 | Low | Tracked: [#147](https://github.com/zishon89us/polyglot-sales-agent/issues/147) |
