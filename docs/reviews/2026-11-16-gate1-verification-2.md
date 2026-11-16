@@ -182,3 +182,68 @@ Defects left open in the touched rules, not attributable to the fixes:
 - Whether the story count and criterion count stated at the top of `user-stories.md` are correct.
 - Channel behaviour assumed by the rules (for example that a template message starts a session, or how the channel reports a failed template send).
 - Nothing was executed; all traces are by reading.
+
+---
+
+# Author's response
+
+Everything above this line is the verifier's report, committed unedited in
+`dc225be`. Everything below is written by the authoring agent.
+
+Date: 2026-11-16 · Issue #61 · Pull request #72
+
+## Outcome
+
+**All findings are accepted. No High finding is open, so Gate 1 is passed on
+the route agreed with the maintainer** and recorded in `AGENTS.md` section 11:
+High findings fixed and narrowly verified, Medium and Low findings tracked as
+issues and fixed when design or build reaches the story.
+
+That is a weaker statement than "the requirements are correct", and it should
+be read with these facts beside it:
+
+- The verifier's verdict rests on one judgment call. It rated M1 Medium and
+  wrote that M1 "is the closest to High", being the same kind of fault as the
+  defect it was checking, on a narrower path. I have not overridden that
+  rating, and I have not fixed M1 here, because every round of edits so far
+  has introduced new defects and another unverified edit would repeat that.
+  M1 is tracked as a high-priority issue and is the first thing the handover
+  state machine in design must settle.
+- R5 is a privacy defect: an opt-out sent while a tenant is not answering is
+  not stated to be applied. It is also tracked as high priority.
+- 62 findings remain open across the reviews: 44 from the second review
+  (#73 to #116), 6 Low items in #117, and 12 here (#118 to #125). Some of the
+  44 may already be resolved by later fixes; each issue says to check.
+  Nothing is built yet, so none has reached a customer.
+- No human has reviewed the requirements in detail. The maintainer's own
+  read remains the independent check that matters most.
+
+## Where each finding is tracked
+
+| ID | Severity | Issue |
+| --- | --- | --- |
+| M1 | Medium, closest to High | #118, priority high |
+| M2 | Medium | #119 |
+| M3 | Medium | #120 |
+| M4 | Medium | #121 |
+| R2 | Medium | #122 |
+| R4 | Medium | #123 |
+| R5 | Medium, privacy | #124, priority high |
+| M5, M6, M7, R3, R6 | Low | #125 |
+
+## What the three rounds showed
+
+| Review | Scope | High findings |
+| --- | --- | --- |
+| First independent review | Whole set | 9 |
+| Second independent review | Whole set, after fixes | 8 |
+| Verification | The 8 fixes | 2 new |
+| Second verification | The 2 fixes and 3 related | 0 |
+
+Each round found serious defects in text written to fix the previous round,
+and almost all were in how rules interact over time: sessions against
+handovers, message classes against consent, quiet hours against scheduling.
+Prose acceptance criteria are a poor tool for that. The design milestone
+therefore starts by modelling session, handover, booking, reminder and
+outbound message as state machines with explicit transition tables, and the
+open findings are resolved against those tables, not by more prose edits.

@@ -38,26 +38,36 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-16 — Positioning and v1.0 scope decided (ADR 0001). Requirements
   rewritten to fix the review findings; story issues synced; opened as pull
   request #72 for #61.
+- 2026-11-16 — Second independent review (52 findings, 8 High), two narrow
+  verification reviews, and their fixes, all in pull request #72. Gate 1
+  passed with 62 Medium and Low findings tracked as issues.
 
 ## Next
 
-1. Re-verification of the two High defects the fixes introduced (running).
-2. If it confirms them, Gate 1 passes and the M1 design issues #38 to #44
-   start, beginning with the ADRs and with state machines for session,
-   handover, booking and message.
-3. The 44 Medium and Low findings (#73 to #116) are fixed as design or build
-   reaches each story.
+1. Maintainer merges pull request #72.
+2. M1 design starts with state machines for session, handover, booking,
+   reminder and outbound message (transition tables), resolving #118 and
+   #124 first, then the ADRs (#38) and the remaining design issues.
+3. The open review findings (#73 to #125) are resolved against those tables
+   as design reaches each story.
 
 ## Gate status
 
-**Gate 1 (requirements) is not passed.** Two independent reviews have run.
-The first found 44 defects, 9 High. After fixes, the second found 52, 8 High,
-almost all in how rules interact. All eight were fixed in pull request #72. A
-narrow verification found three resolved, five partly resolved, and two new
-High defects introduced by the fixes (N1, N3). Those are fixed and are being
-re-verified. The 44 Medium and Low findings are
-tracked as issues #73 to #116. This route was agreed with the maintainer and
-is recorded in `AGENTS.md` section 11.
+**Gate 1 (requirements) is passed, on the route agreed with the maintainer**
+(`AGENTS.md` section 11): no High finding is open; Medium and Low findings
+are tracked as issues.
+
+| Review | Scope | High findings |
+| --- | --- | --- |
+| First independent review | Whole set | 9 |
+| Second independent review | Whole set, after fixes | 8 |
+| Verification | The 8 fixes | 2 new |
+| Second verification | The 2 fixes and 3 related | 0 |
+
+62 Medium and Low findings remain open. The last verdict rests on one
+judgment call: the verifier rated #118 Medium and called it the closest to
+High. Reports and responses are in `reviews/`. No human has yet reviewed the
+requirements in detail.
 
 ## Scope
 
