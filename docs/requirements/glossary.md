@@ -17,24 +17,50 @@ number in this file is the authority.
 | Conversation | All messages between one contact and one tenant. It has no end. |
 | Session | A run of activity inside a conversation. A session starts with the first message, in either direction, after 24 hours in which neither side sent a message, and ends when 24 hours pass with no message from either side. Disclosure, handover, counters and metrics are all per session. |
 | Inbound message | A message from a contact to the tenant. |
-| Business-initiated message | A message whose sending is triggered by a schedule or by the system, not written as a reply to the contact's latest inbound message. Reminders are business-initiated. So are messages sent to the customer when staff cancel or move a booking. **It stays business-initiated whether or not the reply window is open**, so consent (US-C13), opt-out (US-C7) and quiet hours always apply to it. |
-| Reply | A message sent in answer to the contact's latest inbound message, by the assistant or by staff. |
+| Message class | Every outbound message belongs to exactly one of the five classes in the table "Message classes" below. The class decides whether consent, opt-out and quiet hours apply. |
+| Reply | An assistant reply, a system reply or a staff message, as classed below. "First reply" in a metric means the earliest of these in the session. |
 | Reply window | The 24 hours after a contact's most recent inbound message or call, during which the channel allows free-form messages. It decides only whether a message may be free-form or must be a template (US-C9). Source: `docs/compliance.md`. |
 | Template | A message with fixed, pre-approved wording and variable slots, required by the channel outside the reply window. Each language version is approved separately. |
-| Handover | The state of a session in which the assistant does not reply and staff are responsible. It ends when staff hand back or when the session ends, whichever is first. A new session never starts handed over. |
-| Handover reason | One of `requested`, `repeated-failure`, `sensitive-topic`, `data-request`, `limit`, `unsupported-content`, `late-change`, `staff`. |
+| Handover | A request for staff attention attached to a session. While the session is handed over the assistant does not reply in it. A handover is **answered** once a staff user sends a message in it. It ends with one outcome: `handed-back` (staff hand it back), `answered` (the session ends after staff answered) or `closed-unanswered` (staff close it without contacting the customer). An unanswered handover does not end when its session ends: it stays on the waiting list until staff act. A new session never starts handed over, so the assistant answers the customer's next message even while an old handover is still listed as unanswered. |
+| Handover reason | One of `requested`, `repeated-failure`, `sensitive-topic`, `data-request`, `limit`, `unsupported-content`, `late-change`, `provider-failure`, `staff`. |
 | Business hours | The weekly hours in which the tenant's staff answer handovers, set at setup. Distinct from opening hours, which are when appointments can be booked. |
-| Quiet hours | A daily period in tenant time during which no business-initiated message is sent. |
+| Quiet hours | A daily period in tenant time during which no business-initiated message is sent, except as the rules under "Quiet hours rules" below allow. The start time is inside quiet hours and the end time is outside them: with 22:00 to 08:00, a message may be sent at 21:59 and at 08:00, not at 22:00. |
+| Answering | A tenant is answering when it has every required setting and verified channel credentials. Only an answering tenant receives replies (US-C1). Templates do not affect it: a missing or unavailable template withholds only the messages that need it. |
+| Slot | A start time at which one service can be booked. Slots for a service fall on a grid: every slot interval, counted from the start of each opening period, for as long as the start plus the service's duration is no later than the end of that period. A booking occupies the interval from its start up to, but not including, its start plus the service's duration. |
+| Capacity | For one service: the largest number of bookings of that service whose intervals may overlap at any instant. For the tenant, if the total-concurrent-bookings setting is set: the largest number of bookings of any service whose intervals may overlap at any instant. |
+| Free slot | A slot that is not in the past, is no sooner than the minimum notice, is within the booking horizon, whose interval does not overlap a blocked period, and at which one more booking would exceed neither the service's capacity nor the tenant's total at any instant of its interval. |
 | Fallback message | A fixed message, sent by code, used when the assistant cannot produce a safe reply. It says the assistant could not answer that and that the customer can ask for a person. It exists in every supported language; for a contact whose language is unknown or unsupported, the tenant's default language is used. |
 | Person button | A reply button labelled as talking to a person, attached to the fallback message and to the unsupported-type reply. Tapping it is handled by code, without the model. |
-| Grounded fact | A statement of one of these six kinds: a price; a date or time of a slot or booking; a service's name, duration or description; opening hours; a policy the tenant has entered; a detail of the contact's own booking. A grounded fact may be stated only if it appears in the tenant's stored data or in a tool result from the same session. |
+| Grounded fact | A statement of one of these six kinds: a price; a date or time of a slot or booking; a service's name, duration or description; opening hours; a policy the tenant has entered; a detail of the contact's own booking. A grounded fact may be stated only if it is true of the thing it is stated about, according to the tenant's current stored data or a tool result from the same session. Prices and slot or booking times are checked at run time, claim by claim (US-C4); the other kinds are measured by evals. A value the customer stated, repeated back to them, is not an asserted fact unless the assistant confirms it. |
 | Supported language | A language in the eval dataset with a published score. Version 1.0 supports at least six, including Arabic, English, Urdu and Hindi; the full list is fixed in the eval plan (open question OQ-6). The assistant attempts other languages, but nothing is claimed for them. |
 | Unsupported message type | Any inbound message that is not text, a button reply, or an image or video caption: voice notes, images, video, documents, locations, stickers, contacts. |
 | Pack | The configuration and code for one use case. Version 1.0 has the `booking` pack. |
 | Message status | `sent`: accepted by the channel API. `delivered`, `read`: reported by the channel. `failed`: rejected, or reported failed, with the channel's error code. `withheld`: a due business-initiated message that was not attempted, with a reason. |
-| Withheld reason | One of `no-consent`, `opted-out`, `no-template`, `template-unavailable`, `limit-reached`, `too-late`. |
+| Withheld reason | One of `no-consent`, `opted-out`, `no-template`, `template-unavailable`, `limit-reached`, `too-late`. A message delayed by quiet hours is held, not withheld; it becomes `too-late` only under the rules below. |
 | Degraded mode | The service state in which the model provider is treated as unavailable (US-C15). |
-| Awaiting retry | A session whose last customer message could not be answered because the model provider failed. |
+| Awaiting retry | A mark on a session whose latest customer message could not be answered because the model provider failed, or arrived during degraded mode. It is cleared when the answer is sent, when the session is handed over, or when the message is 15 minutes old, at which point the session is handed over with reason `provider-failure` (US-C15). |
+
+## Message classes
+
+| Class | What it is | Needs recorded consent | Blocked by opt-out | Quiet hours apply |
+| --- | --- | --- | --- | --- |
+| Assistant reply | Written by the model in answer to the contact's latest inbound message or batch | No | No | No |
+| System reply | Fixed text sent by code in direct response to an inbound message: the disclosure, the fallback message, the unsupported-type reply, the rate-limit notice, opt-out and opt-in confirmations, and the message that tells a customer their session has been handed over | No | No | No |
+| Staff message | Written by a staff user in the dashboard. Free-form only inside the reply window (US-C9) | No | Yes, when the contact's only messages in the current session are opt-out requests (US-D3) | No |
+| Service notice | Sent by code on a timer or event, about something the contact asked for: the holding message for an unanswered handover (US-C14), a retried answer after a provider failure (US-C15), and the `handover_followup` template (US-C14). The contact's own request is the basis for sending it | No | Yes, if the contact opted out after making the request | Only for `handover_followup`, which is held to the end of quiet hours |
+| Business-initiated message | Any other message triggered by a schedule or an event: appointment reminders, and notices that staff cancelled or moved a booking | Yes (US-C13) | Yes (US-C7) | Yes |
+
+Whether the reply window is open never changes a message's class. It decides
+only whether the message may be free-form or must be a template (US-C9).
+
+## Quiet hours rules
+
+| Message | Rule when its due time falls in quiet hours |
+| --- | --- |
+| Appointment reminder | Scheduled one minute before those quiet hours begin, if that is later than the booking's creation time. Otherwise scheduled for the end of those quiet hours, if that is at least 60 minutes before the appointment starts. Otherwise withheld as `too-late` (US-B3). |
+| Booking-change notice | Sent at once if the affected appointment starts within 12 hours. Otherwise sent at the end of quiet hours (US-D12). |
+| A message queued for the channel's daily limit | When capacity returns during quiet hours, it is held to the end of quiet hours, and withheld as `too-late` if the event it concerns would by then have passed (US-C9). |
+| `handover_followup` | Held to the end of quiet hours. |
 
 ## Metrics
 
@@ -48,7 +74,7 @@ metric with a zero denominator is shown as "no data", never as 0%.
 | Inquiry | Session start | A session, started by an inbound message, in which the contact asked about a service, a price or availability, or asked to book. Sessions that are only an opt-out, a wrong number, or an answer to a reminder are not inquiries. Set by the model when the session ends (US-C19). |
 | Inquiry-to-booking rate | Session start | Inquiries in which a booking was created before the session ended ÷ inquiries. |
 | No-show rate | Appointment start | Appointments marked missed ÷ appointments marked attended or missed. Cancelled appointments and appointments with no recorded outcome are excluded; the count with no outcome is shown beside the figure. |
-| Handover rate | Session start | Sessions with a handover for any reason ÷ sessions with at least one inbound message. The count for each reason, including `staff`, is shown. |
+| Handover rate | Session start | Sessions with a handover for any reason ÷ sessions with at least one inbound message. The count for each reason, including `staff`, is shown, and so is the count of handovers that are unanswered or were closed unanswered. |
 | Contained session | Session start | A session with at least one inbound message, no handover, and either a booking created, changed or cancelled, or at least one assistant reply and no fallback message. Derived by code from recorded events (US-C19). |
 | Containment rate | Session start | Contained sessions ÷ sessions with at least one inbound message. |
 | Model cost per session | Session start | Sum of model cost in the session's traces. Reported as the mean and the 95th percentile across sessions that had at least one model call. |
@@ -74,12 +100,14 @@ the allowed range.
 | Business hours | Required at setup | Per weekday, zero or more periods | US-C6, US-C14 |
 | Opening hours | Required before bookings | Per weekday, zero or more periods | US-B5, US-D2 |
 | Booking horizon | 60 days | 7 to 365 days | US-B2 |
+| Slot interval | 30 minutes | 5 to 120 minutes | US-B2, US-B5 |
+| Total concurrent bookings | Not set (no tenant-wide limit) | 1 to 50, or not set | US-B2, US-B5 |
 | Minimum notice for a booking | 1 hour | 0 to 72 hours | US-B5 |
 | Change cut-off | 2 hours before the start | 0 to 72 hours | US-B4 |
 | Reminder lead time | 24 hours before the start | 1 to 72 hours | US-B3 |
 | Quiet hours | 22:00 to 08:00 | Any daily period up to 12 hours, or none | US-B3, all business-initiated messages |
 | Handover escalation time | 15 minutes | 5 to 240 minutes | US-C14 |
-| Conversation retention | 12 months | 1 to 36 months | NFR-V4 |
+| Message retention | 12 months | 1 to 36 months | NFR-V4 |
 
 ## Fixed values
 
@@ -95,7 +123,12 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Slots offered at once | 5 | US-B2 |
 | Per-contact rate limit | 20 inbound messages in 5 minutes, then a 15-minute pause | US-C17, NFR-S7 |
 | Model call timeout and attempts | 20 seconds, 3 attempts, waits of 1 and 4 seconds | US-C15, NFR-R4 |
-| Degraded-mode trigger and probe | 5 sessions awaiting retry within 2 minutes; health check every 30 seconds; retry sessions up to 15 minutes old | US-C15 |
+| Awaiting-retry attempts | Every 60 seconds and on the customer's next message, until the message is 15 minutes old; at most one provider-failure fallback per session per 15 minutes | US-C15 |
+| Age limit of a tool result used to state a slot or booking time | 10 minutes | US-C4 |
+| Reminder floor after quiet hours | At least 60 minutes before the appointment | US-B3 |
+| Urgent booking-change notice | Appointment starts within 12 hours | US-D12 |
+| Credential check | Daily, and on any channel authentication error | US-D6 |
+| Degraded-mode trigger and probe | 5 sessions marked awaiting retry within 2 minutes; health check every 30 seconds | US-C15 |
 | Send attempts | 3 attempts, waits of 2 and 8 seconds | US-C18 |
 | Wait for delivery before the next message | 10 seconds | US-C18, NFR-R7 |
 | Notification email throttle | 1 email per tenant per 5 minutes; 3 send attempts | US-C14 |
