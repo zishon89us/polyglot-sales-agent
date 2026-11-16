@@ -112,7 +112,7 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 | Column | Notes |
 | --- | --- |
 | `phone` ⚑ | E.164. Unique per tenant. Null after deletion or retention |
-| `phone_hash` | Keyed one-way hash of the number. Kept after deletion only if opted out; see `suppressed_numbers` |
+| `phone_hash`, `phone_hash_key_version` | Keyed one-way hash of the number, made as described under `suppressed_numbers`. Kept after deletion only if opted out |
 | `profile_name` ⚑ | As sent by the channel. Never given to the model (NFR-V7) |
 | `last_language` | A language code. Not treated as personal on its own |
 | `opted_out_at` | Null when not opted out |
@@ -127,8 +127,36 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 
 ### `suppressed_numbers` — tenant-owned
 
-`phone_hash`, `opted_out_at`. Written when an opted-out contact is deleted,
-so the opt-out applies if the number appears again (US-D5). Holds no number.
+`phone_hash`, `key_version`, `opted_out_at`. Written when an opted-out
+contact is deleted, so the opt-out applies if the number appears again
+(US-D5). Holds no number.
+
+**How the hash is made** (threat T36, issue #160). Phone numbers are few
+enough to try them all, so a plain hash could be reversed by anyone who read
+the table. The hash is therefore keyed:
+
+- The number is first put in one form: E.164 digits only, with no plus sign,
+  spaces or punctuation.
+- The hash is HMAC-SHA-256 over the tenant's identifier and that number,
+  with a secret key. Including the tenant means the same number has a
+  different hash in each tenant, so hashes cannot be matched across tenants.
+- The key is held outside the database, in the same way as the
+  credential-encryption key (NFR-S5), and is a different key from it. It is
+  never logged.
+- `contacts.phone_hash` is made the same way.
+
+**Key rotation.** A stored hash cannot be made again under a new key,
+because the number is no longer held. So each row records the `key_version`
+it was made with. After a rotation, new rows use the new key; the old key is
+kept for reading only, and an incoming number is checked under every key
+version that still has rows. An old key can be destroyed only when no row
+uses it, which for this table may be never. If an old key is destroyed
+early, the opt-outs made under it are lost; that is a decision for the
+operator, to be written in the runbook.
+
+**What remains.** Someone who has both the table and the key can still
+reverse the hashes. And a keyed hash of a phone number is still personal
+data in a disguised form; the inventory below treats it as such.
 
 ### `conversations` — tenant-owned
 
@@ -361,6 +389,7 @@ question for a lawyer (open question OQ-4).
 | 4 | Staff email is set to null 12 months after removal | No requirement covered staff personal data. The number is the agent's proposal |
 | 5 | A removed user is soft-removed | So audit entries keep their actor |
 | 6 | The content of unsupported message types is never stored, only the type | US-C12 says it is not sent to the model; this also keeps voice notes and images out of the database |
+| 7 | The phone hash is HMAC-SHA-256 over tenant and number, with a key outside the database and a key version on each row | A plain hash of a phone number can be reversed by trying every number (T36, #160). The choice of HMAC-SHA-256 is the agent's and has not been reviewed by anyone with security training |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
 noted for the Gate 2 review and are not yet reflected in the stories.

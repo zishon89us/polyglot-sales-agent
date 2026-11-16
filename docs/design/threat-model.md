@@ -197,7 +197,7 @@ abuse and cross-site request forgery. They are T20, T21, T23 and T24.
 | T33 | T | Injection through message text, business data or model output into a query | Parameterised queries only; the model never writes a query (ADR 0007 layer 2) | ADR 0007; lint rule to be added with the code in M2 (**#162**) | None known |
 | T34 | I | Tables outside tenant scoping reveal personal data | Job payloads hold identifiers only; unroutable events hold metadata only; a test checks payloads | Data model decisions 1 and 2 | They reveal which tenant has activity, to anyone who can read them |
 | T35 | T, R | The audit log is altered | The application role has no update or delete privilege on it | Data model "constraints", **#162** | A database administrator can alter it |
-| T36 | I | The stored hash of a deleted, opted-out number is reversed by trying every phone number | Keyed hash with the key outside the database | **#160** | Open: the data model currently says only "hash" |
+| T36 | I | The stored hash of a deleted, opted-out number is reversed by trying every phone number | Keyed hash over tenant and number, with the key outside the database and a key version per row | Data model, `suppressed_numbers` and decision 7 | Someone with both the table and the key can reverse it |
 | T37 | I | Deleted data persists in backups | Backup retention to be set with hosting and stated to tenants | Data model "what the retention rule does not cover", ADR 0009, **#166** | Accepted; stated |
 
 ### F7 — Email
@@ -254,7 +254,7 @@ Where text that reaches the model comes from, and who controls it:
 | T48 | **Too much power in the tools.** A tool does more than the task needs | Tools are limited to: read services and policies, find free slots, and create, move or cancel **this contact's** bookings. No tool sends a message, reads another contact, changes business data, fetches a link or runs a query. At most 3 future bookings per contact | US-B2, US-B4, architecture "what a pack provides" | A manipulated model can book or cancel within the customer's own limit of 3; the customer is the one being served |
 | T49 | **Hidden context is extracted.** A customer obtains the prompt, tool definitions or profile | The design does not rely on the prompt staying secret: it holds no credential, no key, no other tenant's data and no other customer's data. Disclosure is still tested | US-C8 criterion 2, NFR-A1 | A disclosed prompt helps an attacker craft later attempts |
 | T50 | **False statements.** The assistant states a wrong price, time or policy, or confirms a wrong value the customer supplied | Each stated amount, time or date needs a claim that code checks against the named item; availability comes only from tools; fallback and handover on failure | US-C4, NFR-A2, R-A1, ADR 0006, ADR 0007 layer 5 | Facts with no checked value are measured by evals, not blocked (ADR 0007). Findings #120 to #122 are settled in the guardrail policy, #44 |
-| T51 | **Planted content.** A manipulated reply carries a link, a phone number or payment details, sent from the business's own number | A rule that these must match the tenant's own data, enforced after the model | **#159**, guardrail policy #44 | **Open.** Today only amounts, times and dates are checked |
+| T51 | **Planted content.** A manipulated reply carries a link, a phone number or payment details, sent from the business's own number | A link, email address, phone number or account number in a reply must equal a value in the tenant's own data; checked by code after the model | Guardrail policy section 4, check O5; US-C4 criterion 15 | Detection is by pattern and can miss an unusual form; measured by the planted-content eval cases |
 | T52 | **Advice the assistant must not give**, or offensive output in the business's name | Refusal rules in the prompt; the model's sensitive-topic flag triggers handover; refusal eval cases per language | US-C8 criterion 5, R-A4, guardrail policy #44 | Rests on the model's judgement; measured, not enforced (ADR 0007) |
 | T53 | **One customer's data shown to another.** A customer asks who else is booked, or for another customer's details | Tools return slots and this contact's own bookings, never who holds a slot; the prompt holds only this session | US-C2, NFR-A1, ADR 0007 layer 2 | None known |
 | T54 | **Unbounded use.** A customer makes each reply expensive: very long input, a loop of tool calls, very long output | Turn cap, per-contact limit, timeout and batching exist; limits per call do not | NFR-C2, NFR-S7, **#158**, **#157** | Open until #158; the daily token budget waits on OQ-7 |
@@ -310,8 +310,8 @@ Issues opened by this document, all labelled `security`.
 | #156 | Sign-in hardening not stated in ADR 0008 | M4 | T20 to T23 |
 | #157 | Tenant-level limits on model calls and new contacts | M3 | T6, T54 |
 | #158 | Bound every model call | M3 | T54 |
-| #159 | Links, phone numbers and payment details in replies | M1 | T51 |
-| #160 | Keyed hash for suppressed phone numbers | M1 | T36 |
+| #159 | Links, phone numbers and payment details in replies (settled in the guardrail policy) | M1 | T51 |
+| #160 | Keyed hash for suppressed phone numbers (settled in the data model) | M1 | T36 |
 | #161 | Design operator access | M1 | T39 |
 | #162 | Separate database roles; key rotation | M2 | T10, T32, T33, T35 |
 | #163 | Harden CI and the dependency supply chain | M2 | T41 to T43 |
@@ -319,9 +319,11 @@ Issues opened by this document, all labelled `security`.
 | #165 | Refuse to start a deployment with development components | M2 | T40 |
 | #166 | System card: state the security limits | M6 | T8, T20, T30, T37 |
 
-Threats with no complete mitigation in the design today: **T6, T36, T39,
-T51 and T54**. T36, T39 and T51 are in milestone M1 and should be settled
-before the Gate 2 review; T6 and T54 are designed in M3 with the engine.
+Threats with no complete mitigation in the design today: **T6, T39 and
+T54**. T39 is in milestone M1 and should be settled before the Gate 2
+review; T6 and T54 are designed in M3 with the engine. T36 was settled in
+the data model (#160) and T51 in the guardrail policy (#159) after this
+document was first written.
 
 ## 9. What this document does not establish
 
