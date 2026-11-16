@@ -75,6 +75,8 @@ find a change that does what its message says.
    next, what is blocked.
 5. When a decision changes the architecture, the data model or a dependency,
    write an ADR before the code.
+6. At every phase gate, get the independent review described in section 11
+   and answer its findings before asking the human to merge.
 
 ### History must be honest
 
@@ -555,3 +557,51 @@ Open one `needs-human` issue for each, with exact steps, as early as M0.
 - Approve production deployments.
 - Run the first live test with a real phone and a consenting pilot business.
 - Take legal advice on data protection before onboarding a paying customer.
+
+## 11. Standards and independent review
+
+Write each kind of document against a named standard, and have work reviewed
+at every phase gate by a reviewer that did not write it. Reviewing your own
+work in the same session does not count as a review.
+
+### Standards
+
+| Work | Standard | Used for |
+| --- | --- | --- |
+| Requirements and acceptance criteria | EARS sentence patterns; Given/When/Then for scenarios | One trigger, one precondition, one verifiable response per criterion |
+| The requirement set | ISO/IEC/IEEE 29148 quality characteristics | Checking the set is complete, consistent, unambiguous, verifiable and traceable |
+| Architecture documents | C4 model for diagrams; arc42 for the section list | Nothing structural left undocumented |
+| Decision records | MADR | Context, options, decision, consequences |
+| Threat model | STRIDE; OWASP Top 10 for LLM Applications | Covering both conventional and AI-specific threats |
+| AI governance documents | NIST AI Risk Management Framework | Organising the system card, eval plan and guardrail policy |
+| Commits and versions | Conventional Commits; Semantic Versioning | History and releases |
+| API | OpenAPI | The API contract |
+
+Before first using a standard, read its current published form and record the
+link and the date read in the document that applies it. A standard is an aid:
+where one conflicts with the scope in section 1, keep the scope and record the
+deviation in an ADR. Do not claim conformance or certification to any standard
+anywhere in the repository; say "written against" or "reviewed against".
+
+### Independent review
+
+- **Who.** A separate agent started with no context from the session that
+  wrote the work, given only the files under review and the matching
+  checklist in `docs/process/review-checklists.md`. The human's review is
+  separate from this and is still required.
+- **When.** At each gate in the checklist file: the requirement set before
+  design starts, the design documents before build starts, every change to AI
+  behaviour, every pull request that changes code, and every release.
+- **Record.** Save the reviewer's output unedited in
+  `docs/reviews/<date>-<gate>-<subject>.md`. Below it, answer every finding:
+  fixed, with a link to the change, or rejected, with the reason.
+- **Passing a gate.** A gate is not passed while a High finding is open. Only
+  the human may accept a rejected High finding.
+- **Checklists improve.** A defect found later that a checklist should have
+  caught is added to that checklist in the pull request that fixes the
+  defect.
+
+The reviewer is another instance of the same kind of model as the author, so
+it shares some blind spots. This review lowers the chance of a defect getting
+through; it does not remove it. The human's review, the automated tests and
+evals, and a pilot with real users remain the checks that matter most.
