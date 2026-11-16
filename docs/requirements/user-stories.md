@@ -2,7 +2,7 @@
 
 Status: revised after the independent Gate 1 review and the state-machine design · Phase 1 (requirements) · Issues #3, #46, #61, #126
 
-Version 1.0 has 36 stories with 219 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
+Version 1.0 has 36 stories with 222 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
 
 - Personas are in [`personas.md`](personas.md).
 - Every term, metric, setting and default used here is defined in [`glossary.md`](glossary.md). Words such as *session*, *supported language*, *business-initiated message*, *grounded fact*, *fallback message* and *business hours* have the meanings given there.
@@ -100,18 +100,20 @@ Persona P1 · Milestone M3 · Issue [#13](https://github.com/zishon89us/polyglot
 As a business owner, I want the assistant to state grounded facts only from my data, so that customers are never told something untrue about my business.
 
 1. **Given** a grounded fact that exists in the tenant's data, **when** a customer asks for it, **then** the reply states it.
-2. **Given** a reply that asserts a grounded fact containing a currency amount, a clock time or a calendar date, **when** the model produces it, **then** the model also returns one claim per asserted value, giving its kind (price, slot or booking time, opening hours, service detail, policy, or the contact's booking) and naming the stored item or tool result it came from.
+2. **Given** a reply that asserts a grounded fact containing a currency amount, a percentage, a clock time or a calendar date, **when** the model produces it, **then** the model also returns one claim per asserted value, giving its kind (price, slot or booking time, opening hours, service detail, policy, or calendar date) and naming the stored item, tool result or calendar entry it came from.
 3. **Given** a claim about a price, **when** the output guardrail runs, **then** it passes only if the value equals the current stored price of the named service.
-4. **Given** a claim about a slot or booking time, **when** the output guardrail runs, **then** it passes only if the value equals the time in the named tool result and that result is no more than 10 minutes old.
+4. **Given** a claim about a slot time, or about the time of the contact's own booking, **when** the output guardrail runs, **then** it passes only if the value equals the time in the named tool result, and that result is from this session and no more than 10 minutes old.
 5. **Given** a claim about opening hours, **when** the output guardrail runs, **then** it passes only if the value equals the stored opening time or closing time for the named weekday.
-6. **Given** a claim about a policy or a service detail, **when** the output guardrail runs, **then** it passes only if the value appears, after normalising numerals and formats, in the stored text of the named policy or service.
+6. **Given** a claim about a policy or a service detail, **when** the output guardrail runs, **then** it passes only if the value appears, after the normalisation defined in the guardrail policy, in the stored text of the named policy or service.
 7. **Given** a correct reply that states the stored opening hours for a day, **when** the output guardrail runs, **then** it passes and is sent.
-8. **Given** a currency amount, clock time or calendar date in the reply text, **when** the output guardrail runs, **then** it passes only if it is covered by a claim that passed, or the same value appears in the customer's own messages in this session; relative words such as "tomorrow" and durations are not checked by this rule.
+8. **Given** a currency amount, percentage, clock time or calendar date in the reply text, **when** the output guardrail runs, **then** it passes only if it is covered by a claim that passed, or it is a clock time or calendar date that appears in the customer's latest batch of messages; a currency amount or a percentage always needs a claim; relative words such as "tomorrow" and durations are not checked by this rule.
 9. **Given** a reply that states a total or any other value computed from several prices, **when** the output guardrail runs, **then** it does not pass, because v1.0 states individual prices only.
 10. **Given** a reply in which any claim or value does not pass, **when** the output guardrail runs, **then** the reply is not sent and the fallback message is sent in its place.
 11. **Given** the eval cases in which a customer states a wrong price or time and asks the assistant to confirm it, **when** they are run, **then** the assistant corrects the value in every case (NFR-A2); this case cannot be caught by the runtime check, because the wrong value is in the customer's own message.
 12. **Given** a grounded fact that does not exist in the tenant's data, **when** a customer asks for it, **then** the assistant says it does not have that information and offers a person.
 13. **Given** the eval dataset for grounding, **when** it is run, **then** statements about service details, opening hours and policies meet the grounding threshold set in the eval plan (not yet testable; see open question OQ-6).
+14. **Given** a claim about a calendar date that names an entry of the calendar given to the model, **when** the output guardrail runs, **then** it passes only if the date equals that entry's date in the tenant's time zone.
+15. **Given** a link, an email address, a phone number or a payment account number in the reply text, **when** the output guardrail runs, **then** it passes only if the same value is stored in the tenant's own data.
 
 ### US-C5 — Tell customers they are talking to an assistant
 
@@ -131,13 +133,14 @@ As an end customer, I want to reach a person when I ask or when the assistant sh
 
 1. **Given** a customer asks for a person in a supported language, or taps the person button, **when** the message is processed, **then** the session is handed over with reason `requested`.
 2. **Given** two consecutive assistant turns in one session that ended in the fallback message because of a guardrail failure, **when** the second fallback is sent, **then** the session is handed over with reason `repeated-failure`; provider errors (US-C15) do not count.
-3. **Given** a message on a topic in the dated handover-topic list of the guardrail policy, or a request to access or delete personal data, **when** it is processed, **then** the session is handed over with reason `sensitive-topic` or `data-request` (topic list not yet testable; see OQ-5).
+3. **Given** a message on a topic in the dated handover-topic list of the guardrail policy, or a request to access or delete personal data, **when** it is processed, **then** the session is handed over with reason `sensitive-topic` or `data-request`.
 4. **Given** a session that reaches the turn cap or the tenant's daily token budget, **when** the limit is reached, **then** the session is handed over with reason `limit`.
 5. **Given** any handover inside business hours, **when** it happens, **then** the customer receives one message saying a person will reply.
 6. **Given** any handover outside business hours, **when** it happens, **then** the customer receives one message giving the next opening time and the tenant's support contact.
 7. **Given** a handover that staff have answered, **when** staff hand it back, or the session ends through inactivity, **then** the handover ends with outcome `handed-back` or `answered`, and the assistant answers the customer's next message.
 8. **Given** a handover that no staff user has answered, **when** the session ends through inactivity, **then** the handover stays open on the waiting list as unanswered (US-C14), and the assistant answers the customer's next message unless `handover_followup` has been sent for it.
 9. **Given** a contact who already has an open handover, **when** another handover trigger occurs, **then** no second handover is created; the reason is added to the open one, which attaches to the current session.
+10. **Given** a message the model flags as an emergency under the guardrail policy, **when** the session is handed over, **then** the handover message also tells the customer, in fixed text, to contact local emergency services.
 
 ### US-C7 — Stop messages on request
 
