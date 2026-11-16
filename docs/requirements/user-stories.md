@@ -2,7 +2,7 @@
 
 Status: revised after the independent Gate 1 review and the state-machine design · Phase 1 (requirements) · Issues #3, #46, #61, #126
 
-Version 1.0 has 36 stories with 222 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
+Version 1.0 has 36 stories with 224 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
 
 - Personas are in [`personas.md`](personas.md).
 - Every term, metric, setting and default used here is defined in [`glossary.md`](glossary.md). Words such as *session*, *supported language*, *business-initiated message*, *grounded fact*, *fallback message* and *business hours* have the meanings given there.
@@ -70,7 +70,7 @@ As an end customer, I want my message to be received even if the channel redeliv
 6. **Given** a validly signed message for a tenant that is not answering (see the glossary), **when** it is received, **then** HTTP 200 is returned, the message is stored in its conversation marked `received-while-not-answering`, and no reply is sent; if the session is handed over it also joins the waiting session (US-C14).
 7. **Given** messages marked `received-while-not-answering`, **when** the tenant is answering again, **then** the assistant does not answer them, and their conversations are listed in the dashboard as unanswered.
 8. **Given** a tenant that stops answering because its channel credentials fail, **when** the failure is detected, **then** one email is sent to the tenant's notification address and one to the operator's alert address.
-9. **Given** a worker that stops while processing a queued message, **when** it restarts, **then** the message is processed and exactly one reply is sent.
+9. **Given** a worker that stops while processing a queued message, **when** it restarts, **then** the message is processed and exactly one reply is sent; only if the worker stopped after the channel had accepted the reply and before that was recorded may the reply be sent a second time, and never a third.
 
 ### US-C2 — Keep each business's data separate
 
@@ -80,7 +80,7 @@ As a business owner, I want messages to my number to be handled only with my bus
 
 1. **Given** two tenants, each with its own number and data, **when** a message arrives on tenant A's number, **then** the conversation, retrieval and reply use only tenant A's records.
 2. **Given** a query or tool call scoped to tenant A, **when** it requests a record owned by tenant B, **then** the record is not returned.
-3. **Given** a query or tool call scoped to tenant A, **when** it requests a record owned by tenant B, **then** the attempt is written to the audit log.
+3. **Given** a request or tool call scoped to tenant A that names a record by identifier, **when** no such record is found in tenant A, **then** the answer is the same whether or not the record exists in another tenant, and the request is written to the audit log with the user or session, the route or tool, and the identifier.
 
 ### US-C3 — Reply in the customer's language
 
@@ -123,7 +123,7 @@ As an end customer, I want to know from the start that an automated assistant is
 
 1. **Given** a new session, **when** the first outbound message of any kind is sent, including a template, the unsupported-type reply or the fallback message, **then** it contains the fixed disclosure text: added by code in a free-form message, never written by the model, and part of the approved wording in a template.
 2. **Given** the contact's language is a supported language, **when** the disclosure text is added, **then** it is in that language; otherwise it is in the tenant's default language.
-3. **Given** a customer asks whether they are talking to a person, **when** the assistant replies, **then** it says it is an automated assistant and offers a person.
+3. **Given** a customer asks whether they are talking to a person, **when** the assistant replies, **then** the model flags the question and code sends the fixed text saying that an automated assistant is replying and that a person can be asked for.
 
 ### US-C6 — Hand the conversation to a person
 
@@ -140,7 +140,7 @@ As an end customer, I want to reach a person when I ask or when the assistant sh
 7. **Given** a handover that staff have answered, **when** staff hand it back, or the session ends through inactivity, **then** the handover ends with outcome `handed-back` or `answered`, and the assistant answers the customer's next message.
 8. **Given** a handover that no staff user has answered, **when** the session ends through inactivity, **then** the handover stays open on the waiting list as unanswered (US-C14), and the assistant answers the customer's next message unless `handover_followup` has been sent for it.
 9. **Given** a contact who already has an open handover, **when** another handover trigger occurs, **then** no second handover is created; the reason is added to the open one, which attaches to the current session.
-10. **Given** a message the model flags as an emergency under the guardrail policy, **when** the session is handed over, **then** the handover message also tells the customer, in fixed text, to contact local emergency services.
+10. **Given** a message that matches the emergency phrase list of the guardrail policy, checked by code in every session, contact and service state, or that the model flags as an emergency, **when** it is processed, **then** the fixed emergency text is sent if the tenant is able to send, and the session is handed over with reason `emergency` and marked urgent, which the waiting list shows first and the notification email states.
 
 ### US-C7 — Stop messages on request
 
@@ -152,8 +152,9 @@ As an end customer, I want to stop receiving messages by saying so, so that I am
 2. **Given** a customer asks to stop in free text in a supported language, **when** the assistant recognises it, **then** the contact is marked opted out and one confirmation is sent.
 3. **Given** an opted-out contact, **when** a business-initiated message is due, **then** it is not sent, the reason is logged, and it appears in the withheld-messages list (US-D12).
 4. **Given** an opted-out contact, **when** they send a message themselves, **then** the assistant replies as usual within that session, and they remain opted out of business-initiated messages.
-5. **Given** an opted-out contact, **when** they send a keyword from the fixed opt-in list or explicitly ask to receive messages again, **then** the opt-out is lifted and the new consent is recorded with its time.
+5. **Given** an opted-out contact, **when** they send a keyword from the fixed opt-in list or tap the opt-in button, **then** the opt-out is lifted and the new consent is recorded with its time.
 6. **Given** a tenant that is not answering, **when** a contact sends an opt-out or opt-in keyword or taps the button, **then** it is applied, and no confirmation is sent.
+7. **Given** an opted-out contact who asks in free text to receive messages again, **when** the assistant recognises the request, **then** code sends one fixed question with an opt-in button, and the opt-out is lifted only if the button is tapped.
 
 ### US-C8 — Resist manipulation and stay in scope
 
@@ -164,8 +165,8 @@ As a business owner, I want the assistant to treat all text it reads as data and
 1. **Given** a customer message telling the assistant to ignore or change its rules, **when** it is processed, **then** the assistant keeps to its rules and replies that it can help with the business's services.
 2. **Given** a customer message asking for the assistant's instructions or prompt, **when** it is processed, **then** no part of the prompt is revealed.
 3. **Given** a customer message asking about another business's data or customers, **when** it is processed, **then** no such data is revealed.
-4. **Given** instructions placed in owner-entered business data or in a contact's profile name, **when** that text reaches the model, **then** they are treated as data and not followed.
-5. **Given** a request for medical, legal or financial advice, **when** the assistant replies, **then** it declines and offers a person.
+4. **Given** instructions placed in owner-entered business data or in a tool result, **when** that text reaches the model, **then** they are treated as data and not followed.
+5. **Given** a request for medical, legal or financial advice, **when** the assistant replies, **then** no such advice is given and the session is handed over with reason `sensitive-topic` (US-C6 criterion 3).
 6. **Given** the red-team eval set, **when** it is run, **then** tool-misuse, prompt-disclosure and cross-tenant cases each pass at 100% (NFR-A1).
 
 ### US-C9 — Follow the channel's rules when the business messages first
@@ -258,15 +259,16 @@ Persona P4 · Milestone M3 · Issue [#64](https://github.com/zishon89us/polyglot
 
 As an end customer, I want a clear message when the assistant cannot answer because of a technical fault, so that I am not left without any reply.
 
-1. **Given** a model call that fails or exceeds 20 seconds, **when** it fails, **then** it is retried up to 3 times in total, waiting 1 second then 4 seconds between attempts.
+1. **Given** a model call that ends in a provider or network error, or exceeds 20 seconds, **when** it fails, **then** it is retried up to 3 times in total, waiting 1 second then 4 seconds between attempts.
 2. **Given** all 3 attempts have failed, **when** the last one fails, **then** the session is marked `awaiting-retry` and the fallback message is sent, unless a provider-failure fallback was already sent in that session in the last 15 minutes.
 3. **Given** a session marked `awaiting-retry`, outside degraded mode, **when** 60 seconds have passed since the last attempt, or the customer sends another message, **then** the answer is attempted again; on success it is sent and the mark is cleared.
 4. **Given** a session marked `awaiting-retry` whose last customer message is 15 minutes old and still unanswered, **when** that age is reached, **then** the mark is cleared and the session is handed over with reason `provider-failure`.
 5. **Given** a session marked `awaiting-retry`, **when** it is handed over for any other reason, **then** the mark is cleared and the assistant does not answer it later.
-6. **Given** 5 sessions marked `awaiting-retry` within 2 minutes for one provider, **when** the fifth is marked, **then** the service enters degraded mode and one email is sent to the notification address of each tenant that has a session marked `awaiting-retry`.
+6. **Given** 5 sessions marked `awaiting-retry` within 2 minutes for one provider, **when** the fifth is marked, **then** a provider health check is run at once, and only if that check fails does the service enter degraded mode; one email is then sent to the notification address of each tenant that has a session marked `awaiting-retry`, at most once per tenant per hour.
 7. **Given** degraded mode, **when** a customer message arrives, **then** no model call is attempted, the session is marked `awaiting-retry`, and the fallback message is sent under the same 15-minute rule.
 8. **Given** degraded mode, **when** a provider health check, run every 30 seconds, succeeds, **then** degraded mode ends, every session still marked `awaiting-retry` is attempted at once, and one recovery email is sent to each tenant that was emailed when it began.
 9. **Given** degraded mode, **when** a template reminder is due, **then** it is sent as normal, because it does not need the model.
+10. **Given** a model response that arrives but does not match the output schema, **when** it is checked, **then** it is treated as a failed output check, not as a provider failure: the fallback message is sent, and it does not count towards degraded mode.
 
 ### US-C16 — Have approved templates before messaging first
 

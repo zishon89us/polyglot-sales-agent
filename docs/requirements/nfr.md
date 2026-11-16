@@ -33,7 +33,7 @@ report. It is a provisional sizing assumption, not a forecast.
 | ID | Requirement | Target | How it is checked |
 | --- | --- | --- | --- |
 | NFR-R1 | No inbound message is lost once acknowledged | 0 lost in restart tests | Integration test that stops the worker mid-job |
-| NFR-R2 | No duplicate replies | 0 duplicates when the same message ID is delivered 5 times | Integration test |
+| NFR-R2 | No duplicate replies | 0 duplicates when the same message ID is delivered 5 times. Separately, when a worker is stopped after the channel accepted a message and before that was recorded: at most 2 copies of a reply, and at most 1 of a template | Integration test, and a restart test that stops the worker at each point |
 | NFR-R3 | Bookings are idempotent | Exactly 1 record when a tool call is repeated | Integration test |
 | NFR-R4 | Model provider failure is contained | Behaviour of US-C15, with the timeout, attempts and waits in the glossary | Integration test with a failing fake client |
 | NFR-R5 | Failed jobs are not silently dropped | A job is retried 5 times with exponential backoff starting at 2 s; 100% of jobs that exhaust their retries are in the dead-letter queue and raise an alert to the operator's configured alert address | Integration test |
@@ -119,5 +119,5 @@ business data, metrics and settings.
 
 | ID | Requirement | Target | How it is checked |
 | --- | --- | --- | --- |
-| NFR-L1 | Channel rules are verified, not remembered | `docs/compliance.md` cites official sources with the date read. Each statement used by the design is re-read in full before the design relies on it | Gate 2 review |
+| NFR-L1 | Channel rules are verified, not remembered | `docs/compliance.md` cites official sources with the date read. Each statement used by the design is either re-read in full, or listed as an assumption in the threat model, section 1. Every such assumption is re-read in full before any live channel is connected | Gate 2 review for the list; a check before live use for the re-reading |
 | NFR-L2 | The repository states its limits | The README and the system card say that the software has not been approved for processing real customer data, and list open questions OQ-1 to OQ-4 | Gate 5 review |

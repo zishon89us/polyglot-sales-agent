@@ -29,6 +29,7 @@ at step 12.
 | 2 | Message ID already stored? | Yes: HTTP 200. **Ends.** |
 | 3 | Receiving number maps to a tenant? | No: store as unroutable, HTTP 200. **Ends.** |
 | 4 | Store the message in its conversation; start or extend the session; open or extend the reply window; HTTP 200 | Always |
+| 4a | Does the text contain a phrase from the emergency list of the guardrail policy? Checked by code, in every tenant, contact, session and service state. | Yes: send the fixed emergency text once per session, if the tenant has verified channel credentials; hand over with reason `emergency`, marked urgent (machine 2: an open handover gains the reason and the mark); notify staff at once, outside the email throttle. **Continues** to step 5. |
 | 5 | Is it the stop or start button, or a message whose whole text, trimmed and case-folded, equals an opt-out or opt-in keyword? | Yes: apply it by code (machine 6). Send the confirmation only if the tenant is answering. **Ends.** |
 | 6 | Is it the Confirm button of a reminder? | Yes: apply it by code (machine 4), in every tenant, contact and session state. Send the result as a system reply only if the tenant is answering. **Ends.** |
 | 7 | Does the contact have an open handover in state `followed-up`? | Yes: attach it to this session (machine 2 → `waiting`). If the tenant is answering and the contact is not paused, tell the customer a person will reply and notify staff. **Ends.** |
@@ -330,11 +331,12 @@ business-initiated message may be sent.
 
 | Event | Effect |
 | --- | --- |
-| Contact books in chat | Add a consent record, source `chat-booking`. |
+| Contact books in chat | Add a consent record, source `chat-booking`. The fixed confirmation text, sent by code, says that a reminder will be sent and how to stop it. |
 | Staff tick consent on a manual booking | Add a consent record, source `staff`. |
 | Opt-out keyword or stop button | Set opted out. Applied by code at step 5 of section 1, **whether or not the tenant is answering**. The confirmation is sent only if the tenant is answering. |
 | Opt-out asked for in free text | Recognised by the model at step 15, so only when the message reaches that step. Set opted out; send the confirmation. A customer whose message cannot reach step 15 can always use the keyword or the button. |
-| Opt-in keyword, or explicit request to receive messages again | Clear opted out; add a consent record, source `opt-in`. |
+| Opt-in keyword or opt-in button | Clear opted out; add a consent record, source `opt-in`. Applied by code at step 5. |
+| Request in free text to receive messages again | Recognised by the model at step 15. **Does not clear the opt-out.** Code sends one fixed question with an opt-in button; only a tap on it clears the opt-out. A misread message therefore cannot restart messages. |
 | Contact deleted while opted out | Keep only a one-way hash of the number, marked opted out. |
 | A number whose hash is marked opted out messages again | The new contact starts `opted-out`. |
 
@@ -386,14 +388,15 @@ Service-wide state:
 
 | State | Entered when | Left when |
 | --- | --- | --- |
-| `normal` | Start; a health check succeeds in `degraded` and the operator is not holding the state | 5 sessions are marked `awaiting-retry` within 2 minutes, or the operator turns degraded mode on (ADR 0011) |
+| `normal` | Start; a health check succeeds in `degraded` and the operator is not holding the state | 5 sessions are marked `awaiting-retry` within 2 minutes **and** a health check run at that moment fails; or the operator turns degraded mode on (ADR 0011). If that health check succeeds the service stays `normal` and the count starts again |
 | `degraded` | As above | A health check, run every 30 seconds, succeeds. While the operator holds the state, health checks do not end it; only the operator turning it off does, after which the next successful health check returns the service to `normal` |
 
 Per-session mark `awaiting-retry`:
 
 | Event | Effect |
 | --- | --- |
-| 3 model attempts fail for a customer message | Set the mark. Send the fallback, unless a provider-failure fallback was sent in this session in the last 15 minutes. |
+| A model response arrives but does not match the output schema | **Not a provider failure.** It is a failed output check: the fallback is sent and it counts towards the two-fallback handover of section 3. It never sets the mark and never counts towards degraded mode. |
+| 3 model attempts end in a provider or network error or a timeout for a customer message | Set the mark. Send the fallback, unless a provider-failure fallback was sent in this session in the last 15 minutes. |
 | A customer message arrives in `degraded` | Set the mark, same fallback rule, no model call. |
 | 60 seconds since the last attempt, service `normal` | Attempt the answer. Success: send it, clear the mark. |
 | Customer sends another message, service `normal` | Normal handling attempts the answer. Success clears the mark. |
@@ -456,6 +459,9 @@ match in the same pull request.
 | 19 | The operator can hold the service in `degraded`; health checks do not end a held state. | ADR 0011 | Section 8 |
 | 20 | An outbound message passes through `sending`; a reply left there is sent once more, a template is not. | Gate 2, S2 | Section 7 |
 | 21 | Sections 4 and 5 (booking, reminder) belong to the booking pack, not the core. | Gate 2, S4; ADR 0012 | Sections 4, 5 |
+| 22 | Degraded mode begins only if a health check fails at the moment the count is reached; invalid model output is not a provider failure. A customer who can make calls fail cannot degrade a healthy provider. | Gate 2, A1 | Section 8; US-C15 |
+| 23 | An emergency phrase is checked by code before every other step, in every state (step 4a), with its own handover reason. | Gate 2, A5 | Section 1; US-C6 |
+| 24 | A free-text request to receive messages again does not lift an opt-out; only a keyword or the opt-in button does. | Gate 2, A12 | Section 6; US-C7 |
 
 ## Models
 
