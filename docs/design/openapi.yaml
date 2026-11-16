@@ -150,10 +150,12 @@ paths:
       responses:
         '200':
           description: Stored, or a duplicate.
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Only for requests with a bad signature, per source.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '401':
           description: The signature is missing or wrong. Nothing is stored.
           content:
@@ -162,6 +164,12 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '413':
           description: The body is larger than the limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: The database is unavailable. The channel redelivers later.
           content:
             application/problem+json:
               schema:
@@ -775,7 +783,8 @@ paths:
       - Business data
       summary: Replace opening hours
       x-role: owner
-      description: Saved even if future bookings now fall outside the hours; those bookings are kept and returned.
+      description: Saved even if future bookings now fall outside the hours. A warning says so; the bookings are kept, and
+        the booking pack lists them through listBookings with outside_opening_hours.
       requestBody:
         required: true
         content:
@@ -1145,7 +1154,7 @@ paths:
       operationId: listHandovers
       tags:
       - Handovers
-      summary: The waiting list
+      summary: The waiting list, urgent handovers first
       x-role: agent
       parameters:
       - name: state
@@ -1350,6 +1359,7 @@ paths:
       - Bookings
       summary: List bookings by start time
       x-role: agent
+      x-pack: booking
       parameters:
       - name: from
         in: query
@@ -1376,6 +1386,12 @@ paths:
           - cancelled
           - attended
           - missed
+      - name: outside_opening_hours
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: Only future bookings that fall outside the current opening hours (US-D2).
       - name: cursor
         in: query
         required: false
@@ -1422,6 +1438,7 @@ paths:
       - Bookings
       summary: Add a booking by hand
       x-role: agent
+      x-pack: booking
       description: Refused with `no-capacity` if the slot is full.
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -1451,6 +1468,76 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/Invalid'
+  /api/v1/booking-service-settings/{serviceId}:
+    get:
+      operationId: getBookingServiceSettings
+      tags:
+      - Bookings
+      summary: A service's duration and capacity
+      x-role: agent
+      x-pack: booking
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingServiceSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: setBookingServiceSettings
+      tags:
+      - Bookings
+      summary: Set a service's duration and capacity
+      x-role: owner
+      x-pack: booking
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingServiceSettings'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingServiceSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
   /api/v1/slots:
     get:
       operationId: listSlots
@@ -1458,6 +1545,7 @@ paths:
       - Bookings
       summary: Free slots for a service
       x-role: agent
+      x-pack: booking
       parameters:
       - name: service_id
         in: query
@@ -1501,6 +1589,7 @@ paths:
       - Bookings
       summary: Move a booking
       x-role: agent
+      x-pack: booking
       description: No cut-off applies to staff. Creates a booking-change notice to the customer.
       parameters:
       - name: bookingId
@@ -1545,6 +1634,7 @@ paths:
       - Bookings
       summary: Cancel a booking
       x-role: agent
+      x-pack: booking
       description: Creates a booking-change notice to the customer.
       parameters:
       - name: bookingId
@@ -1581,6 +1671,7 @@ paths:
       - Bookings
       summary: Record attended or missed
       x-role: agent
+      x-pack: booking
       description: Refused with `not-started` before the start time.
       parameters:
       - name: bookingId
@@ -1624,6 +1715,7 @@ paths:
       - Bookings
       summary: List blocked periods
       x-role: agent
+      x-pack: booking
       parameters:
       - name: from
         in: query
@@ -1660,6 +1752,7 @@ paths:
       - Bookings
       summary: Block a period
       x-role: agent
+      x-pack: booking
       description: If the period contains bookings and keep_bookings is not true, the request is refused with `contains-bookings`
         and nothing is saved.
       requestBody:
@@ -1695,6 +1788,7 @@ paths:
       - Bookings
       summary: Remove a blocked period
       x-role: agent
+      x-pack: booking
       parameters:
       - name: blockedPeriodId
         in: path
@@ -1723,6 +1817,7 @@ paths:
       - Bookings
       summary: Messages that were withheld or failed
       x-role: agent
+      x-pack: booking
       parameters:
       - name: cursor
         in: query
@@ -2212,32 +2307,13 @@ components:
             - weekday
             - opens
             - closes
-        booking_horizon_days:
-          type: integer
-          minimum: 7
-          maximum: 365
-        slot_interval_minutes:
-          type: integer
-          minimum: 5
-          maximum: 120
-        total_concurrent_bookings:
-          anyOf:
-          - type: integer
-            minimum: 1
-            maximum: 50
-          - type: 'null'
-        minimum_notice_hours:
-          type: integer
-          minimum: 0
-          maximum: 72
-        change_cutoff_hours:
-          type: integer
-          minimum: 0
-          maximum: 72
-        reminder_lead_hours:
-          type: integer
-          minimum: 1
-          maximum: 72
+        pack_settings:
+          type: object
+          additionalProperties: true
+          description: 'The settings the tenant''s pack declares, validated by the server against the pack''s schema. For
+            the booking pack: booking_horizon_days (7 to 365), slot_interval_minutes (5 to 120), total_concurrent_bookings
+            (1 to 50, or null), minimum_notice_minutes (0 to 4320), change_cutoff_minutes (0 to 4320), reminder_lead_minutes
+            (60 to 4320). Empty for a pack with no settings.'
         quiet_hours:
           anyOf:
           - type: object
@@ -2355,14 +2431,6 @@ components:
         price_minor:
           type: integer
           minimum: 0
-        duration_minutes:
-          type: integer
-          minimum: 5
-          maximum: 480
-        capacity:
-          type: integer
-          minimum: 1
-          maximum: 50
         active:
           type: boolean
         updated_at:
@@ -2374,10 +2442,31 @@ components:
       - id
       - name
       - price_minor
-      - duration_minutes
-      - capacity
       - active
       - updated_at
+    BookingServiceSettings:
+      type: object
+      properties:
+        service_id:
+          type: string
+          format: uuid
+        duration_minutes:
+          type: integer
+          minimum: 5
+          maximum: 480
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 50
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - duration_minutes
+      - capacity
+      description: Booking pack. A service with no settings cannot be booked.
     ServiceInput:
       type: object
       properties:
@@ -2391,22 +2480,12 @@ components:
         price_minor:
           type: integer
           minimum: 0
-        duration_minutes:
-          type: integer
-          minimum: 5
-          maximum: 480
-        capacity:
-          type: integer
-          minimum: 1
-          maximum: 50
         active:
           type: boolean
       additionalProperties: false
       required:
       - name
       - price_minor
-      - duration_minutes
-      - capacity
     OpeningHours:
       type: object
       properties:
@@ -2466,14 +2545,14 @@ components:
           type: string
           format: date-time
           description: RFC 3339, in UTC.
-        affected_bookings:
+        warnings:
           type: array
           items:
-            $ref: '#/components/schemas/Booking'
+            type: string
       additionalProperties: false
       required:
       - periods
-      - affected_bookings
+      - warnings
     Policy:
       type: object
       properties:
@@ -2649,11 +2728,15 @@ components:
           anyOf:
           - type: string
             enum:
+            - pending
+            - held
+            - discarded
+            - withheld
+            - sending
             - sent
             - delivered
             - read
             - failed
-            - withheld
           - type: 'null'
         status_reason:
           anyOf:
@@ -2703,6 +2786,9 @@ components:
           - handed-back
           - answered
           - closed-unanswered
+        urgent:
+          type: boolean
+          description: True once the reason emergency is present. Urgent handovers are listed first.
         reasons:
           type: array
           items:
@@ -2712,6 +2798,7 @@ components:
             - repeated-failure
             - sensitive-topic
             - data-request
+            - emergency
             - limit
             - unsupported-content
             - late-change
@@ -2748,6 +2835,7 @@ components:
       - conversation_id
       - state
       - reasons
+      - urgent
       - overdue
       - opened_at
     HandoverClose:
@@ -2818,6 +2906,15 @@ components:
           - type: string
             format: uuid
           - type: 'null'
+        contact_phone:
+          anyOf:
+          - type: string
+            description: In international format. Finds or creates the contact. Use this or contact_id, not both.
+          - type: 'null'
+        consent:
+          type: boolean
+          default: false
+          description: True if the customer agreed to messages about this booking. Without it no reminder is sent.
       additionalProperties: false
       required:
       - service_id
@@ -2920,12 +3017,11 @@ components:
           anyOf:
           - type: number
           - type: 'null'
-        inquiry_to_booking_rate:
-          $ref: '#/components/schemas/Metric'
-        no_show_rate:
-          $ref: '#/components/schemas/Metric'
-        appointments_without_outcome:
-          type: integer
+        pack_metrics:
+          type: object
+          additionalProperties: true
+          description: 'Metrics the tenant''s pack supplies. For the booking pack: inquiry_to_booking_rate and no_show_rate,
+            each with value, numerator and denominator, and appointments_without_outcome.'
         handover_rate:
           $ref: '#/components/schemas/Metric'
         unanswered_handovers:
@@ -2944,10 +3040,9 @@ components:
       required:
       - from
       - to
-      - inquiry_to_booking_rate
-      - no_show_rate
       - handover_rate
       - containment_rate
+      - pack_metrics
     DeletionRequest:
       type: object
       properties:

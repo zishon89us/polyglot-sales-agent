@@ -46,6 +46,7 @@ Assumptions. If one is false, the entries that rest on it must be redone.
 | A4 | The operator is trusted and is one person, the maintainer (glossary). |
 | A5 | The model provider keeps to its terms. What it must promise is ADR 0010's subject. |
 | A6 | Version 1.0 runs on a mock channel with synthetic data (ADR 0001). The entries below are written for a live deployment, because the design should be right before it is ever used with real data. |
+| A7 | **Channel behaviour is assumed, not verified.** Every statement about the channel that this design relies on was read as a search extract, not in full, and one page could not be opened (`docs/compliance.md`, "How this was read"). The design assumes: (a) a webhook carries an HMAC-SHA-256 signature of the raw body in `X-Hub-Signature-256`; (b) the signing secret belongs to the app, so one secret covers every tenant; (c) an undelivered webhook is redelivered, with the same message identifier; (d) free-form messages are allowed for 24 hours after the customer's last message, and templates are needed outside that; (e) each template is approved per language, with no fallback; (f) a new business account may message a limited number of recipients per day; (g) delivery order is not guaranteed; (h) the send call offers no way to ask later whether a message was accepted. **Each must be re-read in full before any live channel is connected** (NFR-L1). |
 
 ## 2. What is protected
 
@@ -167,6 +168,7 @@ STRIDE view of the same two flows.
 | T16 | I | The provider keeps or trains on what it receives | Provider terms that exclude training, recorded in an ADR | NFR-V6, R-C3, ADR 0010 (proposed) | Open until ADR 0010 is decided |
 | T17 | T | The response is malformed, or names a tool, tenant or identifier it was not given | Schema validation; unknown tools refused; identifiers resolve only inside the tenant's transaction | ADR 0007 layers 3 and 4, NFR-S1 | None known |
 | T18 | D | The provider is slow or down | Timeout, bounded retries, degraded mode, automatic recovery; reminders need no model | US-C15, NFR-R4, R-T7 | Customers wait for a person |
+| T59 | D | **A customer drives the whole service into degraded mode**, by sending input that makes model calls fail in five sessions within two minutes; every tenant then stops answering and is emailed | Degraded mode begins only if a provider health check fails at that moment, so failures a customer causes cannot degrade a healthy provider. Invalid model output is a failed check, not a provider failure. Degraded-mode emails are limited to one per tenant per hour. Limits per call bound a deliberately slow reply | State machines §8 decision 22, US-C15 criteria 6 and 10, **#158** | A customer can still make their own sessions fail and be handed over, within the per-contact limit. Whether input can force a timeout depends on the model and is not known |
 | T19 | R | No one can tell later why a reply was sent | One trace per call with prompt version, model, tools and guardrail results | US-C10, NFR-A5 | Traces hold no text by design, so the exact wording is found only in the stored message |
 
 ### F5 — Dashboard requests
@@ -206,9 +208,11 @@ abuse and cross-site request forgery. They are T20, T21, T23 and T24.
 | --- | --- | --- | --- | --- | --- |
 | T38 | I | A notification email exposes customer data to a mailbox or the email provider | No message text, name or number in any email; notifications say only that sessions are waiting | Architecture §3, US-C14 | Reset and invitation links travel by email (T23) |
 
-Notification volume is bounded by the throttle of one email per tenant per
-five minutes (glossary), so a customer cannot use the system to flood a
-staff mailbox.
+Handover notifications are limited to one email per tenant per five minutes
+(glossary), and degraded-mode emails to one per tenant per hour (T59). An
+emergency handover is emailed at once, outside the throttle; a customer who
+sends emergency phrases repeatedly gets one emergency text and one handover
+per session, so that route is limited by the session, not by the throttle.
 
 ### F8 — Operator
 
@@ -229,9 +233,17 @@ staff mailbox.
 ## 6. AI-specific threats
 
 The principle, from ADR 0007: **assume the model can be fully manipulated,
-and make sure the serious rules still hold.** Checks that run before the
-model, the tenant scoping of tools, and checks that run after the model do
-not ask the model for anything.
+and make sure the rules that code can enforce still hold.** Those are:
+tenant isolation, acting only for the customer in the conversation, never
+returning another customer's data, never messaging someone who opted out,
+and staying silent in a session staff hold. Checks that run before the
+model and the tenant scoping of tools do not ask the model for anything.
+
+**What does not hold under full manipulation is the truth of what is
+said.** The checks after the model block a false value only in a form code
+can detect and only against the item the model itself names. This document
+first implied more; the Gate 2 review showed that was wrong (finding A2).
+T50 and T60 state the remainder.
 
 Where text that reaches the model comes from, and who controls it:
 
@@ -253,7 +265,8 @@ Where text that reaches the model comes from, and who controls it:
 | T47 | **Tool misuse.** The model is persuaded to call a tool with another contact's or tenant's identifier, to book for someone else, or to cancel a booking that is not the customer's | Tenant and contact are supplied by the server, never by the model; arguments are schema-checked; a booking identifier resolves only if it belongs to this contact | US-C2, US-C8, ADR 0007 layers 2 and 3, NFR-A1 | None known in design; hostile-output unit tests are ADR 0007's confirmation |
 | T48 | **Too much power in the tools.** A tool does more than the task needs | Tools are limited to: read services and policies, find free slots, and create, move or cancel **this contact's** bookings. No tool sends a message, reads another contact, changes business data, fetches a link or runs a query. At most 3 future bookings per contact | US-B2, US-B4, architecture "what a pack provides" | A manipulated model can book or cancel within the customer's own limit of 3; the customer is the one being served |
 | T49 | **Hidden context is extracted.** A customer obtains the prompt, tool definitions or profile | The design does not rely on the prompt staying secret: it holds no credential, no key, no other tenant's data and no other customer's data. Disclosure is still tested | US-C8 criterion 2, NFR-A1 | A disclosed prompt helps an attacker craft later attempts |
-| T50 | **False statements.** The assistant states a wrong price, time or policy, or confirms a wrong value the customer supplied | Each stated amount, time or date needs a claim that code checks against the named item; availability comes only from tools; fallback and handover on failure | US-C4, NFR-A2, R-A1, ADR 0006, ADR 0007 layer 5 | Facts with no checked value are measured by evals, not blocked (ADR 0007). Findings #120 to #122 are settled in the guardrail policy, #44 |
+| T50 | **False statements.** The assistant states a wrong price, time or policy, or confirms a wrong value the customer supplied | Each *detected* amount, percentage, time or date needs a claim, and code checks it equals a value of the item named; availability comes only from tools; fallback and handover on failure | US-C4, NFR-A2, R-A1, ADR 0006, ADR 0007 layer 5, guardrail policy §4 | **Not closed by code.** A value in words, without a currency or time marker, or attached to the wrong service is not caught. Facts with no value are not checked at all. All of these are measured by evals (E2, E4), which lower the rate and do not make it zero |
+| T60 | **False confirmation.** The assistant says in its own words that a booking is made, moved or cancelled when no tool did it. The customer arrives and has no appointment | The true confirmation is fixed text sent only by the tool that changed the booking. Code cannot tell a false one from an ordinary sentence | Guardrail policy G13; eval dimension E16, a fixed gate | **Rests on the model.** Measured, not prevented |
 | T51 | **Planted content.** A manipulated reply carries a link, a phone number or payment details, sent from the business's own number | A link, email address, phone number or account number in a reply must equal a value in the tenant's own data; checked by code after the model | Guardrail policy section 4, check O5; US-C4 criterion 15 | Detection is by pattern and can miss an unusual form; measured by the planted-content eval cases |
 | T52 | **Advice the assistant must not give**, or offensive output in the business's name | Refusal rules in the prompt; the model's sensitive-topic flag triggers handover; refusal eval cases per language | US-C8 criterion 5, R-A4, guardrail policy #44 | Rests on the model's judgement; measured, not enforced (ADR 0007) |
 | T53 | **One customer's data shown to another.** A customer asks who else is booked, or for another customer's details | Tools return slots and this contact's own bookings, never who holds a slot; the prompt holds only this session | US-C2, NFR-A1, ADR 0007 layer 2 | None known |
@@ -319,10 +332,22 @@ Issues opened by this document, all labelled `security`.
 | #165 | Refuse to start a deployment with development components | M2 | T40 |
 | #166 | System card: state the security limits | M6 | T8, T20, T30, T37 |
 
-Threats with no complete mitigation in the design today: **T6 and T54**,
-both designed in M3 with the engine. Three were settled after this document
-was first written: T36 in the data model (#160), T39 in ADR 0011 (#161) and
-T51 in the guardrail policy (#159).
+Threats that are open, accepted or only measured today, in full (Gate 2
+finding A31 showed the earlier list was too short):
+
+| Entries | State |
+| --- | --- |
+| T4, T29 | Mitigation named; its limits are not set (#154, #164) |
+| T6, T54 | Not designed; M3 (#157, #158) |
+| Recycled number (T8) | Not mitigated; accepted for v1.0 (#166) |
+| Provider retention (T16) | Open until the provider is chosen (ADR 0010) |
+| Stored script (T25) | Mitigation named; open until built (#155) |
+| T50, T60 | Rest partly or wholly on the model; measured by evals |
+| A7 | Every channel statement is an assumption until re-read |
+
+Three were settled after this document was first written: T36 in the data
+model (#160), T39 in ADR 0011 (#161) and T51 in part by the guardrail policy
+(#159; disguised forms rest on the model).
 
 ## 9. What this document does not establish
 

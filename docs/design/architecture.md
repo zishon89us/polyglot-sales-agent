@@ -160,7 +160,7 @@ flowchart TB
         worker["apps/worker"]
     end
     subgraph packages
-        core["core<br/>state machines, order of checks,<br/>message classes, timing rule<br/>(pure, no I/O)"]
+        core["core<br/>core state machines, order of checks,<br/>message classes<br/>(pure, no I/O)"]
         db["db<br/>schema, migrations, queries,<br/>tenant transaction, jobs"]
         channel["channel<br/>interface"]
         wa["channel-whatsapp"]
@@ -188,18 +188,21 @@ flowchart TB
 
 | Package | Responsibility |
 | --- | --- |
-| `core` | The rules, as pure functions: the order of checks, the eight state machines, message classes and their pre-send checks, the reminder timing rule, quiet hours, metric definitions. No database, network, clock or framework import; time is passed in. |
+| `core` | The rules that hold for every pack, as pure functions: the order of checks, the six core state machines (handover, session, contact messaging permission, outbound message, provider availability, tenant), message classes and their pre-send checks, quiet hours, and the core metric definitions. No database, network, clock or framework import; time is passed in. It contains nothing about bookings (ADR 0012). |
 | `db` | The schema and migrations; typed queries; the function that opens a transaction for a tenant and sets row-level security; the jobs table and its claim, retry and dead-letter logic. |
 | `channel` | The interface a channel implements: verify a webhook, parse it into the system's own event types, send a free-form or template message, submit a template, check credentials. |
 | `channel-whatsapp`, `channel-mock` | Implementations. All knowledge of Meta's payloads lives in the first. |
 | `ai` | `LlmClient` and its adapters; loading versioned prompts; building the business profile; validating structured output; checking claims; writing traces. |
 | `pack` | The interface a pack implements (below). |
-| `packs/booking`, `packs/faq-only` | Implementations. |
+| `packs/booking` | Everything about appointments: the booking and reminder state machines, the reminder timing rule, slots and capacity, its tables and migrations, its tools, templates, buttons, timers, API routes, settings and metrics (ADR 0012). |
+| `packs/faq-only` | The trial pack: a prompt fragment and evals. It uses the core business profile and adds no code. |
 | `integrations` | Reserved for v1.1. Empty in v1.0. |
 
 **Dependency rule.** `core` imports nothing from this repository. No package
 imports from `apps`. The core never imports a pack; packs are registered with
-the worker at start-up. An import-boundary test in CI enforces all three.
+`worker` and with `api` at start-up, since a pack supplies both tools and
+routes (ADR 0012). The package diagram above predates ADR 0012 and lacks the
+edge from `api` to `pack`; it is corrected with finding V9. An import-boundary test in CI enforces all three.
 
 ### What a pack provides
 
@@ -219,10 +222,23 @@ the worker at start-up. An import-boundary test in CI enforces all three.
 nothing else. If adding it requires a change under `packages/core`, the
 interface above is wrong (NFR-M1).
 
-One part of the core knows about bookings: section 1 of the state machines
-gives the Confirm button its own step. In the code that step is "a button a
-pack has registered as handled by code", so the core stays unaware of what
-the button means.
+ADR 0012 adds four parts to this list: migrations for the pack's own tables,
+a settings schema, an API route plug-in, and timers. It also says what the
+core does with each.
+
+**What belongs to the core and what to the booking pack** is decided in
+ADR 0012. In short: the core owns services with their prices, policies and
+opening hours, because every pack answers questions about them. The booking
+pack owns everything that exists only because appointments do: a service's
+duration and capacity, slots, bookings, blocked periods, reminders, the
+Confirm button, and the booking settings. Sections 4 and 5 of the state
+machines are the booking pack's; step 6 of the order of checks is, in code,
+"a button a pack has registered as handled by code".
+
+The trial pack `faq-only` cannot prove this boundary, because it adds no
+code. The proof is a boundary test (ADR 0012): nothing under `packages/core`,
+the core migrations or the core API routes may name a booking table, type or
+route.
 
 ## 6. Runtime view
 
@@ -240,7 +256,7 @@ sequenceDiagram
     A->>D: one transaction: insert message, upsert conversation job due in 3 s
     A-->>M: 200
     Note over D: a later message moves the job's due time,<br/>at most 10 s after the first
-    W->>D: claim the due job, lock the conversation
+    W->>D: claim the due job, take the conversation lease
     W->>W: order of checks, steps 5 to 14 (core)
     W->>D: load business profile and session
     W->>L: prompt: profile, messages, tools, output schema
@@ -257,7 +273,79 @@ sequenceDiagram
 
 If a new message arrives while the model is working, the worker finds it when
 it re-reads the conversation before storing the reply, discards the reply and
-starts again (US-C11, criterion 2).
+starts again (US-C11, criterion 2). What that means for a booking the first
+attempt already made is defined next.
+
+### Processing one turn
+
+A **turn** is one attempt to answer one batch. This section is the authority
+for how leases, tools, checks and sends fit together. It answers Gate 2
+findings S1, S2, S3 and A13.
+
+1. **Lease.** The worker takes the conversation lease (ADR 0004) and renews
+   it before each model attempt.
+2. **Context.** The prompt holds the session's messages **and the results of
+   every tool call already completed in this session**, read from
+   `tool_calls`. A restarted or retried turn therefore sees a booking that an
+   earlier attempt made.
+3. **Tools.** A tool runs in its own short transaction in the tenant's scope.
+   **That transaction first checks the lease token**, as the store step
+   does; a worker that has lost the lease cannot change anything. A tool
+   that changes state then does three things in the same transaction: the
+   change, its `tool_calls` row, and the job that sends the **fixed
+   confirmation text** for it. The confirmation is sent because the tool
+   succeeded. It does not wait for, or depend on, the model's reply.
+4. **Recognising a repeat.** The model's call identifier is never used.
+   The thing being changed decides:
+   - *Create:* a partial unique index allows one active booking per contact,
+     service and start time. A second create that hits it returns the
+     existing booking. After a cancellation the slot can be booked again,
+     because the cancelled booking is no longer active.
+   - *Move:* the update applies only if the booking is still at the start
+     time the call was told it had. If it is already at the new time, the
+     call returns it unchanged. Moving back and forth is therefore possible.
+   - *Cancel:* cancelling a cancelled booking returns it unchanged.
+   - *Read-only tools* are never deduplicated.
+
+   **A repeat changes nothing, queues no confirmation, and does not count as
+   "a state-changing tool succeeded in this turn" for step 6.** Its
+   `tool_calls` row records which earlier call it repeated.
+5. **Reply.** After the last tool result the model returns its reply, claims
+   and flags, and code runs the output checks.
+6. **If the reply fails a check after a state-changing tool succeeded in this
+   turn,** no fallback is sent: the customer already has the confirmation,
+   which is true. The failure is recorded and does not count towards the
+   two-fallback handover. If a flag is set, the handover or other fixed text
+   is sent as usual, after the confirmation.
+7. **If the turn is discarded** because a newer message arrived, or because
+   the lease was lost, the reply text is dropped. Tools that ran stay done,
+   and their confirmations are already queued. The next turn sees them (2).
+8. **Store.** One transaction checks the lease token, stores the reply and
+   the trace, and enqueues the send job. If the token is no longer the
+   worker's, nothing is stored.
+
+### Sending a message once
+
+The channel is called outside any transaction, so a worker can die after the
+channel accepted a message and before that is recorded. The system cannot
+tell this from a call that never happened, and nothing here assumes the
+channel offers a way to ask (an assumption; see the threat model, section
+1). The policy differs by message class:
+
+| Step | What happens |
+| --- | --- |
+| Before the call | In one transaction the message moves `pending` → `sending`, with the time |
+| After the call succeeds | `sending` → `sent`, with the channel's identifier |
+| After the call fails | Retried as the state machines say, then `failed` |
+| Found in `sending` for more than 2 minutes: an assistant reply, a system reply or a staff message | Sent **once more**, then treated normally. A customer waiting for an answer is worse off with none than with two. In this one case the customer may receive the same reply twice |
+| Found in `sending` for more than 2 minutes: a template (reminder, notice, follow-up) | **Not sent again.** It becomes `failed` with reason `unconfirmed` and appears in the withheld-messages list for staff. A second paid, business-initiated message is worse than a missed one |
+
+So "exactly one reply" (US-C1 criterion 9) holds for a worker that stops
+before the channel call, which is the tested case. For a worker that stops
+in the short interval after the channel accepts and before that is recorded,
+the outcome is at most two copies of a reply and at most one copy of a
+template. The restart test in M2 must show all three outcomes by stopping
+the worker at each point.
 
 ### A reminder is sent
 
@@ -336,8 +424,9 @@ The hosting target is ADR 0009 and the model provider is ADR 0010; both are
 proposed and wait for the maintainer.
 
 Workers are identical and stateless; more can be added. Correctness under
-several workers rests on row locking for jobs and an advisory lock per
-conversation (ADR 0004), and is tested with two workers (NFR-R6).
+several workers rests on row locking for jobs and a lease per conversation
+with a token check (ADR 0004). The test with two workers (NFR-R6) is to be
+written in M2.
 
 Migrations run as a separate step before new code starts, and each has a
 tested reverse step (NFR-O4).
@@ -352,13 +441,16 @@ Cross-tenant operator jobs use a separate role and one named module.
 
 **Transactions and jobs.** A state change and the jobs that follow from it
 are written in one transaction. External calls (channel, model, email) are
-made by jobs, outside any transaction, and are designed to be repeated
-safely.
+made by jobs, outside any transaction (the one exception is the credential
+check when an owner enters credentials, which `api` makes while the owner
+waits). Each is designed so that a repeat is harmless or is not made; see
+"Sending a message once".
 
-**Idempotency.** Inbound: a unique channel message ID. Tools: each
-state-changing tool call carries a key derived from the session and the
-model's call, so a repeated call finds the first result. Outbound: a message
-row is created before the send and its status moves forward only.
+**Idempotency.** Inbound: a unique channel message ID. Tools: no key; a
+repeat is recognised from the thing changed ("Processing one turn", step 4). Outbound: a message
+row is created before the send, moves through `sending`, and is re-sent or
+not according to its class ("Sending a message once"). Jobs: a dedupe key
+where two events could enqueue the same work.
 
 **Time.** All rules take the current time as an argument. Production passes
 the clock; tests pass a fixed or stepped time. Times are stored in UTC;
@@ -393,8 +485,11 @@ PostgreSQL. End-to-end tests drive whole conversations through
 
 ## 9. Architecture decisions
 
-All in `docs/adr/`; the index is `docs/adr/README.md`. ADRs 0001 to 0008 are
-accepted; 0009 (hosting) and 0010 (model provider) are proposed.
+All in `docs/adr/`; the index is `docs/adr/README.md`, which gives each
+record's status. ADRs 0001 to 0008 and 0011 were accepted by the maintainer
+merging them. ADR 0012 (core and pack boundary) is proposed in the pull
+request that answers the Gate 2 review. ADRs 0009 (hosting) and 0010 (model
+provider) are proposed and need the maintainer.
 
 ## 10. Quality requirements
 

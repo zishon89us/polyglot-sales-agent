@@ -29,6 +29,7 @@ at step 12.
 | 2 | Message ID already stored? | Yes: HTTP 200. **Ends.** |
 | 3 | Receiving number maps to a tenant? | No: store as unroutable, HTTP 200. **Ends.** |
 | 4 | Store the message in its conversation; start or extend the session; open or extend the reply window; HTTP 200 | Always |
+| 4a | Does the text contain a phrase from the emergency list of the guardrail policy? Checked by code after the message is stored, in every tenant, contact, session and service state, and before the rate pause. | Yes: apply the emergency event of machine 2 (reason `emergency`, urgent, the immediate email under its hourly ceiling). If the tenant has verified channel credentials, send the emergency text, unless one was sent to this contact in the last 60 minutes; it replaces the ordinary handover message. While an urgent handover is open, a further emergency message adds nothing but is shown to staff like any message. If staff have closed or handed back and a new emergency message arrives, a new urgent handover opens and the same rule decides whether the text is sent again. **Continues** to step 5. |
 | 5 | Is it the stop or start button, or a message whose whole text, trimmed and case-folded, equals an opt-out or opt-in keyword? | Yes: apply it by code (machine 6). Send the confirmation only if the tenant is answering. **Ends.** |
 | 6 | Is it the Confirm button of a reminder? | Yes: apply it by code (machine 4), in every tenant, contact and session state. Send the result as a system reply only if the tenant is answering. **Ends.** |
 | 7 | Does the contact have an open handover in state `followed-up`? | Yes: attach it to this session (machine 2 → `waiting`). If the tenant is answering and the contact is not paused, tell the customer a person will reply and notify staff. **Ends.** |
@@ -139,6 +140,25 @@ stateDiagram-v2
     closed_unanswered --> [*]
 ```
 
+### The urgent mark
+
+A handover is **urgent** from the moment the reason `emergency` is added, and
+stays urgent until it ends. With no open handover, an emergency opens one in
+`waiting`, already urgent. Urgent changes three things and nothing else:
+
+- The waiting list shows urgent handovers first.
+- Staff are emailed at once, outside the five-minute throttle, **once per
+  handover**. To stop many numbers using this to flood a mailbox, a tenant
+  gets at most 5 such immediate emails an hour; beyond that an urgent
+  handover is still first on the list and is covered by the next throttled
+  email, whose subject says urgent.
+- The customer gets the fixed emergency text in place of the ordinary
+  handover message, at most once in 60 minutes (step 4a of section 1).
+
+The escalation clock, the holding message, the follow-up and every staff
+action work as for any other handover. The executable model does not cover
+the urgent mark.
+
 ### Transitions
 
 A dash means the event cannot occur in that state.
@@ -159,6 +179,7 @@ A dash means the event cannot occur in that state.
 | Contact opts out | Stay. Staff may still reply in the session; `handover_followup` becomes unavailable. | Stay. | Stay; follow-up unavailable. | Stay. |
 | Contact deleted (US-D5) | → `closed-unanswered`, reason `contact-deleted` | → `answered` | → `closed-unanswered`, reason `contact-deleted` | → `closed-unanswered`, reason `contact-deleted` |
 | Removed staff user held it (US-D7) | Stay, unheld. | Stay, unheld. | — | — |
+| Emergency (step 4a of section 1, or the model's emergency flag) | Add reason `emergency`; set **urgent**. Stay. | Add the reason; set urgent. Stay. | Attach to the contact's current session → `waiting`; add the reason; set urgent. | Same as `detached`. |
 
 The overdue mark is cleared, and the clock restarts from zero, whenever the
 handover is attached to a session again (by a customer message after a
@@ -202,6 +223,9 @@ written.
 `waiting` or `in-progress` is attached to it.
 
 ## 4. Booking
+
+This machine and the reminder machine of section 5 are implemented in
+`packages/packs/booking`, not in `packages/core` (ADR 0012).
 
 | State | Meaning |
 | --- | --- |
@@ -327,11 +351,12 @@ business-initiated message may be sent.
 
 | Event | Effect |
 | --- | --- |
-| Contact books in chat | Add a consent record, source `chat-booking`. |
+| Contact books in chat | Add a consent record, source `chat`, about that booking. The fixed confirmation text, sent by code, says that a reminder will be sent and how to stop it. |
 | Staff tick consent on a manual booking | Add a consent record, source `staff`. |
 | Opt-out keyword or stop button | Set opted out. Applied by code at step 5 of section 1, **whether or not the tenant is answering**. The confirmation is sent only if the tenant is answering. |
 | Opt-out asked for in free text | Recognised by the model at step 15, so only when the message reaches that step. Set opted out; send the confirmation. A customer whose message cannot reach step 15 can always use the keyword or the button. |
-| Opt-in keyword, or explicit request to receive messages again | Clear opted out; add a consent record, source `opt-in`. |
+| Opt-in keyword or opt-in button | Clear opted out; add a consent record, source `opt-in`. Applied by code at step 5. |
+| Request in free text to receive messages again | Recognised by the model at step 15. **Does not clear the opt-out.** Code sends one fixed question with an opt-in button; only a tap on it clears the opt-out. A misread message therefore cannot restart messages. |
 | Contact deleted while opted out | Keep only a one-way hash of the number, marked opted out. |
 | A number whose hash is marked opted out messages again | The new contact starts `opted-out`. |
 
@@ -346,6 +371,7 @@ opt-out. Only the opt-in event does.
 | `held` | Waiting: for quiet hours to end, for the daily limit, or for the previous message in the conversation to be delivered. |
 | `discarded` | An assistant reply dropped before sending because a newer message arrived or staff took over. Terminal. |
 | `withheld` | Not attempted; stores a reason. Terminal. |
+| `sending` | The channel call has started and its result is not yet recorded. A message found here after 2 minutes is sent once more if it is a reply or staff message, and becomes `failed` with reason `unconfirmed` if it is a template (`architecture.md`, "Sending a message once"). |
 | `sent` | Accepted by the channel API. |
 | `delivered`, `read` | Reported by the channel. |
 | `failed` | Rejected by the channel or reported failed; stores the error code. Terminal. |
@@ -382,14 +408,15 @@ Service-wide state:
 
 | State | Entered when | Left when |
 | --- | --- | --- |
-| `normal` | Start; a health check succeeds in `degraded` and the operator is not holding the state | 5 sessions are marked `awaiting-retry` within 2 minutes, or the operator turns degraded mode on (ADR 0011) |
+| `normal` | Start; a health check succeeds in `degraded` and the operator is not holding the state | 5 sessions are marked `awaiting-retry` within 2 minutes **and** a health check run at that moment fails; or the operator turns degraded mode on (ADR 0011). If that health check succeeds the service stays `normal` and the count starts again |
 | `degraded` | As above | A health check, run every 30 seconds, succeeds. While the operator holds the state, health checks do not end it; only the operator turning it off does, after which the next successful health check returns the service to `normal` |
 
 Per-session mark `awaiting-retry`:
 
 | Event | Effect |
 | --- | --- |
-| 3 model attempts fail for a customer message | Set the mark. Send the fallback, unless a provider-failure fallback was sent in this session in the last 15 minutes. |
+| A model response arrives but does not match the output schema | **Not a provider failure.** It is a failed output check: the fallback is sent and it counts towards the two-fallback handover of section 3. It never sets the mark and never counts towards degraded mode. |
+| 3 model attempts end in a provider or network error or a timeout for a customer message | Set the mark. Send the fallback, unless a provider-failure fallback was sent in this session in the last 15 minutes. |
 | A customer message arrives in `degraded` | Set the mark, same fallback rule, no model call. |
 | 60 seconds since the last attempt, service `normal` | Attempt the answer. Success: send it, clear the mark. |
 | Customer sends another message, service `normal` | Normal handling attempts the answer. Success clears the mark. |
@@ -450,6 +477,11 @@ match in the same pull request.
 | 17 | The escalation clock also runs in `detached`, restarts on re-attachment, and stops when a follow-up is sent. | V4 | Section 2; US-C14 |
 | 18 | The follow-up is available whenever the reply window is closed and no staff message has been sent, including in `waiting`. | V5 | Section 2; US-C14 |
 | 19 | The operator can hold the service in `degraded`; health checks do not end a held state. | ADR 0011 | Section 8 |
+| 20 | An outbound message passes through `sending`; a reply left there is sent once more, a template is not. | Gate 2, S2 | Section 7 |
+| 21 | Sections 4 and 5 (booking, reminder) belong to the booking pack, not the core. | Gate 2, S4; ADR 0012 | Sections 4, 5 |
+| 22 | Degraded mode begins only if a health check fails at the moment the count is reached; invalid model output is not a provider failure. A customer who can make calls fail cannot degrade a healthy provider. | Gate 2, A1 | Section 8; US-C15 |
+| 23 | An emergency phrase is checked by code as soon as the message is stored (step 4a), in every state and before the rate pause, with its own handover reason and an urgent mark. This is the one handover and notification that the rate pause of decision 13 does not stop; it is bounded per session and per tenant per hour instead. | Gate 2, A5; verification V2, V3 | Sections 1, 2; US-C6 |
+| 24 | A free-text request to receive messages again does not lift an opt-out; only a keyword or the opt-in button does. | Gate 2, A12 | Section 6; US-C7 |
 
 ## Models
 

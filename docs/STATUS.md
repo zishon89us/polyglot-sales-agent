@@ -94,19 +94,49 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-16 — ADR 0011 written (#161): the operator works through commands
   run on the server, each recorded in an insert-only log. Whether one tenant
   can be paused is open question OQ-12, for the maintainer.
+- 2026-11-16 — Lint status, keyed hash and ADR 0011 merged as #173 to #175.
+  Gate 2 review run by two separate agents. Structure review: 44 findings,
+  7 High. Threats and AI review: 50 findings, 13 High. Both reports are
+  committed unedited in `docs/reviews/`. **Gate 2 is not passed.** No
+  finding has been answered or fixed yet.
+- 2026-11-16 — Gate 2 findings answered. The maintainer chose to move
+  booking out of the core (ADR 0012) and to record channel statements as
+  assumptions. All 20 High findings were fixed or answered by withdrawing a
+  false claim. A first verification found 14 resolved, 6 partly, and 3 new
+  High findings in the fixes; a second found no High finding open. Version
+  1.0 has 224 acceptance criteria; the API has 44 paths and 57 operations.
+  The regenerated OpenAPI file passes the structural check and has not been
+  re-linted.
 
 ## Next
 
-1. Maintainer merges the three stacked pull requests, in order: the lint
-   status (#41), the keyed hash (#160) and operator access (#161).
-2. Gate 2: independent review of all design documents together, by a
-   separate agent with the Gate 2 checklist. Its report is committed
-   unedited; High findings are fixed and re-verified before build starts.
-3. Open review findings are checked against the state machines and ADRs as
-   design reaches each story.
-4. M1 retro, and the evaluation of AWS AI-DLC rules for M2 (#59).
+1. Maintainer reviews and merges the Gate 2 pull request (#176). Merging
+   accepts ADR 0012.
+2. M1 retro, and the evaluation of AWS AI-DLC rules for M2 (#59).
+3. M2, the walking skeleton. Before the boundary test of ADR 0012 is
+   switched on, the places where the core still names bookings must be
+   removed (#237, #253).
+4. Before any live use: the emergency phrase lists and text, reviewed by a
+   fluent speaker and by a person with clinical or crisis training (#168);
+   each channel assumption re-read in full (threat model A7).
 
 ## Gate status
+
+**Gate 2 (design) passes on the rule of `AGENTS.md` section 11, once the
+maintainer merges #176:** no High finding is open. That is all it means.
+
+| Review | Scope | High findings |
+| --- | --- | --- |
+| Structure review | Architecture, data model, state machines, API, ADRs | 7 |
+| Threats and AI review | Threat model, guardrail policy, eval plan, compliance | 13 |
+| Verification | The 20 fixes | 3 new; 6 of 20 partly resolved |
+| Second verification | Those 9 | 0 |
+
+Three rounds each found defects in the round before, and the last still
+added eight Medium findings. 146 `review-finding` issues are open across
+both gates. The design is not finished; it is at the point where the
+remaining defects are better found by building and testing than by another
+round of reading. No person has reviewed any of it in detail.
 
 **Gate 1 (requirements) is passed, on the route agreed with the maintainer**
 (`AGENTS.md` section 11): no High finding is open; Medium and Low findings
@@ -128,7 +158,7 @@ requirements in detail.
 
 Decided on 2026-11-16 (`adr/0001-positioning-and-v1-scope.md`): the project
 is a portfolio and reference implementation. Version 1.0 is the core engine,
-the dashboard and the `booking` pack, with 36 stories and 222 acceptance
+the dashboard and the `booking` pack, with 36 stories and 224 acceptance
 criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 
