@@ -23,6 +23,7 @@ updates the documents that referred to it.
 | OQ-9 | Which model provider and which hosting region? | Cost, accounts, and the data-transfer rules in `docs/compliance.md` Part B. | Maintainer | Before milestone M3 for the provider; before any deployment for hosting | Issue #7. Milestones M2 and M3 run on a fake model client and local containers. |
 | OQ-10 | Are the proposed setting defaults and fixed values right? | They are the agent's proposals with no data behind them. | Maintainer, from a pilot | No deadline | Nothing. They are testable as written. |
 | OQ-11 | Squash merge or merge commits? | `AGENTS.md` says squash; every pull request so far was merged with a merge commit. | Maintainer | Before milestone M2 | Nothing. |
+| OQ-12 | Can one tenant's assistant be paused, by its owner or by the operator? | As designed, the operator can stop the assistant for everyone (degraded mode) but not for one business, and an owner can only take conversations over one at a time. Adding a pause changes the tenant state machine and US-D6, so it is a change of scope. The agent recommends adding it before any live use. | Maintainer | Before any live use | Nothing in v1.0 on the mock channel. |
 
 ## Standards not yet read from source
 

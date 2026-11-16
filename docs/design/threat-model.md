@@ -214,7 +214,7 @@ staff mailbox.
 
 | ID | Cat. | Threat | Mitigation | Link | Residual |
 | --- | --- | --- | --- | --- | --- |
-| T39 | E, R | The cross-tenant role is used beyond its four jobs, or a person's use of it leaves no record | One module may use the role, enforced by an import-boundary test. How the operator signs in and how actions are recorded is **not designed** | Data model "access before the tenant is known", **#161** | Open. A4 holds only while the operator is one trusted person |
+| T39 | E, R | The cross-tenant role is used beyond its stated jobs, or a person's use of it leaves no record | One module may use the role, enforced by an import-boundary test. The operator acts only through commands run on the server, each writing to an insert-only log; there is no operator route | ADR 0011, data model `operator_log`, **#162** | Someone with a shell and the database credential can bypass the log; only the platform's access log shows that (ADR 0009). A4 holds only while the operator is one trusted person |
 | T40 | S | A deployment runs with the mock channel's test page, the fake model or logged emails | Start-up refuses these in production | **#165** | None once built |
 
 ### F9 — Repository and build
@@ -312,18 +312,17 @@ Issues opened by this document, all labelled `security`.
 | #158 | Bound every model call | M3 | T54 |
 | #159 | Links, phone numbers and payment details in replies (settled in the guardrail policy) | M1 | T51 |
 | #160 | Keyed hash for suppressed phone numbers (settled in the data model) | M1 | T36 |
-| #161 | Design operator access | M1 | T39 |
+| #161 | Design operator access (settled in ADR 0011) | M1 | T39 |
 | #162 | Separate database roles; key rotation | M2 | T10, T32, T33, T35 |
 | #163 | Harden CI and the dependency supply chain | M2 | T41 to T43 |
 | #164 | Protect the contact export file | M5 | T29 |
 | #165 | Refuse to start a deployment with development components | M2 | T40 |
 | #166 | System card: state the security limits | M6 | T8, T20, T30, T37 |
 
-Threats with no complete mitigation in the design today: **T6, T39 and
-T54**. T39 is in milestone M1 and should be settled before the Gate 2
-review; T6 and T54 are designed in M3 with the engine. T36 was settled in
-the data model (#160) and T51 in the guardrail policy (#159) after this
-document was first written.
+Threats with no complete mitigation in the design today: **T6 and T54**,
+both designed in M3 with the engine. Three were settled after this document
+was first written: T36 in the data model (#160), T39 in ADR 0011 (#161) and
+T51 in the guardrail policy (#159).
 
 ## 9. What this document does not establish
 

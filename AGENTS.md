@@ -154,6 +154,7 @@ it; the ADR is the authority, and this table is a summary.
 | LLM access | A thin `LlmClient` interface owned by this project | 0005 | One real provider adapter plus a deterministic fake for tests |
 | Business data for the model | Structured profile in the prompt, tools for live data, no vector search | 0006 | |
 | Guardrails | Code first, in layers; no second model at run time | 0007 | |
+| Operator access | Commands run on the server, each recorded in an insert-only log; no operator route | 0011 | One operator in v1.0 |
 | Packaging | Docker and docker-compose | | `docker compose up` must give a working local stack |
 | CI/CD | GitHub Actions | | See section 8 |
 | Infrastructure | Infrastructure-as-code for one target | 0009, proposed | Target chosen by the human |
