@@ -6,6 +6,7 @@
 .PHONY: setup check format lint typecheck test selftest commitlint
 
 setup:
+	sh tools/git-identity.sh set
 	pnpm install --frozen-lockfile
 
 # lint covers formatting, lint rules (warnings fail) and import order.
@@ -26,6 +27,8 @@ test:
 selftest:
 	pnpm run selftest
 
-# Lints every commit on this branch that is not on origin/main.
+# Lints every commit on this branch that is not on origin/main, and checks
+# that each is authored under the maintainer's identity.
 commitlint:
 	pnpm run commitlint
+	sh tools/git-identity.sh check

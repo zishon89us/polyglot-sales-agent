@@ -123,16 +123,17 @@ M0 Inception met its exit criteria on 2026-11-16; see
   self-test that runs the real checks on deliberately wrong files. The
   first independent code review found 20 defects, two High: the self-test
   did not exercise the project's own configuration, and one commit did not
-  pass on its own. Both are fixed; the report is in the pull request. The maintainer's
-  two questions (commit identity, squash or merge) are unanswered; work
-  continues as before on both.
+  pass on its own. Both are fixed; the report is in the pull request.
+- 2026-11-17 — The maintainer decided that commits are authored under the
+  maintainer's identity, with the agent as co-author. `make setup` sets it,
+  `make check` enforces it, and `AGENTS.md` section 2 records it. Earlier
+  commits are not rewritten.
 
 ## Next
 
 1. Maintainer reviews and merges U1 (#262).
 2. M2 unit U2: the CI pipeline with the document checks (#263).
-3. Still open for the maintainer: whose git identity commits carry, and
-   squash or merge commits (#7, OQ-11).
+3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
    each channel assumption re-read in full (threat model A7).

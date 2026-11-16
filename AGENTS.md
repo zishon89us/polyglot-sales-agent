@@ -79,7 +79,7 @@ find a change that does what its message says.
 ### How you work
 
 1. Start every session by reading `AGENTS.md`, `docs/STATUS.md` and the open
-   issues for the current milestone.
+   issues for the current milestone, and by running `make setup`.
 2. Pick one issue. Create a branch for it. Write or update the tests first
    where practical.
 3. Make the change, run the full local check (`make check`), and open a pull
@@ -107,6 +107,13 @@ find a change that does what its message says.
 - Keep the AI attribution trailer your environment adds to commits and pull
   requests. State plainly in the README that the project was built by a human
   directing an AI agent, and describe who did what.
+- **Commits are authored under the maintainer's identity**, with the agent
+  named in the `Co-Authored-By` trailer. The maintainer decided this on
+  2026-11-17. Run `make setup` at the start of every session, before the
+  first commit: it sets the identity for the clone from
+  `tools/git-identity.sh`. `make check` fails if a commit on the branch has
+  another author. Commits made before that date are authored as "Claude"
+  and are not rewritten, because that would mean force-pushing `main`.
 - If a check fails, fix the cause. Never skip, delete or weaken a test or an
   eval threshold to get a green build; if a threshold is wrong, change it in
   its own pull request with the reasoning.

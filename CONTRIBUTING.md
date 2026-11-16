@@ -48,7 +48,7 @@ tool for a contribution, say so in the pull request.
 You need Node.js 22.12 or later and pnpm 10 (`corepack enable` provides it).
 
 ```sh
-make setup   # install the locked dependencies
+make setup   # set the commit identity, install the locked dependencies
 make check   # lint and format, type check, tests, self-test, commit messages
 ```
 
