@@ -3,12 +3,15 @@
 # Hardening (issue #163):
 #   - every action is pinned to a commit, with the release it was read from;
 #   - the workflow token can only read the repository;
-#   - no secret is used, so a run from a fork sees none;
+#   - no repository secret is used, so a run from a fork sees none. The
+#     secret scan is given the run's own read-only token;
 #   - dependencies install from the lockfile and fail if it would change.
 name: CI
 
 on:
   pull_request:
+    # `edited` so that a changed title is linted again.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -17,7 +20,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a run on main: every merge must be checked.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -36,7 +40,8 @@ jobs:
         with:
           # On a pull request, check out its head, not GitHub's merge commit:
           # the commit lint and the author check are about the branch's own
-          # commits.
+          # commits. So CI tests the branch as pushed, not the result of
+          # merging it; a branch behind main must be updated before merging.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
@@ -64,6 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1

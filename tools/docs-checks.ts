@@ -72,7 +72,7 @@ function markdownFiles(root: string, dir: string, skip: string[]): string[] {
   const found: string[] = [];
   for (const name of readdirSync(join(root, dir))) {
     const path = dir === "." ? name : `${dir}/${name}`;
-    if (skip.includes(path) || name === "node_modules" || name.startsWith(".")) {
+    if (skip.includes(path) || name === "node_modules" || name === ".git") {
       continue;
     }
     if (statSync(join(root, path)).isDirectory()) {
@@ -85,6 +85,22 @@ function markdownFiles(root: string, dir: string, skip: string[]): string[] {
 }
 
 /**
+ * The destinations of inline links, `[text](dest)`, `[text](<dest with spaces>)`
+ * and `[text](dest "title")`, and of reference definitions, `[label]: dest`.
+ * Not handled: HTML anchors, and code spans or fences other than triple backticks.
+ */
+export function linkDestinations(text: string): string[] {
+  const found: string[] = [];
+  for (const match of text.matchAll(/\]\(\s*(?:<([^>]*)>|([^)\s]+))(?:\s+"[^"]*")?\s*\)/g)) {
+    found.push((match[1] ?? match[2]) as string);
+  }
+  for (const match of text.matchAll(/^\s{0,3}\[[^\]]+\]:\s*(?:<([^>]*)>|(\S+))/gm)) {
+    found.push((match[1] ?? match[2]) as string);
+  }
+  return found;
+}
+
+/**
  * Every relative link in a Markdown file points at a file that exists.
  * Review reports are skipped: they are kept as received and quote paths freely.
  */
@@ -92,9 +108,9 @@ export function checkLinks(root: string): string[] {
   const problems: string[] = [];
   for (const file of markdownFiles(root, ".", ["docs/reviews"])) {
     const text = read(root, file).replace(/```[\s\S]*?```/g, "");
-    for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) {
-      const target = (match[1] as string).split("#")[0] as string;
-      if (target === "" || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
+    for (const destination of linkDestinations(text)) {
+      const target = (destination.split("#")[0] as string).split("?")[0] as string;
+      if (target === "" || /^([a-z][a-z0-9+.-]*:\/\/|mailto:)/i.test(target)) {
         continue;
       }
       const resolved = resolve(root, dirname(file), target);
