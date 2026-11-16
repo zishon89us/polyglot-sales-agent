@@ -2,7 +2,7 @@
 
 Status: revised after the independent Gate 1 review · Phase 1 (requirements) · Issues #3, #46, #61
 
-Version 1.0 has 36 stories with 192 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
+Version 1.0 has 36 stories with 203 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
 
 - Personas are in [`personas.md`](personas.md).
 - Every term, metric, setting and default used here is defined in [`glossary.md`](glossary.md). Words such as *session*, *supported language*, *business-initiated message*, *grounded fact*, *fallback message* and *business hours* have the meanings given there.
@@ -65,9 +65,11 @@ As an end customer, I want my message to be received even if the channel redeliv
 2. **Given** a validly signed webhook carrying a message ID not seen before, **when** it is received, **then** HTTP 200 is returned within the target of NFR-P1.
 3. **Given** a validly signed webhook carrying a message ID already stored, **when** it is received, **then** HTTP 200 is returned and the message is not processed again, however many times it is redelivered.
 4. **Given** a webhook with a missing or invalid signature, **when** it is received, **then** HTTP 401 is returned and nothing is stored or queued.
-5. **Given** a validly signed message for a number that maps to no tenant, or to a tenant that is not answering (see the glossary), **when** it is received, **then** HTTP 200 is returned, the event is stored as unroutable, and no reply is sent.
-6. **Given** a tenant that stops answering because its channel credentials fail, **when** the failure is detected, **then** one email is sent to the tenant's notification address and one to the operator's alert address.
-7. **Given** a worker that stops while processing a queued message, **when** it restarts, **then** the message is processed and exactly one reply is sent.
+5. **Given** a validly signed message for a number that maps to no tenant, **when** it is received, **then** HTTP 200 is returned, the event is stored as unroutable, and no reply is sent.
+6. **Given** a validly signed message for a tenant that is not answering (see the glossary), **when** it is received, **then** HTTP 200 is returned, the message is stored in its conversation marked `received-while-not-answering`, and no reply is sent; if the session is handed over it also joins the waiting session (US-C14).
+7. **Given** messages marked `received-while-not-answering`, **when** the tenant is answering again, **then** the assistant does not answer them, and their conversations are listed in the dashboard as unanswered.
+8. **Given** a tenant that stops answering because its channel credentials fail, **when** the failure is detected, **then** one email is sent to the tenant's notification address and one to the operator's alert address.
+9. **Given** a worker that stops while processing a queued message, **when** it restarts, **then** the message is processed and exactly one reply is sent.
 
 ### US-C2 — Keep each business's data separate
 
@@ -97,15 +99,18 @@ Persona P1 · Milestone M3 · Issue [#13](https://github.com/zishon89us/polyglot
 As a business owner, I want the assistant to state grounded facts only from my data, so that customers are never told something untrue about my business.
 
 1. **Given** a grounded fact that exists in the tenant's data, **when** a customer asks for it, **then** the reply states it.
-2. **Given** a reply that asserts a price, or the date and time of a slot or booking, **when** the model produces it, **then** the model also returns one claim per asserted value, naming the service, slot or booking it is about and the data item or tool result it came from.
+2. **Given** a reply that asserts a grounded fact containing a currency amount, a clock time or a calendar date, **when** the model produces it, **then** the model also returns one claim per asserted value, giving its kind (price, slot or booking time, opening hours, service detail, policy, or the contact's booking) and naming the stored item or tool result it came from.
 3. **Given** a claim about a price, **when** the output guardrail runs, **then** it passes only if the value equals the current stored price of the named service.
 4. **Given** a claim about a slot or booking time, **when** the output guardrail runs, **then** it passes only if the value equals the time in the named tool result and that result is no more than 10 minutes old.
-5. **Given** a currency amount, clock time or calendar date in the reply text, **when** the output guardrail runs, **then** it passes only if it is covered by a claim that passed, or the same value appears in the customer's own messages in this session; relative words such as "tomorrow" and durations are not checked by this rule.
-6. **Given** a reply that states a total or any other value computed from several prices, **when** the output guardrail runs, **then** it does not pass, because v1.0 states individual prices only.
-7. **Given** a reply in which any claim or value does not pass, **when** the output guardrail runs, **then** the reply is not sent and the fallback message is sent in its place.
-8. **Given** the eval cases in which a customer states a wrong price or time and asks the assistant to confirm it, **when** they are run, **then** the assistant corrects the value in every case (NFR-A2); this case cannot be caught by the runtime check, because the wrong value is in the customer's own message.
-9. **Given** a grounded fact that does not exist in the tenant's data, **when** a customer asks for it, **then** the assistant says it does not have that information and offers a person.
-10. **Given** the eval dataset for grounding, **when** it is run, **then** statements about service details, opening hours and policies meet the grounding threshold set in the eval plan (not yet testable; see open question OQ-6).
+5. **Given** a claim about opening hours, **when** the output guardrail runs, **then** it passes only if the value equals the stored opening time or closing time for the named weekday.
+6. **Given** a claim about a policy or a service detail, **when** the output guardrail runs, **then** it passes only if the value appears, after normalising numerals and formats, in the stored text of the named policy or service.
+7. **Given** a correct reply that states the stored opening hours for a day, **when** the output guardrail runs, **then** it passes and is sent.
+8. **Given** a currency amount, clock time or calendar date in the reply text, **when** the output guardrail runs, **then** it passes only if it is covered by a claim that passed, or the same value appears in the customer's own messages in this session; relative words such as "tomorrow" and durations are not checked by this rule.
+9. **Given** a reply that states a total or any other value computed from several prices, **when** the output guardrail runs, **then** it does not pass, because v1.0 states individual prices only.
+10. **Given** a reply in which any claim or value does not pass, **when** the output guardrail runs, **then** the reply is not sent and the fallback message is sent in its place.
+11. **Given** the eval cases in which a customer states a wrong price or time and asks the assistant to confirm it, **when** they are run, **then** the assistant corrects the value in every case (NFR-A2); this case cannot be caught by the runtime check, because the wrong value is in the customer's own message.
+12. **Given** a grounded fact that does not exist in the tenant's data, **when** a customer asks for it, **then** the assistant says it does not have that information and offers a person.
+13. **Given** the eval dataset for grounding, **when** it is run, **then** statements about service details, opening hours and policies meet the grounding threshold set in the eval plan (not yet testable; see open question OQ-6).
 
 ### US-C5 — Tell customers they are talking to an assistant
 
@@ -222,13 +227,19 @@ As a staff agent, I want to be notified when a session is handed over, so that t
 1. **Given** a session is handed over, **when** the handover is recorded, **then** it appears in the dashboard waiting list with its reason and waiting time.
 2. **Given** a session is handed over, **when** the handover is recorded, **then** an email is sent to the tenant's notification address, with at most one email per tenant in any 5 minutes, listing all sessions waiting.
 3. **Given** the notification email fails to send, **when** 3 attempts have failed, **then** the failure is logged and the waiting list remains the record of what is waiting.
-4. **Given** a handed-over session with no staff reply within the handover escalation time, **when** that time passes inside business hours, **then** it is marked overdue at the top of the waiting list and the customer receives one holding message with the tenant's support contact; no further automatic message is sent in that session.
-5. **Given** a session handed over outside business hours, **when** the escalation time is counted, **then** it is counted from the next opening time.
-6. **Given** the customer writes again while the session is handed over, **when** the message arrives, **then** the assistant does not reply and the message is added to the waiting session.
-7. **Given** an unanswered handover whose session has ended, **when** staff open the waiting list, **then** it is still listed, marked unanswered, with the date of the request.
-8. **Given** an unanswered handover whose reply window has closed, **when** staff choose to follow up, **then** the `handover_followup` template is sent as a service notice, inviting the customer to reply so that a person can answer.
-9. **Given** an unanswered handover, **when** staff close it without contacting the customer, **then** they must choose a reason, and it is stored with outcome `closed-unanswered`.
-10. **Given** any handover, **when** it ends, **then** it is stored with one outcome: `answered`, `handed-back` or `closed-unanswered`.
+4. **Given** a handed-over session with no staff reply within the handover escalation time, **when** that time passes inside business hours, **then** it is marked overdue at the top of the waiting list.
+5. **Given** a handover that becomes overdue while the contact's reply window is open, **when** it is marked overdue, **then** the customer receives one holding message with the tenant's support contact, and no further automatic message is sent for that handover.
+6. **Given** a handover that becomes overdue after the contact's reply window has closed, **when** it is marked overdue, **then** no holding message is sent.
+7. **Given** a session handed over outside business hours, **when** the escalation time is counted, **then** it is counted from the next opening time.
+8. **Given** the customer writes again while the session is handed over, **when** the message arrives, **then** the assistant does not reply and the message is added to the waiting session.
+9. **Given** an unanswered handover whose session has ended, **when** staff open the waiting list, **then** it is still listed, marked unanswered, with the date of the request.
+10. **Given** an unanswered handover whose reply window has closed, **when** staff choose to follow up, **then** the `handover_followup` template is sent once as a service notice, in the language chosen under US-C9 criterion 2, inviting the customer to reply so that a person can answer; the handover stays open and unanswered.
+11. **Given** an unanswered handover for which `handover_followup` has already been sent, or for which no approved `handover_followup` template exists, **when** staff open it, **then** the follow-up action is unavailable and the dashboard says why.
+12. **Given** a contact with an unanswered handover for which `handover_followup` was sent, **when** they send a message, **then** the session that message belongs to is handed over under that same handover, the customer is told a person will reply, staff are notified as in criteria 1 and 2, and the assistant does not answer.
+13. **Given** a contact with an unanswered handover for which no follow-up was sent, **when** they send a message in a new session, **then** the assistant answers it, and the old handover stays listed as unanswered.
+14. **Given** an unanswered handover, **when** a staff user sends a staff message to that contact from it, in any session, **then** the handover is answered.
+15. **Given** an unanswered handover, **when** staff close it, or 7 days pass after `handover_followup` was sent with no message from the contact, **then** it ends with outcome `closed-unanswered` and the reason: one chosen by staff, or `no-response`.
+16. **Given** any handover, **when** it ends, **then** it is stored with exactly one outcome: `handed-back`, `answered` or `closed-unanswered`.
 
 ### US-C15 — Stay usable when the AI provider fails
 
@@ -327,8 +338,8 @@ As an end customer, I want a reminder before my appointment that I can answer wi
 
 1. **Given** a booking made at least the reminder lead time before its start, for a contact with consent, **when** the lead time before the start is reached, **then** one reminder is sent under US-C9, with Confirm, Reschedule and Cancel buttons.
 2. **Given** a booking made less than the reminder lead time before its start, **when** it is created, **then** no reminder is scheduled.
-3. **Given** a reminder whose due time falls in quiet hours, **when** it is scheduled, **then** it is scheduled one minute before those quiet hours begin, if that is later than the booking's creation time.
-4. **Given** a reminder whose due time falls in quiet hours that began before the booking was created, **when** it is scheduled, **then** it is scheduled for the end of those quiet hours, if that is at least 60 minutes before the appointment; otherwise it is withheld with reason `too-late`.
+3. **Given** a reminder whose due time falls in quiet hours, when one minute before those quiet hours begin is still in the future at the moment of scheduling, **when** it is scheduled or rescheduled, **then** it is set for one minute before those quiet hours begin.
+4. **Given** a reminder whose due time falls in quiet hours, in every other case, **when** it is scheduled or rescheduled, **then** it is set for the end of those quiet hours if that is at least 60 minutes before the appointment, and is otherwise withheld with reason `too-late`.
 5. **Given** a reminder was sent, **when** the customer taps Confirm, **then** the booking is marked confirmed.
 6. **Given** a reminder was sent, **when** the customer taps Reschedule or Cancel, **then** the assistant continues under US-B4.
 7. **Given** a reminder was sent, **when** the customer does not answer, **then** the booking is unchanged and no second reminder is sent.
@@ -500,7 +511,7 @@ As a staff agent, I want to see upcoming bookings and any message that was not s
 
 1. **Given** staff, **when** they open bookings, **then** future bookings are listed by start time with service, status and whether confirmed.
 2. **Given** staff, **when** they cancel or move a booking, **then** the booking changes, capacity is updated, and a business-initiated notice to the customer is created.
-3. **Given** a booking-change notice created during quiet hours, **when** it is scheduled, **then** it is sent at once if the affected appointment starts within 12 hours, and otherwise at the end of quiet hours.
+3. **Given** a booking-change notice created during quiet hours, **when** it is scheduled, **then** it is sent at once if the booking's start time, or for a moved booking the earlier of its old and new start times, is within 12 hours, and otherwise at the end of quiet hours.
 4. **Given** a business-initiated message that was withheld or failed, **when** staff open the withheld-messages list, **then** it is listed with the contact, what it was for and the reason.
 
 ## Criteria delivered later than their story
