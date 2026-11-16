@@ -185,3 +185,128 @@ Locations use the story or NFR ID, or the document heading. "AC" means acceptanc
 - Any statement about the real channel's rules (reply-window length, template approval, what a template may contain, pricing) and about data-protection law in Saudi Arabia: not verifiable without sources, and the documents rightly do not assert details. Feasibility of an itemised order confirmation as a template is therefore "cannot judge".
 - Whether the EARS and ISO/IEC/IEEE 29148 standards were read in current form and the link and date recorded, as `AGENTS.md` section 11 requires: no such record appears in the files reviewed; it may be in a file outside scope.
 - Git history, pull requests, status log and retros: excluded by instruction, so nothing is said about how the documents were produced.
+
+---
+
+# Author's response
+
+Everything above this line is the reviewer's report, committed unedited in
+`dc9fedf`. Everything below is written by the authoring agent.
+
+Date: 2026-11-16 · Issue #58
+
+## Outcome
+
+**All 44 findings are accepted; none is rejected.** I checked each against the
+documents and found no finding that misreads them. Gate 1 is **not passed**:
+nine High findings are open, and no requirement has been changed yet.
+
+This review found far more than my own review earlier the same day (12
+findings), including a contradiction my review introduced: R1, where the
+glossary definition I wrote would let a reminder reach a customer who had
+just opted out. That is the argument for independent review.
+
+Fixes are not in this pull request, for two reasons. Several High findings
+need the maintainer's decision first, and the fixes interact, so writing them
+once after the decisions avoids rewriting the same criteria twice. The fixes
+are tracked in #61.
+
+## Notes on the review itself
+
+- The reviewer reported that after it finished writing, its environment
+  placed the full text of `AGENTS.md` in its context, and that it did not
+  revise the report afterwards. Its findings cite only sections 1 and 11.
+- The reviewer could not confirm that EARS and ISO/IEC/IEEE 29148 were read
+  from their current published form. They were not. `AGENTS.md` section 11
+  requires this before a standard is first applied; it is added to #61.
+- Excluding my own review document made three glossary entries unjudgeable
+  (R36). Open questions now move into the reviewed set.
+
+## Decisions needed from the maintainer
+
+Each has a recommendation. D1 to D3 change scope or depend on outside facts,
+so they wait for an answer. For D4 to D8 the recommendation will be applied
+in #61 unless the maintainer says otherwise.
+
+| ID | Findings | Decision | Recommendation |
+| --- | --- | --- | --- |
+| D1 | R6, R30, R12 | How does the cash-on-delivery result reach the owner, and how does the product learn an order shipped or was refused? | A dashboard order list with status and export, plus staff marks for shipped, delivered and refused. A store event for outcomes can follow later. This replaces the earlier question Q1. |
+| D2 | R9 | How are owner accounts created? | Invitation only in the MVP: an operator creates the tenant and invites the owner by email. No open sign-up, which removes a class of abuse. |
+| D3 | R4, R11 | Which languages must business-initiated messages support at launch, given templates need approval? | Cannot be decided until the channel's current template rules are verified in #37. Interim: tenant default language only. |
+| D4 | R2, R3 | When does a handover end? | When staff hand back, or automatically when a new session starts. Add business hours and an out-of-hours message. A provider outage puts the tenant in a degraded state with one notification, not one handover per conversation. |
+| D5 | R7, R32 | What does deletion do? | Delete messages and personal fields; cancel future bookings and free their slots; cancel open orders' pending messages; keep only a hashed suppression record so an opt-out survives deletion; traces hold no message text or phone number. Needs a lawyer's view before a pilot. |
+| D6 | R14 | What is booking capacity? | A whole-number capacity per service and time slot, default 1. No staff or room scheduling in the MVP. |
+| D7 | R18 | One pack per tenant, or both? | Exactly one pack per tenant in the MVP. |
+| D8 | R17, R42 | Is conversation history translated for staff, and what language is the dashboard in? | No translation in the MVP; dashboard in English. Record both as assumptions to validate, and correct persona P3. |
+
+## Scope warning
+
+Fixing these findings properly adds an estimated 8 to 10 stories to the 32
+that exist, on top of the 9 added earlier today. That estimate is mine and is
+rough. The maintainer should decide whether the MVP still holds two packs, or
+whether v1.0.0 ships the core, the dashboard and the `booking` pack, with
+`cod-confirm` following as v1.1. Two of the nine High findings (R5, R6)
+concern only `cod-confirm`, and R4 weighs most heavily on it.
+
+## Response to each finding
+
+"Decision" means the fix waits for the decision named. "Direct" means the fix
+needs no decision and will be made in #61.
+
+| ID | Severity | Response | Fix |
+| --- | --- | --- | --- |
+| R1 | High | Accepted. The definition I wrote is wrong and contradicts US-B3 and NFR-V1. | Direct: define by who starts the exchange; the window decides only free-form versus template. |
+| R2 | High | Accepted. | Decision D4. |
+| R3 | High | Accepted. Provider outage is also missing from the risk register. | Decision D4; new story; new risk. |
+| R4 | High | Accepted. | Decision D3; new story for template provisioning; a due message that is not sent is logged and flagged. |
+| R5 | High | Accepted. | Direct: specify the `order.created` payload and validation; flag any order whose confirmation is suppressed or fails. |
+| R6 | High | Accepted. Persona P2's main need had no story. | Decision D1. |
+| R7 | High | Accepted. | Decision D5; add a criterion for a deletion request made in chat. |
+| R8 | High | Accepted. I defined the metric in the glossary and gave no story the job of producing its data. | Direct: criteria for classifying and storing inquiry and task completion, with eval cases; add containment to US-D4. |
+| R9 | High | Accepted. | Decision D2; criteria for invitation, recovery, session lifetime and webhook secret provisioning. |
+| R10 | Medium | Accepted. | Direct: re-sequence milestones or split the affected criteria by milestone. |
+| R11 | Medium | Accepted. | Decision D3. |
+| R12 | Medium | Accepted. | Decision D1; add an order state model. |
+| R13 | Medium | Accepted. | Direct: reminder lifecycle on reschedule, cancel and each reply including none. |
+| R14 | Medium | Accepted. | Decision D6; add the false branches, booking horizon, per-contact limit and service duration. |
+| R15 | Medium | Accepted. | Direct: staff booking list, cancel and move; conflicts with existing bookings; staff-recorded consent. |
+| R16 | Medium | Accepted. | Direct: conversations return to the waiting list; time bound; last owner cannot be removed. |
+| R17 | Medium | Accepted. | Direct for takeover cases; decision D8 for translation. |
+| R18 | Medium | Accepted. | Decision D7; new settings story with allowed ranges; collect the notification address at setup. |
+| R19 | Medium | Accepted. | Direct: "any supported language"; add a deterministic opt-out route that does not depend on the model. |
+| R20 | Medium | Accepted. | Direct: one list of grounded fact types everywhere; a match rule for numbers, dates and translated text. |
+| R21 | Medium | Accepted. | Direct: define the failure counter; the topic list is written with the guardrail policy (#44), and the criterion is marked not yet testable until then. |
+| R22 | Medium | Accepted. | Direct: fallback message content, languages and its own fallback. |
+| R23 | Medium | Accepted. | Direct: disclosure per session and on every kind of first outbound message. |
+| R24 | Medium | Accepted. | Direct: mixed batches and the unsupported-message counter. |
+| R25 | Medium | Accepted. | Direct: define retry versus replay with a number; one response per case; unknown-number case. |
+| R26 | Medium | Accepted. | Direct: send-failure criteria with retry numbers; define "sent". |
+| R27 | Medium | Accepted. | Direct: split US-C8 AC1; cover all untrusted text; per-contact rate limit and notification throttling. |
+| R28 | Medium | Accepted in part. Some values cannot honestly be set before code or a dataset exists. | Direct: give the number where one can be given; otherwise name the document, milestone and issue that sets it, and mark dependent criteria not yet testable. |
+| R29 | Medium | Accepted. | Direct: correct the glossary introduction and use "session" consistently. |
+| R30 | Medium | Accepted. | Decision D1. |
+| R31 | Medium | Accepted. | Direct: list every metric and the date-range selector in US-D4. |
+| R32 | Medium | Accepted. | Decision D5; list the required trace fields in a criterion. |
+| R33 | Medium | Accepted. | Direct: give each NFR-only behaviour a story or an engineering issue with a traceability row; back each risk mitigation with a requirement or reword the risk. |
+| R34 | Medium | Accepted. | Direct: replies to an opted-out contact, opting back in, staff visibility of withheld messages. |
+| R35 | Medium | Accepted. | Direct: add the else-branch and the times to each criterion listed. |
+| R36 | Medium | Accepted. | Direct: move open questions into `docs/requirements/open-questions.md`, inside the reviewed set, with an owner for each. |
+| R37 | Low | Accepted. | Direct: "business owner" for core and dashboard stories. |
+| R38 | Low | Accepted. | Direct: reorder. |
+| R39 | Low | Accepted. | Direct: split the bundled criteria; list validation rules. |
+| R40 | Low | Accepted. | Direct: mark the problem statement and competitor description as assumptions. |
+| R41 | Low | Accepted. | Direct: reword the two principles. |
+| R42 | Low | Accepted. | Decision D8. |
+| R43 | Low | Accepted. | Direct: name the screens, tool severity level and throttling profile. |
+| R44 | Low | Accepted. | Direct: reference quiet hours from the stories; add the late-message rule; keep each number in one place. |
+
+## What happens next
+
+1. The maintainer answers D1 to D3 and the scope question, and objects to any
+   of D4 to D8 they disagree with.
+2. #37 (verifying the channel's rules from official sources) proceeds now. It
+   is research, not design, and D3 depends on it.
+3. #61 applies the fixes to the requirements and to the story issues.
+4. A second independent review checks the fixed set. Gate 1 passes only when
+   that review has no open High finding.
+5. The remaining M1 design issues (#38 to #44) stay blocked until then.
