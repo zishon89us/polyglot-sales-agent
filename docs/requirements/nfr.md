@@ -8,6 +8,8 @@ of milestone M2, when the walking skeleton gives real numbers, and change them
 only through a pull request that explains why.
 
 Terms, metrics and fixed values are defined in [`glossary.md`](glossary.md).
+State and transition rules are in
+[`docs/design/state-machines.md`](../design/state-machines.md).
 A target that cannot be set yet names the open question in
 [`open-questions.md`](open-questions.md) that will set it, and is marked
 **not yet testable**.

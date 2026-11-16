@@ -21,7 +21,7 @@ number in this file is the authority.
 | Reply | An assistant reply, a system reply or a staff message, as classed below. "First reply" in a metric means the earliest of these in the session. |
 | Reply window | The 24 hours after a contact's most recent inbound message or call, during which the channel allows free-form messages. It decides only whether a message may be free-form or must be a template (US-C9). Source: `docs/compliance.md`. |
 | Template | A message with fixed, pre-approved wording and variable slots, required by the channel outside the reply window. Each language version is approved separately. |
-| Handover | A request for staff attention about one contact. It is created in a session, and while a session is handed over the assistant does not reply in it. A handover is **answered** once a staff user sends a staff message to the contact from it. It ends with exactly one outcome: `handed-back` (staff hand it back after answering), `answered` (its session ends after staff answered), or `closed-unanswered` (staff close it, or 7 days pass after `handover_followup` with no message from the contact). An unanswered handover does not end when its session ends: it stays on the waiting list until one of those happens. A new session starts handed over in one case only: the contact writes after staff sent `handover_followup` for an unanswered handover, and that session then belongs to the same handover. In every other case the assistant answers the contact's next session, even while an old handover is still listed as unanswered. |
+| Handover | A request for staff attention about one contact. A contact has at most one open handover. While a handover is attached to a session and waiting or in progress, that session is handed over and the assistant does not reply in it. A handover is **answered** once a staff user sends a staff message from it. It ends with exactly one outcome: `handed-back`, `answered` or `closed-unanswered`, the last with a stored reason (one chosen by staff, or `handed-back-unanswered`, `no-response`, `expired`, `contact-deleted`). An unanswered handover does not end when its session ends. Its states and every transition are defined in `docs/design/state-machines.md` section 2, which is the authority. |
 | Handover reason | One of `requested`, `repeated-failure`, `sensitive-topic`, `data-request`, `limit`, `unsupported-content`, `late-change`, `provider-failure`, `staff`. |
 | Business hours | The weekly hours in which the tenant's staff answer handovers, set at setup. Distinct from opening hours, which are when appointments can be booked. |
 | Quiet hours | A daily period in tenant time during which no business-initiated message is sent, except as the rules under "Quiet hours rules" below allow. The start time is inside quiet hours and the end time is outside them: with 22:00 to 08:00, a message may be sent at 21:59 and at 08:00, not at 22:00. |
@@ -38,7 +38,7 @@ number in this file is the authority.
 | Message status | `sent`: accepted by the channel API. `delivered`, `read`: reported by the channel. `failed`: rejected, or reported failed, with the channel's error code. `withheld`: a due business-initiated message that was not attempted, with a reason. |
 | Withheld reason | One of `no-consent`, `opted-out`, `no-template`, `template-unavailable`, `limit-reached`, `too-late`. A message delayed by quiet hours is held, not withheld; it becomes `too-late` only under the rules below. |
 | Degraded mode | The service state in which the model provider is treated as unavailable (US-C15). |
-| Awaiting retry | A mark on a session whose latest customer message could not be answered because the model provider failed, or arrived during degraded mode. It is cleared when the answer is sent, when the session is handed over, or when the message is 15 minutes old, at which point the session is handed over with reason `provider-failure` (US-C15). |
+| Awaiting retry | A mark on a session whose latest customer message could not be answered because the model provider failed, or arrived during degraded mode. It is cleared when the answer is sent, when the session is handed over or ends, or when the message is 15 minutes old, at which point the session is handed over with reason `provider-failure` (US-C15; `docs/design/state-machines.md` section 8). |
 
 ## Message classes
 
@@ -57,9 +57,9 @@ only whether the message may be free-form or must be a template (US-C9).
 
 | Message | Rule when its due time falls in quiet hours |
 | --- | --- |
-| Appointment reminder | Set for one minute before those quiet hours begin, if that moment is still in the future when the reminder is scheduled or rescheduled. Otherwise set for the end of those quiet hours, if that is at least 60 minutes before the appointment starts. Otherwise withheld as `too-late` (US-B3). |
+| Appointment reminder | Set for one minute before those quiet hours begin, if that moment is still in the future when the reminder is scheduled or rescheduled. Otherwise set for the end of those quiet hours, if that is at least 60 minutes before the appointment starts. Otherwise withheld as `too-late`. A reminder is never sent later than 60 minutes before its appointment, however it came to be late. The full rule, with worked examples, is in `docs/design/state-machines.md` section 5 (US-B3). |
 | Booking-change notice | Sent at once if the booking's start time, or for a moved booking the earlier of its old and new start times, is within 12 hours. Otherwise sent at the end of quiet hours (US-D12). |
-| A message queued for the channel's daily limit | When capacity returns during quiet hours, it is held to the end of quiet hours, and withheld as `too-late` if the event it concerns would by then have passed (US-C9). |
+| A message queued for the channel's daily limit | When capacity returns, the message's own rule in this table is applied as if it had just become due (US-C9). |
 | `handover_followup` | Held to the end of quiet hours. |
 
 ## Metrics
@@ -132,6 +132,9 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Send attempts | 3 attempts, waits of 2 and 8 seconds | US-C18 |
 | Wait for delivery before the next message | 10 seconds | US-C18, NFR-R7 |
 | Unanswered follow-up expiry | 7 days after `handover_followup` | US-C14 |
+| Detached handover expiry | 14 days after its session ended | US-C14 |
+| Handover escalation clock | Counts only while the tenant is inside business hours | US-C14 |
+| Credential check that cannot complete | No state change; retried within the hour | US-D6 |
 | Notification email throttle | 1 email per tenant per 5 minutes; 3 send attempts | US-C14 |
 | Sign-in lockout | 5 failures in 15 minutes, then 15 minutes | US-D1, NFR-S6 |
 | Dashboard session | 60 minutes idle, 12 hours total | US-D1 |
