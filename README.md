@@ -114,9 +114,11 @@ been built or run. None will appear here until they are real.
 
 ## How this project is built
 
-An AI coding agent (Claude) writes the documents and, later, the code. A
-human maintainer sets the scope, makes the decisions reserved for a person,
-and reviews and merges every pull request. The working agreement the agent
+An AI coding agent (Claude) writes the documents and the code. A human
+maintainer sets the scope, makes the decisions reserved for a person, and
+reviews and merges every pull request. Commits are authored under the
+maintainer's name, as the person responsible for them, and each one names
+the agent that wrote it in a `Co-Authored-By` line. The working agreement the agent
 follows is [`AGENTS.md`](AGENTS.md).
 
 At each phase gate the work is reviewed by a separate AI agent that has no
