@@ -55,17 +55,20 @@ M0 Inception met its exit criteria on 2026-11-16; see
   open. It also showed that the document overstated the handover model,
   which checks invariant H2 only; corrected. Remaining findings tracked as
   #148 to #150.
+- 2026-11-16 — Pull request #127 merged by the maintainer. First decision
+  records written in MADR 4.0.0 form (#38): seven decided, two proposed for
+  the maintainer (hosting, model provider). ADR 0004 replaces Redis with a
+  jobs table in PostgreSQL; `AGENTS.md` section 3 updated to match.
 
 ## Next
 
-1. Maintainer merges pull request #127. Its second verification found no
-   High defect open.
-2. ADRs (#38), then architecture (#39), data model (#40), threat model (#42),
-   eval plan (#43), guardrail policy (#44) and API (#41). The output-check
-   findings #120 to #122 are settled in the guardrail policy.
-3. The remaining review findings (#73 to #117, #120 to #122, #125) are checked
-   against the state machines as design reaches each story.
-4. Gate 2: independent review of all design documents.
+1. Maintainer reviews and merges the first ADRs (#38).
+2. Architecture (#39), data model (#40), threat model (#42), eval plan (#43),
+   guardrail policy (#44) and API (#41). The output-check findings #120 to
+   #122 are settled in the guardrail policy.
+3. Open review findings are checked against the state machines and ADRs as
+   design reaches each story.
+4. Gate 2: independent review of all design documents together.
 
 ## Gate status
 
