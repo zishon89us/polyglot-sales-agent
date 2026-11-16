@@ -5,7 +5,7 @@ Living progress log. The agent updates this at the end of every session.
 ## Current milestone: M1 Design
 
 Exit criteria: design documents merged; open questions listed for the
-maintainer. Issues #37–#44.
+maintainer. Issues #37–#44, plus #58 and #61 for the requirements gate.
 
 M0 Inception met its exit criteria on 2026-11-16; see
 [`retros/m0-inception.md`](retros/m0-inception.md).
@@ -31,38 +31,60 @@ M0 Inception met its exit criteria on 2026-11-16; see
   9 stories added (32 in total, issues #47–#55), glossary added.
 - 2026-11-16 — Named standards and independent phase-gate review adopted,
   with checklists; merged as #60.
-- 2026-11-16 — First independent review run on the requirements (#58): 44
-  findings, 9 High, all accepted. Report and response opened as a pull
-  request. Fixes tracked in #61.
+- 2026-11-16 — First independent review of the requirements: 44 findings, 9
+  High, all accepted. Merged as #62.
+- 2026-11-16 — Channel rules and data-protection obligations researched from
+  official sources (#37); pull request #63.
+- 2026-11-16 — Positioning and v1.0 scope decided (ADR 0001). Requirements
+  rewritten to fix the review findings; story issues synced; opened as pull
+  request #72 for #61.
+- 2026-11-16 — Second independent review (52 findings, 8 High), two narrow
+  verification reviews, and their fixes, all in pull request #72. Gate 1
+  passed with 62 Medium and Low findings tracked as issues.
 
 ## Next
 
-1. #37 Verify channel rules and data-protection obligations from official
-   sources; write `docs/compliance.md`. Not blocked: it is research, and
-   decision D3 depends on it.
-2. #61 Fix the 44 findings of the independent requirements review, once the
-   maintainer has answered decisions D1 to D3 and the scope question.
-3. A second independent review of the fixed requirements.
+1. Maintainer merges pull request #72.
+2. M1 design starts with state machines for session, handover, booking,
+   reminder and outbound message (transition tables), resolving #118 and
+   #124 first, then the ADRs (#38) and the remaining design issues.
+3. The open review findings (#73 to #125) are resolved against those tables
+   as design reaches each story.
 
 ## Gate status
 
-**Gate 1 (requirements) is not passed.** The independent review found 44
-defects, 9 of them High; see
-[`reviews/2026-11-16-gate1-requirements.md`](reviews/2026-11-16-gate1-requirements.md).
-The M1 design issues #38 to #44 are blocked until a second review has no open
-High finding.
+**Gate 1 (requirements) is passed, on the route agreed with the maintainer**
+(`AGENTS.md` section 11): no High finding is open; Medium and Low findings
+are tracked as issues.
+
+| Review | Scope | High findings |
+| --- | --- | --- |
+| First independent review | Whole set | 9 |
+| Second independent review | Whole set, after fixes | 8 |
+| Verification | The 8 fixes | 2 new |
+| Second verification | The 2 fixes and 3 related | 0 |
+
+62 Medium and Low findings remain open. The last verdict rests on one
+judgment call: the verifier rated #118 Medium and called it the closest to
+High. Reports and responses are in `reviews/`. No human has yet reviewed the
+requirements in detail.
+
+## Scope
+
+Decided on 2026-11-16 (`adr/0001-positioning-and-v1-scope.md`): the project
+is a portfolio and reference implementation. Version 1.0 is the core engine,
+the dashboard and the `booking` pack, with 36 stories and 203 acceptance
+criteria, run against a mock channel. The `cod-confirm` pack is deferred to
+v1.1.
 
 ## Blocked on the maintainer
 
-- Decisions D1 to D3 and the MVP scope question in the author's response to
-  the independent review. D4 to D8 have recommendations that will be applied
-  unless the maintainer objects.
-- #6 Project board, private vulnerability reporting, and which pull requests
-  (if any) the agent may merge itself.
-- #7 Licence, product name, copyright holder, LLM provider, hosting target,
-  Meta developer app, commit identity. Needed before M2.
-- Squash merge or merge commits: practice and `AGENTS.md` differ (see the M0
-  retro).
+- Open questions with the maintainer as owner, in
+  `requirements/open-questions.md`. None blocks v1.0 on the mock channel
+  except OQ-9 (model provider) before M3 and OQ-11 (merge style) before M2.
+- #6 Project board and private vulnerability reporting.
+- #7 Copyright holder name, commit identity, and the accounts needed only
+  for live use.
 
 ## Not done yet
 

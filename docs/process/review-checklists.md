@@ -29,8 +29,10 @@ check and why.
 
 ## Gate 1 — Requirements
 
-Files: `docs/requirements/*.md`. Standards: EARS for requirement wording,
-ISO/IEC/IEEE 29148 for the qualities of a requirement set.
+Files: `docs/requirements/*.md` except dated `review-*.md` files, which are
+the author's own view. The quality characteristics below are those commonly
+attributed to ISO/IEC/IEEE 29148; that standard has not been read, so no
+conformance is claimed.
 
 **Each requirement or acceptance criterion is:**
 
@@ -56,6 +58,13 @@ ISO/IEC/IEEE 29148 for the qualities of a requirement set.
       row; every metric can be computed from data some story produces.
 - [ ] Honest: nothing is presented as measured, validated or verified that
       is not.
+- [ ] Robust to definitions: read each glossary definition literally and
+      check that no rule which depends on it can be escaped through its
+      wording. (Added after finding R1 of the first Gate 1 review.)
+- [ ] Producible: for every metric and every stored fact a document relies
+      on, some story's criterion creates the data.
+- [ ] Sequenced: no criterion depends on a story in a later milestone,
+      unless that is stated.
 
 **Walk these scenarios end to end and report where the documents run out:**
 
