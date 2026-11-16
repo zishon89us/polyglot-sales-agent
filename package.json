@@ -1,0 +1,27 @@
+{
+  "name": "polyglot-sales-agent",
+  "private": true,
+  "description": "Multilingual WhatsApp booking assistant. Reference implementation.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "format": "biome check --write .",
+    "lint": "biome ci --error-on-warnings .",
+    "typecheck": "tsc --project tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "selftest": "sh tools/selftest/run.sh",
+    "commitlint": "commitlint --from origin/main --to HEAD --verbose"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8",
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
