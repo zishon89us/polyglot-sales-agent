@@ -329,14 +329,11 @@ implements US-C13 criterion 3.
 
 ## 10. How the file was checked, and what is not done
 
-- **Linter.** Pull request #172 added `redocly.yaml` and reports that
-  `npx @redocly/cli lint docs/design/openapi.yaml` gives no errors and no
-  warnings, with the recommended rules and one rule turned off
-  (`no-server-example.com`, because the file lists only the local
-  development server). That run was made in a different session from the one
-  that wrote this document, which was not permitted to run a lint tool and
-  **has not repeated the run**. The lint becomes a CI step in M2, which is
-  where it is next verified.
+- **Linter.** `pnpm run lint:openapi` lints the file with the recommended
+  Redocly rules and one rule turned off (`no-server-example.com`, because
+  the file lists only the local development server). It is part of
+  `make check` and of CI since M2 unit U2. The file as regenerated for the
+  Gate 2 fixes passes it.
 - **Structural check.** `docs/design/tools/check_openapi.py` checks that
   every reference resolves, operation names are unique, path parameters
   match their paths, every operation has a success response, every route

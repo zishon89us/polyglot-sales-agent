@@ -131,6 +131,13 @@ vulnerabilities on that date.
 | Vitest | 5.1.0 | MIT | 2026-11-02 | Runs TypeScript and ES modules without a build step | Node's built-in test runner: no dependency, fewer features |
 | commitlint | 21.2.4 | MIT | 2026-10-18 | Enforces the commit format of `AGENTS.md` section 4 | A hand-written check |
 | @types/node | 22.20.5 | MIT | — | Types for the Node.js line above | — |
+| @redocly/cli | 2.79.0 | MIT | Added in unit U2 | Lints the OpenAPI file; the rule set was already in `redocly.yaml` | Spectral |
+
+CI actions, added in unit U2 and pinned to the commit each release tag
+pointed to on 2026-11-17: `actions/checkout` v7.0.1, `actions/setup-node`
+v7.1.0, `pnpm/action-setup` v6.1.1, `gitleaks/gitleaks-action` v3.0.0. Their
+documentation was not read; the inputs used are the long-standing ones, and
+the first CI run is the check that they still work.
 
 All are development dependencies; none ships in the product. Their 110
 transitive packages are under MIT, ISC, Apache-2.0, BSD-3-Clause,

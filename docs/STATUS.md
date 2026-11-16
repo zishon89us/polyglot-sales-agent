@@ -128,11 +128,18 @@ M0 Inception met its exit criteria on 2026-11-16; see
   maintainer's identity, with the agent as co-author. `make identity` sets it,
   `make check` enforces it on the agent's commits, and `AGENTS.md` section 2 records it. Earlier
   commits are not rewritten.
+- 2026-11-17 — U1 merged as #274. M2 unit U2 (#263): a CI workflow that
+  runs `make check` on Node.js 22 and 26, a dependency audit and a secret
+  scan, with actions pinned to commits and a read-only token. Document
+  checks added to `make check`: stories against the traceability table,
+  decision-record sections, relative links, and the OpenAPI lint, which now
+  runs in this session and passes. First real tests: 12, for the document
+  checks.
 
 ## Next
 
-1. Maintainer reviews and merges U1 (#262).
-2. M2 unit U2: the CI pipeline with the document checks (#263).
+1. Maintainer reviews and merges U2 (#263).
+2. M2 unit U3: one source for shared names (#264).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
