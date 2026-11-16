@@ -2,7 +2,7 @@
   "name": "@polyglot-sales-agent/core",
   "version": "0.0.0",
   "private": true,
-  "description": "Rules common to every pack, as pure code. No I/O. Nothing about bookings (ADR 0012).",
+  "description": "Rules common to every pack, as pure code. No I/O. One booking name remains, the handover reason late-change (ADR 0012, known exceptions).",
   "license": "MIT",
   "type": "module",
   "exports": {

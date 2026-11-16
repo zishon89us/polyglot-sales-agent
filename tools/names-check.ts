@@ -35,10 +35,14 @@ function section(text: string, heading: string): string | undefined {
 /** The first cell of each body row of the first table whose header starts with the given cell. */
 function firstColumn(text: string, headerCell: string): string[] | undefined {
   const lines = text.split("\n");
-  const header = lines.findIndex((line) => line.startsWith(`| ${headerCell} |`));
-  if (header < 0) {
+  const headers = lines.flatMap((line, index) =>
+    line.startsWith(`| ${headerCell} |`) ? [index] : [],
+  );
+  // Exactly one such table, or the check cannot know which one it is reading.
+  if (headers.length !== 1) {
     return undefined;
   }
+  const header = headers[0] as number;
   const cells: string[] = [];
   for (const line of lines.slice(header + 2)) {
     if (!line.startsWith("|")) {
@@ -77,15 +81,38 @@ type Schema = {
   properties?: Record<string, Schema>;
 };
 
+/** Every enum value a schema allows, across `items` and all `anyOf` branches. */
 function enumOf(schema: Schema | undefined): string[] | undefined {
   if (schema === undefined) {
     return undefined;
   }
-  return (
-    schema.enum ??
-    enumOf(schema.items) ??
-    schema.anyOf?.map((option) => option.enum).find((e) => e !== undefined)
-  );
+  const values = [
+    ...(schema.enum ?? []),
+    ...(enumOf(schema.items) ?? []),
+    ...(schema.anyOf ?? []).flatMap((option) => enumOf(option) ?? []),
+  ];
+  return values.length > 0 ? values : undefined;
+}
+
+/** The one line that starts with the given text, or undefined if there is none or more than one. */
+function onlyLine(text: string, start: string): string | undefined {
+  const lines = text.split("\n").filter((line) => line.startsWith(start));
+  return lines.length === 1 ? lines[0] : undefined;
+}
+
+/** The quoted strings inside the Python call that follows a marker, up to its closing bracket. */
+function pythonStrings(text: string, marker: string, open: string): string[] | undefined {
+  const at = text.indexOf(marker);
+  if (at < 0 || text.indexOf(marker, at + 1) >= 0) {
+    return undefined;
+  }
+  const from = text.indexOf(open, at);
+  const close = open === "(" ? ")" : open;
+  const to = text.indexOf(close, from + 1);
+  if (from < 0 || to < 0) {
+    return undefined;
+  }
+  return [...text.slice(from, to).matchAll(/"([^"]+)"/g)].map((m) => m[1] as string);
 }
 
 export function checkSharedNames(root: string): string[] {
@@ -100,10 +127,20 @@ export function checkSharedNames(root: string): string[] {
   const handover = schemas["Handover"]?.properties;
   const message = schemas["Message"]?.properties;
 
-  const reasonRow = glossary.split("\n").find((line) => line.startsWith("| Handover reason |"));
-  const statusRow = (section(dataModel, "### `messages` — tenant-owned") ?? "")
-    .split("\n")
-    .find((line) => line.startsWith("| `status` |"));
+  const reasonRow = onlyLine(glossary, "| Handover reason |");
+  const statusRow = onlyLine(
+    section(dataModel, "### `messages` — tenant-owned") ?? "",
+    "| `status` |",
+  );
+  const generator = read(root, "docs/design/tools/gen_openapi.py");
+  const model = read(root, "docs/design/models/handover_machine.py");
+  const policy = section(
+    read(root, "docs/ai/guardrail-policy.md"),
+    "## 6. When a conversation goes to a person",
+  );
+  const modelOpen = pythonStrings(model, "\nOPEN = ", "(");
+  const modelTerminal = pythonStrings(model, "\nTERMINAL = ", "(");
+  const policyReasons = firstColumn(policy ?? "", "Reason")?.flatMap(backticked);
   const machine2 = section(machines, "## 2. Handover") ?? "";
   const machine7 = section(machines, "## 7. Outbound message") ?? "";
   const classLabels = Object.values(MESSAGE_CLASSES);
@@ -112,7 +149,7 @@ export function checkSharedNames(root: string): string[] {
   return [
     ...compare(
       "glossary, Handover reason",
-      reasonRow === undefined ? undefined : backticked(reasonRow.split(". ")[0] as string),
+      reasonRow === undefined ? undefined : backticked(reasonRow),
       HANDOVER_REASONS,
     ),
     ...compare(
@@ -140,5 +177,45 @@ export function checkSharedNames(root: string): string[] {
     ...compare("OpenAPI, Message.status", enumOf(message?.["status"]), MESSAGE_STATUSES),
     ...compare("OpenAPI, Message.class", enumOf(message?.["class"]), classNames),
     ...compare("OpenAPI, Message.direction", enumOf(message?.["direction"]), MESSAGE_DIRECTIONS),
+    // The script that produces the OpenAPI file restates the lists; without
+    // these, regenerating the file would silently bring old names back.
+    ...compare(
+      "OpenAPI generator, Handover state",
+      pythonStrings(generator, '"state": enum("waiting"', "("),
+      HANDOVER_STATES,
+    ),
+    ...compare(
+      "OpenAPI generator, Handover reasons",
+      pythonStrings(generator, '"reasons": arr(enum(', "("),
+      HANDOVER_REASONS,
+    ),
+    ...compare(
+      "OpenAPI generator, Message status",
+      pythonStrings(generator, '"status": nullable(enum("pending"', "("),
+      MESSAGE_STATUSES,
+    ),
+    ...compare(
+      "OpenAPI generator, Message class",
+      pythonStrings(generator, '"class": nullable(enum(', "("),
+      classNames,
+    ),
+    ...compare(
+      "OpenAPI generator, Message direction",
+      pythonStrings(generator, '"direction": enum(', "("),
+      MESSAGE_DIRECTIONS,
+    ),
+    ...compare(
+      "handover model, OPEN and TERMINAL",
+      modelOpen === undefined || modelTerminal === undefined
+        ? undefined
+        : [...modelOpen, ...modelTerminal],
+      HANDOVER_STATES,
+    ),
+    // The policy's table names a reason once per trigger, so repeats are expected there.
+    ...compare(
+      "guardrail policy, section 6 reasons",
+      policyReasons === undefined ? undefined : [...new Set(policyReasons)],
+      HANDOVER_REASONS,
+    ),
   ];
 }
