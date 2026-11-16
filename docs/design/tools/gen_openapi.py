@@ -129,7 +129,7 @@ schemas = {
         "class": nullable(enum("assistant-reply", "system-reply", "staff-message", "service-notice", "business-initiated")),
         "type": {"type": "string", "description": "text, button, or the unsupported type's name."},
         "text": nullable({"type": "string", "description": "Untrusted. Render as characters, never as markup."}),
-        "status": nullable(enum("sent", "delivered", "read", "failed", "withheld")),
+        "status": nullable(enum("pending", "held", "discarded", "withheld", "sending", "sent", "delivered", "read", "failed")),
         "status_reason": nullable(S), "sent_by_user_id": nullable(UUID), "created_at": TIME},
         ["id", "direction", "type", "created_at"]),
     "StaffMessageInput": obj({"text": {"type": "string", "minLength": 1, "maxLength": 4000}}, ["text"]),
@@ -146,7 +146,11 @@ schemas = {
         "id": UUID, "service_id": UUID, "contact_id": nullable(UUID), "starts_at": TIME, "ends_at": TIME,
         "state": enum("booked", "confirmed", "cancelled", "attended", "missed"),
         "created_via": enum("chat", "staff")}, ["id", "service_id", "starts_at", "ends_at", "state", "created_via"]),
-    "BookingInput": obj({"service_id": UUID, "starts_at": TIME, "contact_id": nullable(UUID)}, ["service_id", "starts_at"]),
+    "BookingInput": obj({"service_id": UUID, "starts_at": TIME, "contact_id": nullable(UUID),
+                         "contact_phone": nullable({"type": "string", "description": "In international format. Finds or creates the contact. Use this or contact_id, not both."}),
+                         "consent": {"type": "boolean", "default": False,
+                                     "description": "True if the customer agreed to messages about this booking. Without it no reminder is sent."}},
+                        ["service_id", "starts_at"]),
     "BookingMove": obj({"starts_at": TIME}, ["starts_at"]),
     "BookingOutcome": obj({"outcome": enum("attended", "missed")}, ["outcome"]),
     "Slot": obj({"starts_at": TIME, "remaining": {"type": "integer", "minimum": 1}}, ["starts_at", "remaining"]),
@@ -270,8 +274,11 @@ op("post", "/webhooks/whatsapp", "receiveWebhook", "Channel webhook", "Receive m
         "A duplicate event is acknowledged and ignored. An event for an unknown number is acknowledged and stored as metadata only.",
    ok_desc="Stored, or a duplicate.",
    extra={"401": problem("The signature is missing or wrong. Nothing is stored."),
-          "413": problem("The body is larger than the limit.")})
-del paths["/webhooks/whatsapp"]["post"]["responses"]["422"]
+          "413": problem("The body is larger than the limit."),
+          "429": problem("Only for requests with a bad signature, per source."),
+          "503": problem("The database is unavailable. The channel redelivers later.")})
+for _c in ("422", "400"):
+    del paths["/webhooks/whatsapp"]["post"]["responses"][_c]
 
 # Authentication
 T = "Authentication"

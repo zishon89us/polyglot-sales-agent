@@ -203,6 +203,9 @@ written.
 
 ## 4. Booking
 
+This machine and the reminder machine of section 5 are implemented in
+`packages/packs/booking`, not in `packages/core` (ADR 0012).
+
 | State | Meaning |
 | --- | --- |
 | `booked` | Created; start time in the future or past, no outcome yet. |
@@ -346,6 +349,7 @@ opt-out. Only the opt-in event does.
 | `held` | Waiting: for quiet hours to end, for the daily limit, or for the previous message in the conversation to be delivered. |
 | `discarded` | An assistant reply dropped before sending because a newer message arrived or staff took over. Terminal. |
 | `withheld` | Not attempted; stores a reason. Terminal. |
+| `sending` | The channel call has started and its result is not yet recorded. A message found here after 2 minutes is sent once more if it is a reply or staff message, and becomes `failed` with reason `unconfirmed` if it is a template (`architecture.md`, "Sending a message once"). |
 | `sent` | Accepted by the channel API. |
 | `delivered`, `read` | Reported by the channel. |
 | `failed` | Rejected by the channel or reported failed; stores the error code. Terminal. |
@@ -450,6 +454,8 @@ match in the same pull request.
 | 17 | The escalation clock also runs in `detached`, restarts on re-attachment, and stops when a follow-up is sent. | V4 | Section 2; US-C14 |
 | 18 | The follow-up is available whenever the reply window is closed and no staff message has been sent, including in `waiting`. | V5 | Section 2; US-C14 |
 | 19 | The operator can hold the service in `degraded`; health checks do not end a held state. | ADR 0011 | Section 8 |
+| 20 | An outbound message passes through `sending`; a reply left there is sent once more, a template is not. | Gate 2, S2 | Section 7 |
+| 21 | Sections 4 and 5 (booking, reminder) belong to the booking pack, not the core. | Gate 2, S4; ADR 0012 | Sections 4, 5 |
 
 ## Models
 

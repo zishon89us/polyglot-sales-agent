@@ -134,9 +134,14 @@ The request does four things and nothing else (NFR-P1):
 | A valid event | 200 | |
 | A duplicate of an event already stored | 200 | The channel must stop redelivering it; the unique constraint makes it harmless |
 | A valid signature, but the receiving number belongs to no tenant | 200 | Metadata only is stored (data model, decision 1). An error would make the channel retry |
-| A valid signature, but a payload this version cannot parse | 200 | The raw event is stored as unparsed for the operator, and an alert is raised |
+| A valid signature, but a payload this version cannot parse, including a body that is not valid JSON | 200 | Metadata only is stored (`unparsed_events`: a hash, the size and an error code, kept 30 days), and the operator is alerted. The raw event is not kept, because it would hold a stranger's number and text outside tenant scoping |
 | A bad or missing signature | 401 | |
 | The database is unavailable | 503 | The channel redelivers later |
+
+The webhook never answers 400 or 429 to a validly signed request: the first
+would be pointless, since the channel cannot repair its own payload, and the
+second would throttle the channel's deliveries. Requests with a bad
+signature may be rate-limited per source and answered 429 (#154).
 
 What is trusted from a signed event: that the channel sent it, the sender's
 number and the receiving number (threat-model assumption A1). What is never
@@ -205,6 +210,16 @@ refused with `handover-state` or `followup-unavailable` in a state where the
 machine's table does not allow it. `sendFollowUp` may answer 202 with
 `followup_status` of `held` (quiet hours) or `withheld`, with the reason
 shown on the handover.
+
+**Adding a booking by hand** (US-D9, US-C13). `createBooking` takes a
+service and a start time and, optionally, the customer: either an existing
+`contact_id` or a `contact_phone`, in the body, which finds or creates the
+contact. `consent: true` records that the customer agreed to messages about
+this booking; without it no reminder is sent for it. A booking with no
+customer attached gets no messages at all.
+
+**Booking routes belong to the booking pack** (ADR 0012). For a tenant whose
+pack is not `booking` they answer 404, as if they did not exist.
 
 **Blocking time** (US-D9). A period that contains bookings is refused with
 `contains-bookings` and the list of them. The client sends it again with
@@ -285,10 +300,12 @@ Every operation in the file appears in this table; a script checked it.
 | 4 | Last write wins on edits | Few editors per tenant | Two owners editing the same service can overwrite each other silently |
 | 5 | `releaseHandover` exists | US-D3 criterion 3 says "until it is released" | The state machines name no release event; it changes the holder, not the state. For the Gate 2 review |
 | 6 | A manual booking may have no contact | A booking made by phone is not a WhatsApp contact; the data model has no free-text field for a name | Staff cannot see whose booking it is. May need a decision in M5 |
-| 7 | An unparseable but validly signed event is stored and answered 200 | Otherwise the channel redelivers it forever | Nothing in the requirements covers it; the operator alert is new |
+| 7 | An unparseable but validly signed event is answered 200 and recorded as metadata only | Otherwise the channel redelivers it forever; and the raw event must not sit outside tenant scoping | Nothing in the requirements covers it; the operator alert is new. With no raw copy, the operator cannot see what the payload was |
+| 9 | Staff may attach a manual booking to a phone number and record consent | Without it a phone customer could never get a reminder (Gate 2 finding S5) | The number is typed by staff and is not verified |
 | 8 | A contact is found by POST | A phone number must not be in a URL | — |
 
-Decisions 5, 6 and 7 add behaviour that no story states.
+Decisions 5, 6 and 7 add behaviour that no story states. Decision 9
+implements US-C13 criterion 3.
 
 ## 10. How the file was checked, and what is not done
 

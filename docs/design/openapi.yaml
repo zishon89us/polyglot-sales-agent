@@ -150,10 +150,12 @@ paths:
       responses:
         '200':
           description: Stored, or a duplicate.
-        '400':
-          $ref: '#/components/responses/BadRequest'
         '429':
-          $ref: '#/components/responses/TooManyRequests'
+          description: Only for requests with a bad signature, per source.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '401':
           description: The signature is missing or wrong. Nothing is stored.
           content:
@@ -162,6 +164,12 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '413':
           description: The body is larger than the limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: The database is unavailable. The channel redelivers later.
           content:
             application/problem+json:
               schema:
@@ -2649,11 +2657,15 @@ components:
           anyOf:
           - type: string
             enum:
+            - pending
+            - held
+            - discarded
+            - withheld
+            - sending
             - sent
             - delivered
             - read
             - failed
-            - withheld
           - type: 'null'
         status_reason:
           anyOf:
@@ -2818,6 +2830,15 @@ components:
           - type: string
             format: uuid
           - type: 'null'
+        contact_phone:
+          anyOf:
+          - type: string
+            description: In international format. Finds or creates the contact. Use this or contact_id, not both.
+          - type: 'null'
+        consent:
+          type: boolean
+          default: false
+          description: True if the customer agreed to messages about this booking. Without it no reminder is sent.
       additionalProperties: false
       required:
       - service_id
