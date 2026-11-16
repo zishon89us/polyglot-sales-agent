@@ -68,6 +68,11 @@ The MVP is the core engine, the owner dashboard and two packs.
 Across both packs the product also reports handover rate, containment rate
 (conversations finished without a person) and model cost per conversation.
 
+Every metric named here is defined precisely in [`glossary.md`](glossary.md).
+The refused-delivery rate cannot be computed by the product as currently
+scoped, because the store only tells it when an order is created; this is
+open question Q1 in the requirements review.
+
 ## Success criteria for v1.0.0
 
 These are about the software, because the project has no customers yet.

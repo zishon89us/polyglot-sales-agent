@@ -1,6 +1,8 @@
 # Non-functional requirements
 
-Status: draft for maintainer review · Phase 1 (requirements) · Issue #4
+Status: draft for maintainer review · Phase 1 (requirements) · Issues #4 and #46
+
+Terms and metric definitions are in [`glossary.md`](glossary.md).
 
 Each requirement has a number and a way to check it. The targets are starting
 points chosen before any code exists; none has been measured. Revisit them at
@@ -16,9 +18,10 @@ load-test report. It is a provisional sizing assumption, not a forecast.
 | ID | Requirement | Target | How it is checked |
 | --- | --- | --- | --- |
 | NFR-P1 | Webhook acknowledgement time | 99th percentile ≤ 1 s at reference load | Load test |
-| NFR-P2 | End-to-end reply time, from inbound webhook to outbound send, with the real model | Median ≤ 10 s, 95th percentile ≤ 20 s | Trace data in staging; reported on the dashboard |
+| NFR-P2 | End-to-end reply time with the real model, measured from the end of the message batching window (NFR-P5) to the outbound send | Median ≤ 10 s, 95th percentile ≤ 20 s | Trace data in staging; reported on the dashboard |
 | NFR-P3 | Time spent outside the model call per reply | 95th percentile ≤ 1 s | Trace spans |
 | NFR-P4 | Dashboard page load on a mid-range phone connection | Largest content visible ≤ 3 s | Browser test with throttling |
+| NFR-P5 | Message batching window (US-C11) | Waits 3 s after the latest inbound message, never more than 10 s after the first | Integration test with timed message bursts |
 
 ## Reliability
 
@@ -29,6 +32,7 @@ load-test report. It is a provisional sizing assumption, not a forecast.
 | NFR-R3 | Bookings and order confirmations are idempotent | Exactly 1 record when a tool call is repeated | Integration test |
 | NFR-R4 | Model provider failure is contained | After 3 retries with backoff, a fallback message is sent and the conversation is handed over | Integration test with a failing fake client |
 | NFR-R5 | Failed jobs are not silently dropped | 100% of exhausted jobs land in the dead-letter queue and raise an alert | Integration test |
+| NFR-R7 | Replies within one conversation are sent in order | 0 interleaved or out-of-order replies with 2 or more workers and bursts of 5 messages | Integration test |
 | NFR-R6 | Service availability target once deployed | 99.5% per month for the webhook endpoint | Uptime monitoring; an objective, not a guarantee |
 
 ## Security
