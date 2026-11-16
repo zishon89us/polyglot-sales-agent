@@ -75,15 +75,19 @@ M0 Inception met its exit criteria on 2026-11-16; see
   dimensions, the red-team set, dataset rules with a held-out set, graders,
   and how thresholds are set from a baseline the maintainer accepts. No eval
   has been run and no score exists. Six languages proposed (#168).
+- 2026-11-16 — Guardrail policy written (#44): 16 rules, with the checks
+  before and after the model, the handover topics and the fixed texts, each
+  naming how it is enforced and tested. It settles findings #120, #121 and
+  #122, the reply-content rule #159 and open question OQ-5, and changes
+  US-C4 and US-C6; version 1.0 now has 222 acceptance criteria.
 
 ## Next
 
-1. Maintainer reviews and merges the eval plan (#43).
-2. Guardrail policy (#44) and API (#41). The output-check
-   findings #120 to #122 and the reply-content rule #159 are settled in the
-   guardrail policy.
-3. Before Gate 2: the three open design gaps from the threat model, #160
-   (keyed hash), #161 (operator access) and #159.
+1. Maintainer reviews and merges the eval plan (#43) and the guardrail
+   policy (#44); the second is stacked on the first.
+2. API (#41).
+3. Before Gate 2: the two open design gaps from the threat model, #160
+   (keyed hash) and #161 (operator access).
 4. Open review findings are checked against the state machines and ADRs as
    design reaches each story.
 5. Gate 2: independent review of all design documents together.
@@ -110,7 +114,7 @@ requirements in detail.
 
 Decided on 2026-11-16 (`adr/0001-positioning-and-v1-scope.md`): the project
 is a portfolio and reference implementation. Version 1.0 is the core engine,
-the dashboard and the `booking` pack, with 36 stories and 219 acceptance
+the dashboard and the `booking` pack, with 36 stories and 222 acceptance
 criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 
