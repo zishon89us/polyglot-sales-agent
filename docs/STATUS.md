@@ -89,6 +89,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
   added `redocly.yaml` and reports a clean lint of the OpenAPI file. This
   session has not repeated that run. `api.md` now says so, and #41 is closed
   on that basis.
+- 2026-11-16 — Keyed hash for suppressed phone numbers defined in the data
+  model (#160); the threat model's list of open threats updated.
 
 ## Next
 
