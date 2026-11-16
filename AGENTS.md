@@ -7,10 +7,19 @@ repository. Read it in full at the start of every session, together with
 ## 1. Mission and scope
 
 You are building a production-quality, open-source WhatsApp sales assistant
-that answers customer messages in whatever language the customer writes, using
-only the business's own data, and turns the conversation into a booking or a
-confirmed order. You own the repository end to end: planning, code, tests,
-documentation and releases.
+that answers customer messages in the customer's language, using only the
+business's own data, and turns the conversation into a booked appointment.
+You own the repository end to end: planning, code, tests, documentation and
+releases.
+
+The project is positioned as a portfolio and reference implementation, not as
+a commercial competitor to the channel owner's own AI agent. Version 1.0 runs
+end to end against a mock of the channel. The decision and its consequences
+are in `docs/adr/0001-positioning-and-v1-scope.md`.
+
+The requirements in `docs/requirements/` are the authority for what to build.
+Where this file and those documents differ on product behaviour, the
+requirements are right and this file has a defect to fix.
 
 The repository has a second purpose. It is a portfolio piece that must show a
 complete software development lifecycle and a mature AI development lifecycle
@@ -29,24 +38,26 @@ in section 5 must leave real, reviewable evidence.
 - **Owner dashboard.** A small web app where the business owner edits their
   data, reads conversations, takes over a chat and sees metrics.
 
-### First two packs (MVP)
+### Packs
 
-| Pack | What it does | Success metric |
-| --- | --- | --- |
-| `booking` | Answers price and availability questions, books an appointment, sends a reminder with confirm and reschedule options | Inquiry-to-booking rate, median first-reply time, no-show rate |
-| `cod-confirm` | Messages the buyer after a cash-on-delivery order to confirm the order and address before shipping | Confirmation rate, refused-delivery rate |
+| Pack | Version | What it does | Success metric |
+| --- | --- | --- | --- |
+| `booking` | v1.0 | Answers price and availability questions, books an appointment, sends a reminder with confirm, reschedule and cancel options | Inquiry-to-booking rate, median first-reply time, no-show rate |
+| `faq-only` | v1.0, trial | A trivial second pack added at the end of M5 to prove that a new pack needs no core change | None |
+| `cod-confirm` | v1.1, deferred | Confirms a cash-on-delivery order and its address before shipping | To be defined when the pack is planned |
 
 ### MVP boundaries
 
 - Multi-tenant from the first commit: every table and every query is scoped
   by tenant.
-- Language-agnostic: no language is hard-coded. Replies use the customer's
-  language; the dashboard is English with right-to-left-safe rendering of
-  chat content.
+- No language is hard-coded in the core. Replies use the customer's language
+  for every supported language (see the glossary). Messages the business
+  sends first use approved templates, in Arabic and English in v1.0. The
+  dashboard is English with right-to-left-safe rendering of chat content.
 - One messaging channel: WhatsApp Business Cloud API. Put it behind a channel
   interface so another channel can be added later.
-- One store integration for `cod-confirm`: a generic signed webhook
-  (`order.created`). Platform-specific connectors come later.
+- Each tenant uses exactly one pack and its own channel account.
+- Accounts are created by invitation only.
 
 ### Non-goals for the MVP
 
@@ -54,6 +65,8 @@ in section 5 must leave real, reviewable evidence.
   only.
 - No broadcast or bulk marketing campaigns.
 - No voice notes, image understanding or calls.
+- No translation of conversations for staff.
+- No store integrations; they belong to the deferred `cod-confirm` pack.
 - No billing system; note plan limits in config only.
 - No medical, legal or financial advice from the assistant, in any pack.
 
@@ -152,9 +165,9 @@ ADR, and change it there if you find a better fit.
   orchestration, handover, audit log.
 - `ai`: prompt assembly, retrieval over tenant data, tool calling, guardrails,
   tracing.
-- `packs/booking` and `packs/cod-confirm`: intents, tools, templates, evals.
-- `integrations`: signed inbound webhooks (orders), outbound links (calendar,
-  payment).
+- `packs/booking` and the trial `packs/faq-only`: intents, tools, templates,
+  evals.
+- `integrations`: reserved for v1.1 (signed inbound order webhooks).
 - `dashboard`: owner-facing web app.
 - `mock-whatsapp`: a local server that imitates the Cloud API for development,
   tests and demos.
@@ -171,7 +184,7 @@ ADR, and change it there if you find a better fit.
 5. Retrieve the tenant data relevant to the message.
 6. Call the model with the versioned system prompt, conversation history,
    retrieved data and the active pack's tools.
-7. Execute any tool calls (check availability, create booking, confirm order)
+7. Execute any tool calls (check availability, create or change a booking)
    through validated, tenant-scoped functions.
 8. Run output guardrails: grounded in retrieved data, in the customer's
    language, inside policy. On failure, send a safe fallback and flag for
@@ -182,7 +195,7 @@ ADR, and change it there if you find a better fit.
 ### Core data model
 
 `tenants`, `users`, `channels`, `contacts` (with consent and opt-out state),
-`conversations`, `messages`, `knowledge_items`, `bookings`, `orders`,
+`conversations`, `sessions`, `messages`, `knowledge_items`, `bookings`,
 `message_templates`, `handovers`, `ai_traces`, `audit_log`. Document it in
 `docs/design/data-model.md` with an entity-relationship diagram written in
 Mermaid.
@@ -210,7 +223,7 @@ a lifecycle phase.
 │   └── mock-whatsapp/        # local Cloud API imitation
 ├── packages/
 │   ├── core/  ai/  channel-whatsapp/  integrations/  db/
-│   └── packs/booking/  packs/cod-confirm/
+│   └── packs/booking/  packs/faq-only/
 ├── prompts/                  # versioned prompt files, one folder per prompt
 ├── evals/                    # datasets, graders, runner, baseline results
 ├── infra/                    # infrastructure-as-code
@@ -355,11 +368,10 @@ without an eval run attached to the pull request.
 - Injection: customer text and retrieved content are delimited as data.
   Maintain a red-team eval set of injection and jailbreak attempts in several
   languages and require a 100% pass rate on tool-misuse cases.
-- Handover: hand over on explicit request, low confidence, repeated failure,
-  complaints, or any sensitive topic. The customer is told a person will
-  reply.
-- Disclosure: the first message in a conversation states that the customer is
-  talking to an automated assistant.
+- Handover: hand over for the reasons listed in story US-C6. The customer is
+  always told what happens next.
+- Disclosure: the first outbound message in every session states that the
+  customer is talking to an automated assistant.
 
 ### Observability and cost
 
@@ -416,7 +428,10 @@ milestone.
 ### Privacy
 
 - Collect the minimum. Record consent and its source for each contact; honour
-  opt-out keywords in any language immediately and permanently.
+  opt-out by keyword, button or request, immediately, until the contact opts
+  back in.
+- Never use conversations to train or evaluate a model. Never send a phone
+  number or a contact's name to the model.
 - Configurable retention per tenant, with a job that deletes or anonymises
   expired conversations.
 - Endpoints to export and delete one contact's data.
@@ -444,8 +459,8 @@ deployable after every merge. `make check` runs locally exactly what CI runs.
 | --- | --- | --- |
 | Unit | Pure logic: state machines, guardrails, validators, pack tools | Fast, no network; the fake `LlmClient` only |
 | Integration | API and workers against real PostgreSQL and Redis in containers | Includes tenant-isolation and idempotency tests |
-| Contract | Our payloads against recorded WhatsApp Cloud API fixtures and the `order.created` webhook schema | Fixtures are synthetic and dated |
-| End-to-end | Full conversations through `mock-whatsapp` to a booking or a confirmed order | One happy path and the main failure paths per pack |
+| Contract | Our payloads against recorded WhatsApp Cloud API fixtures | Fixtures are synthetic and dated |
+| End-to-end | Full conversations through `mock-whatsapp` to a booking | One happy path and the main failure paths per pack |
 | AI evals | Section 6 | Separate job, separate report |
 | Load | Burst of inbound webhooks, checking the targets in `nfr.md` | Run on demand and before each release |
 | Dashboard | Component tests and one browser flow per main screen | Include right-to-left text rendering |
@@ -496,16 +511,16 @@ previous one meets its exit criteria.
 | M0 Inception | Repo scaffold, licence, README skeleton, `AGENTS.md`, templates, labels, board, branch protection request, all phase 1 requirements documents | Requirements merged; every MVP story exists as an issue with acceptance criteria |
 | M1 Design | Architecture, data model, API spec, threat model, eval plan, guardrail policy, first ADRs | Design documents merged; open questions listed for the human |
 | M2 Walking skeleton | Monorepo tooling, CI pipeline, docker-compose, database migrations, `mock-whatsapp`, webhook to queue to echo reply | `docker compose up` works; an end-to-end test sends a message and receives the echo; CI green |
-| M3 AI core | `LlmClient`, prompt loader, retrieval over tenant data, language handling, guardrails, tracing, eval harness with first dataset | Grounded multilingual answers pass the eval thresholds; eval job runs in CI |
-| M4 Booking pack | Booking tools, reminders, handover, pack evals | End-to-end booking conversation passes in at least four languages |
-| M5 COD pack and dashboard | Order webhook, confirmation flow, owner dashboard with data editor, conversation view, takeover, metrics | Both packs usable through the dashboard; tenant-isolation tests pass |
+| M3 AI core | `LlmClient`, prompt loader, retrieval over tenant data, language handling, guardrails, provider-failure handling, batching, delivery tracking, tracing, eval harness with first dataset | Grounded multilingual answers pass the eval thresholds; eval job runs in CI |
+| M4 Handover and dashboard foundation | Invitation and sign-in, tenant setup, staff roles, conversation view, takeover, handover and staff notification | A session can be handed over, answered by staff in the dashboard and handed back; tenant-isolation tests pass |
+| M5 Booking pack and dashboard | Booking tools, reminders, templates, consent, business data editor, bookings view, metrics, export and deletion, settings, trial `faq-only` pack | End-to-end booking conversation passes in every supported language; the trial pack changes no core file |
 | M6 Hardening and release | Load test, security review against the threat model, red-team evals, runbooks, staging deploy, system card, demo script, v1.0.0 | All section 10 criteria met; release tagged |
 
 ### Pack-independence check
 
-At the end of M5, add a third, trivial pack (for example `faq-only`) in a
-single pull request. If that pull request has to touch `packages/core`, the
-abstraction is wrong: fix it and record what you learned in an ADR.
+At the end of M5, add the trivial second pack `faq-only` in a single pull
+request. If that pull request has to touch `packages/core`, the abstraction is
+wrong: fix it and record what you learned in an ADR.
 
 ### README by the end of M6
 
@@ -533,8 +548,8 @@ when all its issues are done and its exit criteria are met.
 
 ### Done for v1.0.0
 
-- A stranger can clone the repo, run the quickstart and complete both pack
-  conversations against the mock server.
+- A stranger can clone the repo, run the quickstart and complete the booking
+  conversation against the mock server.
 - Every user story traces to tests; every AI behaviour traces to eval cases.
 - The system card states the tested languages with their scores and the known
   limitations.
@@ -568,8 +583,8 @@ work in the same session does not count as a review.
 
 | Work | Standard | Used for |
 | --- | --- | --- |
-| Requirements and acceptance criteria | EARS sentence patterns; Given/When/Then for scenarios | One trigger, one precondition, one verifiable response per criterion |
-| The requirement set | ISO/IEC/IEEE 29148 quality characteristics | Checking the set is complete, consistent, unambiguous, verifiable and traceable |
+| Requirements and acceptance criteria | Given/When/Then, with one precondition, one trigger and one verifiable response per criterion, as EARS also asks | Testable criteria |
+| The requirement set | The Gate 1 checklist in `docs/process/review-checklists.md`, which uses quality characteristics commonly attributed to ISO/IEC/IEEE 29148. That standard is paid and has not been read, so it is not claimed | Checking the set is complete, consistent, unambiguous, verifiable and traceable |
 | Architecture documents | C4 model for diagrams; arc42 for the section list | Nothing structural left undocumented |
 | Decision records | MADR | Context, options, decision, consequences |
 | Threat model | STRIDE; OWASP Top 10 for LLM Applications | Covering both conventional and AI-specific threats |
