@@ -382,8 +382,8 @@ Service-wide state:
 
 | State | Entered when | Left when |
 | --- | --- | --- |
-| `normal` | Start; a health check succeeds in `degraded` | 5 sessions are marked `awaiting-retry` within 2 minutes |
-| `degraded` | As above | A health check, run every 30 seconds, succeeds |
+| `normal` | Start; a health check succeeds in `degraded` and the operator is not holding the state | 5 sessions are marked `awaiting-retry` within 2 minutes, or the operator turns degraded mode on (ADR 0011) |
+| `degraded` | As above | A health check, run every 30 seconds, succeeds. While the operator holds the state, health checks do not end it; only the operator turning it off does, after which the next successful health check returns the service to `normal` |
 
 Per-session mark `awaiting-retry`:
 
@@ -449,6 +449,7 @@ match in the same pull request.
 | 16 | Reminders are scheduled no later than 60 minutes before the appointment and accepted by the channel no later than 55 minutes before. | V3 | Section 5; US-B3; glossary |
 | 17 | The escalation clock also runs in `detached`, restarts on re-attachment, and stops when a follow-up is sent. | V4 | Section 2; US-C14 |
 | 18 | The follow-up is available whenever the reply window is closed and no staff message has been sent, including in `waiting`. | V5 | Section 2; US-C14 |
+| 19 | The operator can hold the service in `degraded`; health checks do not end a held state. | ADR 0011 | Section 8 |
 
 ## Models
 

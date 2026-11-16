@@ -290,7 +290,8 @@ known or belong to no tenant. Each is listed with what it can reveal.
 | `channel_routes` | `receiving_number_id`, `tenant_id` | The webhook must find the tenant from the receiving number | Which tenant owns a business number. No customer data |
 | `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
 | `unroutable_events` | `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
-| `service_state` | One row: `normal` or `degraded`, since when | Service-wide | Nothing personal |
+| `service_state` | One row: `normal` or `degraded`, since when, and whether the operator is holding it in `degraded` | Service-wide | Nothing personal |
+| `operator_log` | `command`, `arguments`, `operator_name`, `phase` (`started` or `finished`), `outcome`, `at` | Operator actions belong to no tenant | Insert-only for every role. Arguments never hold an email address, a phone number or a name; a created row is recorded by its identifier (ADR 0011) |
 | Migration bookkeeping | | | Nothing personal |
 
 ### Access before the tenant is known
@@ -304,8 +305,9 @@ with the cross-tenant role, and returns only what the next step needs.
 | Authenticate a request | Session identifier from the cookie | User, tenant, role |
 | Start a sign-in, invitation or reset | Email address or token | User and tenant identifiers, password hash for comparison |
 
-Operator jobs that cross tenants by design: creating a tenant, the daily
-credential check, the retention job, and claiming jobs. Nothing else may use
+Work that crosses tenants by design: creating a tenant and the other
+operator commands of ADR 0011, the daily credential check, the retention
+job, and claiming jobs. Nothing else may use
 the cross-tenant role; the import-boundary test enforces which modules can
 reach it.
 

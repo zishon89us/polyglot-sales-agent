@@ -43,6 +43,7 @@ given here, because none has been verified.
 | [0008](0008-dashboard-authentication.md) | Email and password with server-side sessions | Accepted by the agent; awaiting maintainer review |
 | [0009](0009-hosting-target.md) | Hosting target and region | Proposed; needs the maintainer |
 | [0010](0010-model-provider.md) | Model provider | Proposed; needs the maintainer |
+| [0011](0011-operator-access.md) | Operator access through commands run on the server, with an insert-only log | Accepted by the agent; awaiting maintainer review |
 
-Records 0002 to 0008 become "Accepted" when the maintainer merges the pull
+Records 0002 to 0008 and 0011 become "Accepted" when the maintainer merges the pull
 request that adds them. Merging is the acceptance.

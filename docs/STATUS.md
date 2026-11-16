@@ -91,16 +91,20 @@ M0 Inception met its exit criteria on 2026-11-16; see
   on that basis.
 - 2026-11-16 — Keyed hash for suppressed phone numbers defined in the data
   model (#160); the threat model's list of open threats updated.
+- 2026-11-16 — ADR 0011 written (#161): the operator works through commands
+  run on the server, each recorded in an insert-only log. Whether one tenant
+  can be paused is open question OQ-12, for the maintainer.
 
 ## Next
 
-1. Maintainer merges the three stacked pull requests: the lint status
-   (#41), the keyed hash (#160) and operator access (#161).
-2. Before Gate 2: the two open design gaps from the threat model, #160
-   (keyed hash) and #161 (operator access).
+1. Maintainer merges the three stacked pull requests, in order: the lint
+   status (#41), the keyed hash (#160) and operator access (#161).
+2. Gate 2: independent review of all design documents together, by a
+   separate agent with the Gate 2 checklist. Its report is committed
+   unedited; High findings are fixed and re-verified before build starts.
 3. Open review findings are checked against the state machines and ADRs as
    design reaches each story.
-4. Gate 2: independent review of all design documents together.
+4. M1 retro, and the evaluation of AWS AI-DLC rules for M2 (#59).
 
 ## Gate status
 
@@ -136,7 +140,7 @@ v1.1.
 - #6 Project board and private vulnerability reporting.
 - #168 Confirm the supported languages and arrange a speaker's review of
   each eval dataset. Needed in M3.
-- #161 How the operator creates tenants.
+- OQ-12 Whether one tenant's assistant can be paused. Before any live use.
 - #7 Copyright holder name, commit identity, and the accounts needed only
   for live use.
 

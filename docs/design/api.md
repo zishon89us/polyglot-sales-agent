@@ -44,8 +44,8 @@ Not part of v1.0:
 
 - **The `order.created` webhook** named in issue #41. It belongs to the
   `cod-confirm` pack, deferred to v1.1 (ADR 0001).
-- **An operator interface.** How the operator creates a tenant is not
-  designed (#161). No dashboard route can create a tenant.
+- **An operator interface.** The operator works through commands run on the
+  server (ADR 0011). No route can create a tenant.
 - **An API for third parties.** The only clients are the dashboard and the
   channel.
 - **Sign-up.** There is no route that creates an account without an

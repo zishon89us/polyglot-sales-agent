@@ -302,11 +302,12 @@ nothing about any other customer.
 | Customer | Ask for a person; stop messages | Button, keyword or free text |
 | Staff | Take over any conversation; the assistant then stays silent in it | US-D3 |
 | Owner | Change business data and settings; remove a staff user | US-D2, US-D11, US-D7 |
-| Operator | Put the service into degraded mode, so that no model is called and customers are offered a person; roll a prompt back to an earlier version | **Not designed.** Belongs with operator access, #161 |
+| Operator | Put the service into degraded mode, so that no model is called and customers are offered a person | `ops service degraded on` (ADR 0011) |
+| Maintainer | Roll a prompt back to an earlier version | A configuration change by pull request, then a deployment (ADR 0011) |
 
 An owner cannot switch the assistant off for their own business in v1.0
-except by taking over conversations one at a time. That is a gap; it is
-added to #161 for a decision.
+except by taking over conversations one at a time, and the operator cannot
+pause one tenant. That is a gap; it is open question OQ-12.
 
 ## 11. What this policy changes
 
