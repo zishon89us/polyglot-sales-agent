@@ -133,8 +133,9 @@ M0 Inception met its exit criteria on 2026-11-16; see
   scan, with actions pinned to commits and a read-only token. Document
   checks added to `make check`: stories against the traceability table,
   decision-record sections, relative links, and the OpenAPI lint, which now
-  runs in this session and passes. First real tests: 12, for the document
-  checks.
+  runs in this session and passes. First real tests: 16, for the document
+  checks. CI passed on the pull request. The code review found 15 defects,
+  none High; the six Medium ones are fixed or stated as limits.
 
 ## Next
 

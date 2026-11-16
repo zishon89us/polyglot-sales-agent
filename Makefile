@@ -1,6 +1,7 @@
 # `make check` is the one local check, and the `check` job of
-# .github/workflows/ci.yml runs exactly this. CI adds two things that need the
-# network or GitHub: the dependency audit (`make audit`) and the secret scan.
+# .github/workflows/ci.yml runs exactly this. CI adds three things that need the
+# network or GitHub: the dependency audit (`make audit`), the secret scan and a
+# lint of the pull-request title.
 #
 # Not here yet: `dev`, `build` and `eval`, which AGENTS.md section 4 lists.
 # They arrive with the first app (M2) and the eval harness (M3).

@@ -45,7 +45,7 @@ tool for a contribution, say so in the pull request.
 
 ## Working on the code
 
-You need Node.js 22.12 or later and pnpm 10 (`corepack enable` provides it).
+You need Node.js 22.18 or later and pnpm 10 (`corepack enable` provides it).
 
 ```sh
 make setup   # install the locked dependencies
@@ -54,7 +54,9 @@ make check   # lint and format, type check, tests, document checks, self-test, c
 
 `make check` is the one local check, and CI runs exactly this on every pull
 request, on Node.js 22 and 26. CI also runs a dependency audit
-(`make audit`, which needs the network) and a secret scan.
+(`make audit`, which needs the network), a secret scan and a lint of the
+pull-request title. CI tests your branch as pushed, not the result of
+merging it, so update a branch that is behind `main` before it is merged.
 
 - **Lint** covers formatting, lint rules and import order. Warnings fail.
 - **Self-test.** It copies deliberately wrong files from
@@ -66,6 +68,7 @@ request, on Node.js 22 and 26. CI also runs a dependency audit
   nothing escapes it.
 - **Document checks.** Every story has a row in the traceability table;
   every decision record has its sections and is in the index; relative
-  links resolve; the OpenAPI file lints.
+  links resolve, except in `docs/reviews/`, which is kept as received; the
+  OpenAPI file lints, with warnings treated as errors.
 - **Commit messages** on your branch are linted against `AGENTS.md` section
   4. The 72-character limit applies to the whole first line.
