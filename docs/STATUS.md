@@ -19,19 +19,21 @@ acceptance criteria.
 - 2026-11-16 — Product vision and personas merged by the maintainer as #9.
 - 2026-11-16 — Milestones M1–M6 created. 23 MVP user stories written, each
   opened as its own issue (#10–#32) and assigned to its milestone;
-  traceability table started. Opened as a pull request for #3.
+  traceability table started. Merged by the maintainer as #33.
+- 2026-11-16 — Branch ruleset for `main` set to active by the maintainer.
+- 2026-11-16 — Non-functional requirements (#4) and risk register (#5) opened
+  as pull requests.
 
 ## Next
 
-1. #4 Non-functional requirements.
-2. #5 Risk register.
-3. M0 retro and tag, then milestone M1 (design).
+1. M0 retro in `docs/retros/`, close the milestone.
+2. Milestone M1 (design): open its issues, starting with verifying channel
+   rules from official documentation for `docs/compliance.md`.
 
 ## Blocked on the maintainer
 
-- #6 A ruleset named `main` exists but its enforcement is set to disabled, so
-  `main` is not yet protected. Still open: which pull requests (if any) the
-  agent may merge itself.
+- #6 Still open: project board, private vulnerability reporting, and which
+  pull requests (if any) the agent may merge itself.
 - #7 Licence, product name, copyright holder, LLM provider, hosting target,
   Meta developer app, commit identity. None of these block M0 or M1.
 
