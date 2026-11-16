@@ -1,0 +1,373 @@
+# Data model
+
+Status: draft for maintainer review · Phase 2 (design) · Issue #40
+
+The tables of version 1.0, how each is scoped to a tenant, which constraints
+enforce the invariants of `docs/design/state-machines.md`, and what happens
+to every personal field on retention and deletion.
+
+The database is PostgreSQL with row-level security (ADR 0003). Jobs and login
+sessions are tables here too (ADRs 0004 and 0008). Column types are indicative;
+the migrations in milestone M2 are the definition.
+
+## Conventions
+
+- Every table has `id` (UUID) and `created_at` unless stated.
+- "Tenant-owned" means the table has a non-null `tenant_id` and a row-level
+  security policy that admits only rows of the transaction's tenant.
+- Times are stored in UTC with time zone. Tenant-local rules are computed in
+  `packages/core` from the tenant's time zone.
+- Money is an integer in the currency's minor unit, with the tenant's
+  currency code.
+- State columns hold exactly the state names of `state-machines.md`.
+- **Personal data** is marked ⚑. The inventory at the end lists every such
+  field.
+
+## Diagram
+
+```mermaid
+erDiagram
+    TENANTS ||--o{ CHANNEL_ACCOUNTS : has
+    TENANTS ||--o{ USERS : has
+    TENANTS ||--o{ SERVICES : offers
+    TENANTS ||--o{ POLICIES : states
+    TENANTS ||--o{ BLOCKED_PERIODS : blocks
+    TENANTS ||--o{ MESSAGE_TEMPLATES : submits
+    TENANTS ||--o{ CONTACTS : serves
+    USERS ||--o{ USER_SESSIONS : opens
+    CONTACTS ||--o{ CONSENT_RECORDS : gives
+    CONTACTS ||--|| CONVERSATIONS : has
+    CONVERSATIONS ||--o{ SESSIONS : contains
+    CONVERSATIONS ||--o{ MESSAGES : contains
+    SESSIONS ||--o{ MESSAGES : groups
+    SESSIONS ||--o{ AI_TRACES : produces
+    SESSIONS ||--o{ TOOL_CALLS : makes
+    CONTACTS ||--o{ HANDOVERS : requests
+    SESSIONS |o--o| HANDOVERS : "attached to"
+    CONTACTS |o--o{ BOOKINGS : makes
+    SERVICES ||--o{ BOOKINGS : "booked as"
+    BOOKINGS ||--o| REMINDERS : has
+    MESSAGES |o--o| REMINDERS : "sent as"
+    MESSAGE_TEMPLATES |o--o{ MESSAGES : "used by"
+```
+
+Not drawn: `audit_log`, `jobs`, `channel_routes`, `unroutable_events`,
+`suppressed_numbers`, `auth_tokens` and `service_state`, described below.
+
+## Tenant and access
+
+### `tenants` — tenant-owned (policy on its own `id`)
+
+| Column | Notes |
+| --- | --- |
+| `name` | |
+| `pack` | Exactly one (`booking`, `faq-only`) |
+| `time_zone`, `default_language`, `template_languages`, `currency` | Required settings |
+| `support_contact`, `notification_email` | Required settings. Business contact details, not customer data |
+| `business_hours`, `opening_hours` | Per weekday, zero or more periods |
+| `booking_horizon_days`, `slot_interval_minutes`, `total_concurrent_bookings` (nullable), `min_notice_minutes`, `change_cutoff_minutes`, `reminder_lead_minutes` | Booking settings |
+| `quiet_start`, `quiet_end` (nullable pair) | Quiet hours |
+| `escalation_minutes`, `message_retention_months` | |
+| `answering` | Derived and stored: required settings present and credentials verified (state machines, section 9) |
+| `not_answering_notified_at` | So the owner and operator are emailed once per outage |
+
+Allowed ranges are the glossary's settings table, enforced by check
+constraints and again in the API.
+
+### `channel_accounts` — tenant-owned
+
+| Column | Notes |
+| --- | --- |
+| `channel` | `whatsapp` or `mock` |
+| `receiving_number_id` | The channel's identifier for the business number. Unique across all tenants |
+| `credentials_encrypted` | Encrypted with a key held outside the database (NFR-S5) |
+| `verified_at`, `last_check_at`, `last_check_result` | `ok`, `rejected` or `indeterminate` |
+
+### `users` — tenant-owned
+
+| Column | Notes |
+| --- | --- |
+| `email` ⚑ | Staff personal data. Unique across all tenants |
+| `password_hash` | Null until the invitation is accepted |
+| `role` | `owner` or `agent` |
+| `removed_at` | Soft removal, so audit entries keep their actor |
+
+A constraint-backed check refuses removing or demoting the last owner of a
+tenant (US-D7).
+
+### `user_sessions` — tenant-owned
+
+`session_id_hash` (unique), `user_id`, `last_used_at`. Deleting a user's rows
+ends their sessions (ADR 0008).
+
+### `auth_tokens` — tenant-owned
+
+Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
+`expires_at`, `used_at`.
+
+## Customers and conversations
+
+### `contacts` — tenant-owned
+
+| Column | Notes |
+| --- | --- |
+| `phone` ⚑ | E.164. Unique per tenant. Null after deletion or retention |
+| `phone_hash` | Keyed one-way hash of the number. Kept after deletion only if opted out; see `suppressed_numbers` |
+| `profile_name` ⚑ | As sent by the channel. Never given to the model (NFR-V7) |
+| `last_language` | A language code. Not treated as personal on its own |
+| `opted_out_at` | Null when not opted out |
+| `last_inbound_at` | The reply window is open while this is under 24 hours ago |
+| `rate_paused_until` | |
+| `anonymised_at` | Set when personal fields were removed |
+
+### `consent_records` — tenant-owned
+
+`contact_id`, `source` (`chat-booking`, `staff`, `opt-in`), `recorded_at`,
+`staff_user_id` (nullable), `booking_id` (nullable). Rows are never updated.
+
+### `suppressed_numbers` — tenant-owned
+
+`phone_hash`, `opted_out_at`. Written when an opted-out contact is deleted,
+so the opt-out applies if the number appears again (US-D5). Holds no number.
+
+### `conversations` — tenant-owned
+
+`contact_id` (unique: one conversation per contact), `channel_account_id`.
+
+### `sessions` — tenant-owned
+
+| Column | Notes |
+| --- | --- |
+| `conversation_id`, `started_at`, `last_message_at`, `ended_at` | A partial unique index allows one session with `ended_at` null per conversation |
+| `disclosed` | Disclosure has been sent |
+| `guardrail_fallbacks`, `unreadable_batches`, `assistant_replies` | The counters of state machines, section 3 |
+| `awaiting_retry_since`, `provider_fallback_sent_at` | State machines, section 8 |
+| `language`, `unsupported_language` | For US-C3 and metrics |
+| `is_inquiry`, `booking_outcome`, `had_handover`, `contained` | Written when the session ends (US-C19). `is_inquiry` is set by the model; the others by code |
+
+### `messages` — tenant-owned
+
+| Column | Notes |
+| --- | --- |
+| `conversation_id`, `session_id` | |
+| `direction` | `inbound` or `outbound` |
+| `class` | For outbound: one of the five message classes |
+| `kind` | `text`, `button`, `template`, or an unsupported type name |
+| `channel_message_id` | Unique per tenant when not null. This constraint is the deduplication of US-C1 |
+| `body` ⚑ | The text. Null for unsupported types, whose content is never stored, and null after retention or deletion |
+| `button_payload` | For Confirm: the booking and the start time it was sent for |
+| `template_id`, `template_variables` ⚑ | Variables can hold a service name and a time; treated as personal with the message |
+| `status` | `pending`, `held`, `discarded`, `withheld`, `sent`, `delivered`, `read`, `failed` |
+| `withheld_reason`, `error_code` | |
+| `sent_by_user_id` | For staff messages |
+| `fee_amount`, `fee_currency` | As reported by the channel; null if not reported |
+| `received_while_not_answering` | |
+| `sent_at`, `delivered_at` | |
+
+### `handovers` — tenant-owned
+
+| Column | Notes |
+| --- | --- |
+| `contact_id`, `session_id` (nullable) | Attached to a session only in `waiting` and `in-progress` |
+| `state` | The seven states of state machines, section 2 |
+| `reasons` | An array; new triggers append |
+| `held_by_user_id` | Nullable |
+| `answered_at` | Set when the first staff message is accepted by the channel |
+| `followup_message_id`, `followup_accepted_at` | At most one follow-up |
+| `detached_at`, `overdue_at`, `holding_message_id` | |
+| `escalation_elapsed_seconds`, `escalation_counted_to` | The business-hours clock |
+| `closed_reason`, `ended_at` | For `closed-unanswered` |
+
+**A partial unique index on `contact_id` over the four open states enforces
+invariant H1** (one open handover per contact) in the database, so it does
+not depend on application code. A check constraint requires `session_id` to
+be non-null exactly in `waiting` and `in-progress`, which is invariant H3's
+data side.
+
+## Business data (the `booking` pack)
+
+### `services` — tenant-owned
+
+`name`, `description`, `price_minor`, `duration_minutes`, `capacity`,
+`active`, `updated_at`. Check constraints hold the ranges of US-D2. A service
+with bookings is deactivated, not deleted.
+
+### `policies` — tenant-owned
+
+`title`, `body`, `updated_at`. Owner-entered text; delimited as data when
+given to the model.
+
+### `blocked_periods` — tenant-owned
+
+`starts_at`, `ends_at`, `created_by_user_id`.
+
+### `bookings` — tenant-owned
+
+| Column | Notes |
+| --- | --- |
+| `contact_id` | Nullable: set to null when the contact is anonymised and the booking is in the past |
+| `service_id`, `starts_at`, `ends_at` | `ends_at` is `starts_at` plus the service's duration at the time of booking |
+| `state` | `booked`, `confirmed`, `cancelled`, `attended`, `missed` |
+| `created_via` | `chat` or `staff` |
+| `idempotency_key` | Unique per tenant; a repeated tool call finds the first booking (NFR-R3) |
+| `confirmed_at`, `cancelled_at`, `outcome_recorded_by_user_id` | |
+
+There is no free-text column (US-B2). Capacity (invariant B1) is not a
+constraint: it is checked under an advisory lock in the same transaction as
+the write (ADR 0003).
+
+### `reminders` — tenant-owned
+
+`booking_id`, `state` (`none`, `scheduled`, `sent`, `withheld`, `cancelled`),
+`for_start_at` (the appointment time it was computed for), `scheduled_for`,
+`message_id`, `withheld_reason`. A partial unique index allows one reminder
+in `scheduled` per booking.
+
+### `message_templates` — tenant-owned
+
+`key` (for example `booking_reminder`, `handover_followup`), `language`,
+`category`, `channel_template_id`, `status`, `status_updated_at`. Unique on
+tenant, key and language.
+
+## AI and audit
+
+### `tool_calls` — tenant-owned
+
+`session_id`, `call_key` (unique per tenant), `tool`, `arguments`, `result`,
+`result_at`. Makes tool calls idempotent and gives claims a result to name,
+with the time the 10-minute rule needs. `arguments` and `result` hold service
+and slot identifiers and times, not customer text.
+
+### `ai_traces` — tenant-owned
+
+`session_id`, `prompt_name`, `prompt_version`, `model`, `input_tokens`,
+`output_tokens`, `cost_micros`, `latency_ms`, `tool_names`,
+`guardrail_results`, `outcome`. **No message text, no phone number, no
+name** (US-C10).
+
+### `audit_log` — tenant-owned
+
+`actor_user_id` (nullable for the system), `action`, `subject_type`,
+`subject_id`, `details`. Append-only: the application role has no update or
+delete privilege on it. `details` never holds a phone number, a name or
+message text; a deletion entry records the contact's `id`, not its number.
+
+## Tables outside tenant scoping
+
+These have no row-level security, because they are read before a tenant is
+known or belong to no tenant. Each is listed with what it can reveal.
+
+| Table | Columns | Why unscoped | What it reveals |
+| --- | --- | --- | --- |
+| `channel_routes` | `receiving_number_id`, `tenant_id` | The webhook must find the tenant from the receiving number | Which tenant owns a business number. No customer data |
+| `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
+| `unroutable_events` | `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
+| `service_state` | One row: `normal` or `degraded`, since when | Service-wide | Nothing personal |
+| Migration bookkeeping | | | Nothing personal |
+
+### Access before the tenant is known
+
+Three lookups must cross tenants. Each is one function in one module, run
+with the cross-tenant role, and returns only what the next step needs.
+
+| Lookup | Input | Returns |
+| --- | --- | --- |
+| Route a webhook | Receiving number identifier | Tenant identifier |
+| Authenticate a request | Session identifier from the cookie | User, tenant, role |
+| Start a sign-in, invitation or reset | Email address or token | User and tenant identifiers, password hash for comparison |
+
+Operator jobs that cross tenants by design: creating a tenant, the daily
+credential check, the retention job, and claiming jobs. Nothing else may use
+the cross-tenant role; the import-boundary test enforces which modules can
+reach it.
+
+## Constraints that carry invariants
+
+| Invariant or rule | Enforced by |
+| --- | --- |
+| A message is processed once (US-C1) | Unique `channel_message_id` per tenant |
+| One open handover per contact (H1) | Partial unique index on `handovers` |
+| A handover is attached exactly in `waiting` and `in-progress` (H3, data side) | Check constraint on `handovers` |
+| One active session per conversation | Partial unique index on `sessions` |
+| One booking per repeated tool call (NFR-R3) | Unique `idempotency_key` |
+| One scheduled reminder per booking | Partial unique index on `reminders` |
+| A tenant keeps at least one owner (US-D7) | Trigger or deferred constraint on `users` |
+| Settings stay in range (US-D11) | Check constraints on `tenants` |
+| Service fields stay in range (US-D2) | Check constraints on `services` |
+| The audit log is append-only | Privileges of the application role |
+| No row is visible across tenants (NFR-S1) | Row-level security on every tenant-owned table; a test fails on a table without a policy |
+| Capacity is never exceeded (B1) | Not a constraint: advisory lock plus check in one transaction; a concurrency test |
+
+Putting H1 in the database closes a gap the design models left open: the
+handover model could not check it, because it held one handover by
+construction.
+
+## Personal data: inventory, retention and deletion
+
+"Retention" is the daily job of NFR-V4 with the tenant's message-retention
+setting. "Deletion" is the owner's request under US-D5, completed within 24
+hours.
+
+| Field | Whose | Retention job | Deletion on request |
+| --- | --- | --- | --- |
+| `messages.body`, `messages.template_variables` | Customer | Set to null when the message is older than the retention period, whatever the age of other messages | Set to null for all the contact's messages |
+| `contacts.phone`, `contacts.profile_name` | Customer | Set to null when the contact has no message within the period, no future booking and no booking that started within the period | Set to null |
+| `contacts.phone_hash` | Customer | Removed with the phone number, unless opted out | Removed, unless opted out, when it moves to `suppressed_numbers` |
+| `bookings.contact_id` | Customer | Set to null with the contact's anonymisation, for past bookings | Future bookings are cancelled and their slots freed; then set to null |
+| `consent_records` | Customer | Deleted with the contact's anonymisation | Included in the export; then deleted |
+| `handovers.contact_id` | Customer | Kept; the contact row it points to is anonymised | Open handovers end as `closed-unanswered` or `answered`; kept |
+| `sessions`, `ai_traces`, `tool_calls` | Customer, indirectly | Kept: they hold no text, number or name | Kept |
+| `audit_log` | Staff and system | Kept | Kept; it never held the number |
+| `users.email` | Staff | Kept while the user exists | Not covered by US-D5. Set to null 12 months after `removed_at` |
+| `tenants.support_contact`, `notification_email` | Business | Kept | Not personal data of a customer |
+
+What a deleted or anonymised contact leaves behind: a `contacts` row with an
+`id`, `last_language`, timestamps and `anonymised_at`; sessions and bookings
+with no personal field; and, only if they had opted out, a hash in
+`suppressed_numbers`. Past metrics therefore do not change (glossary).
+
+The export of US-D5 contains: the contact row, every message with its text,
+bookings, consent records and the opt-out time.
+
+### What the retention rule does not cover
+
+- **Free text inside a message that names someone else.** A customer can
+  write another person's name or number. It is deleted with the message.
+- **Backups.** A deleted field remains in backups until they expire. Backup
+  retention is set with the hosting decision (ADR 0009) and must be stated to
+  tenants.
+- **The model provider's own retention** of what it was sent. It depends on
+  the provider's terms (ADR 0010).
+- **Logs.** They hold no personal data by design (NFR-V2), so they are not
+  purged per contact.
+
+## What this does for the record of processing
+
+Saudi Arabia's data-protection rules require a controller to keep records of
+categories of data, retention periods and recipients
+(`docs/compliance.md`, Part B). The inventory above is written so that a
+tenant can use it for that: categories are the ⚑ fields, the retention period
+is the tenant's own setting, and the recipients are the channel and the model
+provider (`architecture.md`, section 3). Whether it is sufficient is a
+question for a lawyer (open question OQ-4).
+
+## Decisions made here
+
+| # | Decision | Why |
+| --- | --- | --- |
+| 1 | Unroutable events store metadata only, not the sender's number or the message body | They concern people with no relationship to any tenant. US-C1 says "the event is stored"; this narrows what "the event" holds |
+| 2 | Job payloads hold identifiers only | The `jobs` table is outside tenant scoping |
+| 3 | Invariant H1 is a database constraint | It was the invariant the model could not check |
+| 4 | Staff email is set to null 12 months after removal | No requirement covered staff personal data. The number is the agent's proposal |
+| 5 | A removed user is soft-removed | So audit entries keep their actor |
+| 6 | The content of unsupported message types is never stored, only the type | US-C12 says it is not sent to the model; this also keeps voice notes and images out of the database |
+
+Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
+noted for the Gate 2 review and are not yet reflected in the stories.
+
+## Not covered here
+
+- Indexes for performance. They are added with the queries in M2 to M5.
+- The `faq-only` pack's data: it reuses `policies`.
+- Exact column types and the SQL of the row-level security policies, which
+  are the migrations.

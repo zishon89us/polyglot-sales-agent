@@ -62,12 +62,16 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-16 — ADRs merged as #151. Architecture document written against
   the arc42 section list (#39): context, containers, packages, the pack
   interface, three runtime flows and how the four highest risks are met.
+- 2026-11-16 — Architecture merged as #152. Data model written (#40): every
+  table with its tenant scoping, the constraints that carry invariants, and
+  a personal-data inventory with retention and deletion behaviour. One
+  open handover per contact is now a database constraint.
 
 ## Next
 
-1. Maintainer reviews and merges the architecture document (#39).
-2. Data model (#40), threat model (#42), eval plan (#43), guardrail policy
-   (#44) and API (#41). The output-check findings #120 to
+1. Maintainer reviews and merges the data model (#40).
+2. Threat model (#42), eval plan (#43), guardrail policy (#44) and API
+   (#41). The output-check findings #120 to
    #122 are settled in the guardrail policy.
 3. Open review findings are checked against the state machines and ADRs as
    design reaches each story.
