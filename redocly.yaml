@@ -1,0 +1,7 @@
+# Lint settings for docs/design/openapi.yaml.
+# Run: npx @redocly/cli lint docs/design/openapi.yaml
+extends:
+  - recommended
+rules:
+  # The design-time contract lists only the local development server.
+  no-server-example.com: off
