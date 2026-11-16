@@ -125,8 +125,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
   did not exercise the project's own configuration, and one commit did not
   pass on its own. Both are fixed; the report is in the pull request.
 - 2026-11-17 — The maintainer decided that commits are authored under the
-  maintainer's identity, with the agent as co-author. `make setup` sets it,
-  `make check` enforces it, and `AGENTS.md` section 2 records it. Earlier
+  maintainer's identity, with the agent as co-author. `make identity` sets it,
+  `make check` enforces it on the agent's commits, and `AGENTS.md` section 2 records it. Earlier
   commits are not rewritten.
 
 ## Next

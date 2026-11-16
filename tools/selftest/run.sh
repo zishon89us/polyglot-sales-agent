@@ -33,13 +33,22 @@ plant() {
 }
 
 expect_rejection() {
+  # expect_rejection <name> <diagnostic> <text that must also appear> <command...>
+  # The third argument ties the diagnostic to the planted file: without it, the
+  # same diagnostic from some unrelated file would hide a check that no longer
+  # covers the scratch package.
   name="$1"
   pattern="$2"
-  shift 2
+  about="$3"
+  shift 3
   output="$("$@" 2>&1)"
   status=$?
   if [ "$status" -eq 0 ]; then
     echo "selftest: FAIL - $name passed on a file that is wrong"
+    failed=1
+  elif ! printf '%s' "$output" | grep -q "$about"; then
+    echo "selftest: FAIL - $name failed, but did not mention '$about':"
+    printf '%s\n' "$output" | head -5
     failed=1
   elif ! printf '%s' "$output" | grep -q "$pattern"; then
     echo "selftest: FAIL - $name failed, but not with '$pattern':"
@@ -51,25 +60,25 @@ expect_rejection() {
 }
 
 plant type-error.ts bad.ts
-expect_rejection "type check" "TS2322" pnpm run typecheck
+expect_rejection "type check" "TS2322" "__selftest__/src/bad.ts" pnpm run typecheck
 
 plant type-error.ts bad.tsx
-expect_rejection "type check of a .tsx file" "TS2322" pnpm run typecheck
+expect_rejection "type check of a .tsx file" "TS2322" "__selftest__/src/bad.tsx" pnpm run typecheck
 
 plant lint-error.ts bad.ts
-expect_rejection "lint" "noDebugger" pnpm run lint
+expect_rejection "lint" "noDebugger" "__selftest__/src/bad.ts" pnpm run lint
 
 plant warning.ts bad.ts
-expect_rejection "lint warning" "noExplicitAny" pnpm run lint
+expect_rejection "lint warning" "noExplicitAny" "__selftest__/src/bad.ts" pnpm run lint
 
 plant format-error.ts bad.ts
-expect_rejection "format check" "File content differs from formatting output" pnpm run lint
+expect_rejection "format check" "File content differs from formatting output" "__selftest__/src/bad.ts" pnpm run lint
 
 plant failing.test.ts bad.test.ts
-expect_rejection "test run" "selftest fixture fails on purpose" pnpm run test
+expect_rejection "test run" "selftest fixture fails on purpose" "__selftest__/src/bad.test.ts" pnpm run test
 
 cleanup
-expect_rejection "commit message lint" "type-empty" \
+expect_rejection "commit message lint" "type-empty" "Updated some stuff" \
   sh -c 'echo "Updated some stuff." | pnpm exec commitlint'
 
 exit "$failed"
