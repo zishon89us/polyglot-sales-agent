@@ -234,6 +234,7 @@ Corrected in this pull request:
 | Verification of the state machines | 4 |
 | Second verification, of the four fixes | 0 |
 
-32 findings from these two reviews remain open as issues (#128 to #150), all
-Medium or Low. The handover model checks one invariant out of three. No
+34 findings from these two reviews remain open, tracked in 23 issues (#128
+to #150), all Medium or Low: 27 from the first verification and 7 from this
+one. The handover model checks one invariant out of three. No
 human has reviewed the tables.
