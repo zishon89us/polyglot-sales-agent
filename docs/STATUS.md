@@ -94,19 +94,25 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-16 — ADR 0011 written (#161): the operator works through commands
   run on the server, each recorded in an insert-only log. Whether one tenant
   can be paused is open question OQ-12, for the maintainer.
+- 2026-11-16 — Lint status, keyed hash and ADR 0011 merged as #173 to #175.
+  Gate 2 review run by two separate agents. Structure review: 44 findings,
+  7 High. Threats and AI review: 50 findings, 13 High. Both reports are
+  committed unedited in `docs/reviews/`. **Gate 2 is not passed.** No
+  finding has been answered or fixed yet.
 
 ## Next
 
-1. Maintainer merges the three stacked pull requests, in order: the lint
-   status (#41), the keyed hash (#160) and operator access (#161).
-2. Gate 2: independent review of all design documents together, by a
-   separate agent with the Gate 2 checklist. Its report is committed
-   unedited; High findings are fixed and re-verified before build starts.
-3. Open review findings are checked against the state machines and ADRs as
-   design reaches each story.
+1. Maintainer chooses the route for the 20 High findings, and decides S4
+   (whether the core may know about bookings).
+2. Answer every finding in both reports; fix the High findings; a narrow
+   review checks those fixes.
+3. Medium and Low findings become `review-finding` issues.
 4. M1 retro, and the evaluation of AWS AI-DLC rules for M2 (#59).
 
 ## Gate status
+
+**Gate 2 (design) is not passed.** Two independent reviews on 2026-11-16
+found 20 High findings (7 and 13) among 94. None is answered yet.
 
 **Gate 1 (requirements) is passed, on the route agreed with the maintainer**
 (`AGENTS.md` section 11): no High finding is open; Medium and Low findings
