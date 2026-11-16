@@ -332,6 +332,10 @@ independent review does that.
 "Fixed" means the requirements now say what the finding asked for. It does
 not mean the behaviour is built or tested.
 
+Criterion numbers in the table are those at commit `a1b5caf`. Later fixes
+added criteria to some stories, so a number here may now point one or two
+criteria early; the story is always right.
+
 | ID | Severity | Status | Where |
 | --- | --- | --- | --- |
 | R1 | High | Fixed | Glossary "Business-initiated message" and "Reply window"; NFR-V1; US-C7, US-C13 |
