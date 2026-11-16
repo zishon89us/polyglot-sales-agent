@@ -14,16 +14,27 @@ servers:
   description: Local development
 tags:
 - name: Operations
+  description: Liveness and readiness checks for the process.
 - name: Channel webhook
+  description: 'The endpoints the messaging channel calls: the subscription check, and incoming messages and status events.'
 - name: Authentication
+  description: Signing in and out, the current session, and setting or resetting a password.
 - name: Tenant
+  description: 'The business''s own record: its settings, channel connection and message templates.'
 - name: Users
+  description: The people who can sign in to a tenant's dashboard, and their roles.
 - name: Business data
+  description: The services, opening hours and policies the assistant answers from.
 - name: Conversations
+  description: 'Customer conversations: reading them, sending a staff message and taking one over.'
 - name: Handovers
+  description: Conversations waiting for a person, and what staff can do with them.
 - name: Bookings
+  description: Appointments, free slots, blocked periods, and booking messages that were withheld or failed.
 - name: Metrics
+  description: Results for a period.
 - name: Contact data
+  description: Finding a contact, and exporting or deleting the data held about them.
 security:
 - sessionCookie: []
 paths:
