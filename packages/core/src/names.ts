@@ -1,11 +1,12 @@
 // The single source for names that the documents, the database and the API
-// all use (M2 unit U3). `tools/names-check.ts` fails `make check` if the
-// glossary, the data model, the state machines or the OpenAPI file disagree
-// with this file. To add or rename a value, change it here and then in each
-// place the check names.
+// all use (M2 unit U3). `tools/names-check.ts` fails `make check` if one of
+// the places it reads disagrees with this file: the glossary, the data model,
+// the state machines, the OpenAPI file and the script that generates it, the
+// handover model and the guardrail policy. To add or rename a value, change
+// it here and then in each place the check names.
 //
-// Only names that belong to the core are here. The booking pack's names live
-// in the pack (ADR 0012).
+// Only names that belong to the core are here, with one known exception,
+// `late-change`. The booking pack's names live in the pack (ADR 0012).
 
 /** The states of a handover (state machines, section 2). */
 export const HANDOVER_STATES = [

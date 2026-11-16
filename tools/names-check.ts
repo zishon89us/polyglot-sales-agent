@@ -100,19 +100,28 @@ function onlyLine(text: string, start: string): string | undefined {
   return lines.length === 1 ? lines[0] : undefined;
 }
 
-/** The quoted strings inside the Python call that follows a marker, up to its closing bracket. */
-function pythonStrings(text: string, marker: string, open: string): string[] | undefined {
+/**
+ * The names in the Python call or tuple at a marker. The brackets must hold
+ * double-quoted strings and commas and nothing else: a variable, a `*`, a
+ * comment, single quotes or a nested call is reported as not found rather
+ * than read in part. This reads the script's text, not what it produces.
+ */
+function pythonStrings(text: string, marker: string): string[] | undefined {
   const at = text.indexOf(marker);
   if (at < 0 || text.indexOf(marker, at + 1) >= 0) {
     return undefined;
   }
-  const from = text.indexOf(open, at);
-  const close = open === "(" ? ")" : open;
-  const to = text.indexOf(close, from + 1);
+  const inMarker = marker.lastIndexOf("(");
+  const from = inMarker >= 0 ? at + inMarker : text.indexOf("(", at);
+  const to = text.indexOf(")", from + 1);
   if (from < 0 || to < 0) {
     return undefined;
   }
-  return [...text.slice(from, to).matchAll(/"([^"]+)"/g)].map((m) => m[1] as string);
+  const inside = text.slice(from + 1, to);
+  if (!/^\s*"[^"\n]+"(\s*,\s*"[^"\n]+")*\s*,?\s*$/.test(inside)) {
+    return undefined;
+  }
+  return [...inside.matchAll(/"([^"]+)"/g)].map((m) => m[1] as string);
 }
 
 export function checkSharedNames(root: string): string[] {
@@ -138,8 +147,8 @@ export function checkSharedNames(root: string): string[] {
     read(root, "docs/ai/guardrail-policy.md"),
     "## 6. When a conversation goes to a person",
   );
-  const modelOpen = pythonStrings(model, "\nOPEN = ", "(");
-  const modelTerminal = pythonStrings(model, "\nTERMINAL = ", "(");
+  const modelOpen = pythonStrings(model, "\nOPEN = ");
+  const modelTerminal = pythonStrings(model, "\nTERMINAL = ");
   const policyReasons = firstColumn(policy ?? "", "Reason")?.flatMap(backticked);
   const machine2 = section(machines, "## 2. Handover") ?? "";
   const machine7 = section(machines, "## 7. Outbound message") ?? "";
@@ -181,27 +190,27 @@ export function checkSharedNames(root: string): string[] {
     // these, regenerating the file would silently bring old names back.
     ...compare(
       "OpenAPI generator, Handover state",
-      pythonStrings(generator, '"state": enum("waiting"', "("),
+      pythonStrings(generator, '"state": enum("waiting"'),
       HANDOVER_STATES,
     ),
     ...compare(
       "OpenAPI generator, Handover reasons",
-      pythonStrings(generator, '"reasons": arr(enum(', "("),
+      pythonStrings(generator, '"reasons": arr(enum('),
       HANDOVER_REASONS,
     ),
     ...compare(
       "OpenAPI generator, Message status",
-      pythonStrings(generator, '"status": nullable(enum("pending"', "("),
+      pythonStrings(generator, '"status": nullable(enum("pending"'),
       MESSAGE_STATUSES,
     ),
     ...compare(
       "OpenAPI generator, Message class",
-      pythonStrings(generator, '"class": nullable(enum(', "("),
+      pythonStrings(generator, '"class": nullable(enum('),
       classNames,
     ),
     ...compare(
       "OpenAPI generator, Message direction",
-      pythonStrings(generator, '"direction": enum(', "("),
+      pythonStrings(generator, '"direction": enum('),
       MESSAGE_DIRECTIONS,
     ),
     ...compare(

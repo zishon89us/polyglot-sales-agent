@@ -118,6 +118,29 @@ describe("checkSharedNames", () => {
     );
   });
 
+  test.each([
+    ['"requested", "repeated-failure"', '"requested", "repeat"', "Handover reasons"],
+    ['"pending", "held", "discarded"', '"pending", "held", "dropped"', "Message status"],
+    ['"service-notice", "business-initiated"', '"notice", "business-initiated"', "Message class"],
+    ['enum("inbound", "outbound")', 'enum("inbound", "outgoing")', "Message direction"],
+  ])("a list changed in the generating script only: %s", (from, to, where) => {
+    change("docs/design/tools/gen_openapi.py", from, to);
+    const problems = checkSharedNames(root);
+    expect(problems).toHaveLength(2);
+    expect(problems.every((p) => p.startsWith(`OpenAPI generator, ${where}: `))).toBe(true);
+  });
+
+  test.each([
+    ['enum("inbound", "outbound")', 'enum("inbound", "outbound", \'internal\')'],
+    ['enum("inbound", "outbound")', 'enum("inbound", "outbound", *EXTRA)'],
+    ['enum("inbound", "outbound")', 'enum(*("inbound", "outbound"), "internal")'],
+  ])("a list in the generating script that is not plain strings is not passed: %s", (from, to) => {
+    change("docs/design/tools/gen_openapi.py", from, to);
+    expect(checkSharedNames(root)).toEqual([
+      "OpenAPI generator, Message direction: the list was not found where the check expects it",
+    ]);
+  });
+
   test("a name renamed in the script that generates the OpenAPI file only", () => {
     change(
       "docs/design/tools/gen_openapi.py",

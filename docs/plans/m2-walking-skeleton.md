@@ -21,7 +21,7 @@ isolation, exactly-once handling, the lease and the send policy.
 | --- | --- | --- | --- | --- |
 | U1 | #262 | Monorepo tooling and the local check | — | `make check` passes on an empty workspace; a deliberately wrong file fails it. |
 | U2 | #263 | CI pipeline with the document checks | U1 | A pull request with a planted secret, a broken OpenAPI file and a missing traceability row each fail. |
-| U3 | #264 | One source for shared names | U1 | Changing a name in one place only fails the check. |
+| U3 | #264 | One source for shared names | U1 | Changing a name in one of the places the check reads fails the check. As built: five lists, seventeen places; mentions in prose are not checked (#278). |
 | U4 | #265 | Database, roles and tenant isolation | U1 | A query as the application role without a tenant returns nothing; cross-tenant read and write attempts fail (US-C2); a new table without a policy fails the test. |
 | U5 | #266 | Jobs, the conversation lease and worker health | U4 | Two workers never process one conversation at once (NFR-R6); a job that keeps failing ends in dead-letter; a lost lease discards the late result. |
 | U6 | #267 | Channel interface and the mock channel | U1 | Contract tests against dated synthetic fixtures; a bad signature stores nothing; an oversized body is refused. |
@@ -61,6 +61,8 @@ GitHub Actions running `make check` on every pull request: locked install, forma
 ### U3: One source for shared names (#264)
 
 A package of shared definitions: message statuses and classes, handover reasons and states, flags, settings with their units and ranges. A check that the tables in the glossary, data model, state machines and OpenAPI file match it (#204, #183).
+
+**As built:** message statuses, classes and directions, and handover states and reasons. Flags and settings with their units and ranges were not done; they and the rest of #183 and #204 are in #278.
 
 ### U4: Database, roles and tenant isolation (#265)
 
@@ -114,7 +116,7 @@ their subject. Those that M2 must settle, by unit:
 | Unit | Findings |
 | --- | --- |
 | U2 | #163 (CI hardening) |
-| U3 | #183 in part (status names only). Not done in U3 and moved to #278: model flags, #204 (units and names of settings), #249 (pack settings), the rest of #183 |
+| U3 | #183 in part (the names of handover states and reasons and of message statuses, classes and directions). Not done in U3 and moved to #278: model flags, #204 (units and names of settings), #249 (pack settings), the rest of #183 |
 | U4 | #162 (roles and keys), #191 (cross-tenant role and the policy test), #184 in part (tables the skeleton needs) |
 | U5 | #187 (worker health), #195 in part (timers that exist in M2) |
 | U6 | #154 (webhook limits), #202 (two mocks) |
