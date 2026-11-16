@@ -1,0 +1,27 @@
+name: Bug
+description: Something behaves differently from its acceptance criteria
+labels: ["phase:test"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Use synthetic data only. Never paste real phone numbers or customer messages.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit

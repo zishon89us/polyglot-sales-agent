@@ -1,0 +1,22 @@
+name: Eval gap
+description: AI behaviour that no eval case covers, or a failure seen in use
+labels: ["area:ai", "phase:test"]
+body:
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Behaviour not covered
+      description: Use synthetic examples only.
+    validations:
+      required: true
+  - type: input
+    id: languages
+    attributes:
+      label: Languages affected
+  - type: textarea
+    id: case
+    attributes:
+      label: Proposed eval case
+      description: Input, expected outcome, and how it would be graded.
+    validations:
+      required: true

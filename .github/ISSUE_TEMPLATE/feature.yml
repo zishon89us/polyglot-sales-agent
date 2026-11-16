@@ -1,0 +1,23 @@
+name: Feature or user story
+description: A piece of user-visible behaviour, with acceptance criteria
+labels: ["phase:build"]
+body:
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      description: As a <persona>, I want <capability>, so that <outcome>.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Given / When / Then. Each criterion must be checkable by a test.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Constraints, dependencies, out of scope.
