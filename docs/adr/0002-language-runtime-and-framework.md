@@ -98,3 +98,46 @@ database, network or framework module, checked by an import-boundary test.
   must be checked against the Node.js release schedule when M2 starts.
 - This confirms the default in `AGENTS.md` section 3.
 - Reopen if the eval tooling in TypeScript blocks milestone M3.
+
+## Amendment, 2026-11-17: tooling and the Node.js line (M2 unit U1)
+
+This record asked for a check of the Node.js release schedule when M2
+starts, and left the tools to the unit that needs them. The first code
+review (Gate 4) found neither recorded.
+
+**Node.js.** Read on 2026-11-17 as search extracts, not in full:
+<https://nodejs.org/en/blog/announcements/evolving-the-nodejs-release-schedule>
+(Node.js 26 enters long-term support in October 2026 and is the last line
+under the old schedule) and <https://nodejs.org/en/about/previous-releases>
+(22 is in maintenance; the extract seen still showed 24 as the active line).
+The two extracts do not agree on which line is the active one today, so the
+statement is an assumption until read in full.
+
+Decision: the code must run on **Node.js 22.12 or later**. 22 is what the
+agent's environment provides and is still supported; CI (unit U2) runs the
+checks on 22 and on the newest long-term-support line. Type definitions are
+pinned to the 22 line, the oldest supported, so that nothing newer is used
+by accident. `engines` is advisory; nothing enforces it until CI does.
+
+**Tools.** Each was chosen on 2026-11-17. Versions are pinned exactly.
+Licences are from the npm registry. `pnpm audit` reported no known
+vulnerabilities on that date.
+
+| Tool | Version | Licence | Last published | Why this one | Considered instead |
+| --- | --- | --- | --- | --- | --- |
+| pnpm | 10.28.0 | MIT | Active; 12.x is the newest line | Workspaces, a strict lockfile, already present in the agent's environment. The 10 line is used because that is what is installed; moving to 12 is a separate change | npm workspaces |
+| TypeScript | 7.0.2 | Apache-2.0 | 2026-11-16 | Required by this record | — |
+| Biome | 2.6.8 | MIT or Apache-2.0 | 2026-11-15 | One tool and one configuration for formatting, lint and import order; fast enough to run on every check | ESLint with Prettier: more rules and plug-ins, two tools to keep in step |
+| Vitest | 5.1.0 | MIT | 2026-11-02 | Runs TypeScript and ES modules without a build step | Node's built-in test runner: no dependency, fewer features |
+| commitlint | 21.2.4 | MIT | 2026-10-18 | Enforces the commit format of `AGENTS.md` section 4 | A hand-written check |
+| @types/node | 22.20.5 | MIT | — | Types for the Node.js line above | — |
+
+All are development dependencies; none ships in the product. Their 110
+transitive packages are under MIT, ISC, Apache-2.0, BSD-3-Clause,
+Python-2.0 (one) and MPL-2.0 (three: `lightningcss` and its platform
+binaries, through Vitest). MPL-2.0 applies file by file and places no
+condition on this project's own code.
+
+Not verified: how actively each tool is maintained beyond its last
+publication date, and whether a newer major version of any of them has
+changed its licence.

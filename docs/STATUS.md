@@ -117,13 +117,22 @@ M0 Inception met its exit criteria on 2026-11-16; see
   `docs/plans/m2-walking-skeleton.md`. Open review findings sorted into the
   milestone that builds their subject. `AGENTS.md` gains the unit loop and
   the halt rule.
+- 2026-11-17 — ADR 0013 and the M2 plan merged as #261 and #273. **First
+  code.** M2 unit U1 (#262): pnpm workspace, TypeScript 7 in strict mode,
+  Biome for format and lint, Vitest, commitlint, and `make check`, with a
+  self-test that runs the real checks on deliberately wrong files. The
+  first independent code review found 20 defects, two High: the self-test
+  did not exercise the project's own configuration, and one commit did not
+  pass on its own. Both are fixed; the report is in the pull request. The maintainer's
+  two questions (commit identity, squash or merge) are unanswered; work
+  continues as before on both.
 
 ## Next
 
-1. Maintainer merges ADR 0013 (#59) and the M2 plan, which is stacked on it.
-2. Maintainer answers two questions before the first code commit: whose git
-   identity commits carry, and squash or merge commits (#7, OQ-11).
-3. M2 unit U1: monorepo tooling and the local check (#262).
+1. Maintainer reviews and merges U1 (#262).
+2. M2 unit U2: the CI pipeline with the document checks (#263).
+3. Still open for the maintainer: whose git identity commits carry, and
+   squash or merge commits (#7, OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
    each channel assumption re-read in full (threat model A7).

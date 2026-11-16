@@ -42,3 +42,26 @@ The body says why the change was made and ends with `Refs #<issue>` or
 Most of this repository is written by an AI agent directed by the maintainer.
 Commits made by the agent carry a `Co-Authored-By` trailer. If you use an AI
 tool for a contribution, say so in the pull request.
+
+## Working on the code
+
+You need Node.js 22.12 or later and pnpm 10 (`corepack enable` provides it).
+
+```sh
+make setup   # install the locked dependencies
+make check   # lint and format, type check, tests, self-test, commit messages
+```
+
+`make check` is the one local check. CI will run exactly this once it
+exists (M2 unit U2); until then nothing runs it for you.
+
+- **Lint** covers formatting, lint rules and import order. Warnings fail.
+- **Self-test.** It copies deliberately wrong files from
+  `tools/selftest/fixtures/` into a scratch package and runs the real
+  checks on them with the project's own configuration. If a check accepts
+  its wrong file, the self-test fails. It covers the type check, lint,
+  formatting, the test run and the commit-message lint. It does not cover
+  every file type or folder; it shows each check can fail, not that
+  nothing escapes it.
+- **Commit messages** on your branch are linted against `AGENTS.md` section
+  4. The 72-character limit applies to the whole first line.
