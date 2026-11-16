@@ -15,20 +15,21 @@ acceptance criteria.
 - 2026-11-16 — Labels (phase, area, priority, `needs-human`), the M0
   milestone and issues #1–#7 created.
 - 2026-11-16 — Working agreement and repository scaffold opened as a pull
-  request for #1.
+  request for #1; merged by the maintainer as #8.
+- 2026-11-16 — Product vision and personas opened as a pull request for #2.
 
 ## Next
 
-1. #2 Product vision and personas.
-2. #3 MVP user stories with acceptance criteria, one issue per story, and the
+1. #3 MVP user stories with acceptance criteria, one issue per story, and the
    traceability table.
-3. #4 Non-functional requirements.
-4. #5 Risk register.
+2. #4 Non-functional requirements.
+3. #5 Risk register.
 
 ## Blocked on the maintainer
 
-- #6 Branch protection for `main`, and which pull requests (if any) the agent
-  may merge itself.
+- #6 A ruleset named `main` exists but its enforcement is set to disabled, so
+  `main` is not yet protected. Still open: which pull requests (if any) the
+  agent may merge itself.
 - #7 Licence, product name, copyright holder, LLM provider, hosting target,
   Meta developer app, commit identity. None of these block M0 or M1.
 
