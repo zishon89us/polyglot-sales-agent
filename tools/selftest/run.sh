@@ -77,6 +77,23 @@ expect_rejection "format check" "File content differs from formatting output" "_
 plant failing.test.ts bad.test.ts
 expect_rejection "test run" "selftest fixture fails on purpose" "__selftest__/src/bad.test.ts" pnpm run test
 
+# Document checks: a copy of the documents with one traceability row removed.
+cleanup
+mkdir -p "$scratch/root" || exit 1
+cp -R docs .github README.md AGENTS.md CONTRIBUTING.md SECURITY.md "$scratch/root/" || exit 1
+grep -v '^| US-C1 ' docs/requirements/traceability.md \
+  >"$scratch/root/docs/requirements/traceability.md"
+expect_rejection "traceability check" "no row for US-C1" "traceability.md" \
+  sh -c "cd '$scratch/root' && node '$root/tools/check-docs.ts'"
+
+# OpenAPI lint: a copy of the file with its first operationId removed.
+cleanup
+mkdir -p "$scratch" || exit 1
+awk '!done && /operationId:/ { done = 1; next } { print }' docs/design/openapi.yaml \
+  >"$scratch/openapi.yaml" || exit 1
+expect_rejection "OpenAPI lint" "operation-operationId" "__selftest__/openapi.yaml" \
+  pnpm exec redocly lint "$scratch/openapi.yaml"
+
 cleanup
 expect_rejection "commit message lint" "type-empty" "Updated some stuff" \
   sh -c 'echo "Updated some stuff." | pnpm exec commitlint'
