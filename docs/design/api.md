@@ -9,8 +9,8 @@ endpoints. The machine-readable contract is
 the OpenAPI file is right about shapes and this document is right about
 behaviour, and the difference is a defect.
 
-Nothing here is built. **The OpenAPI file has not been run through a
-linter**; see "What is not done".
+Nothing here is built. The OpenAPI file was linted in pull request #172; see
+"How the file was checked".
 
 ## Method and sources
 
@@ -290,16 +290,21 @@ Every operation in the file appears in this table; a script checked it.
 
 Decisions 5, 6 and 7 add behaviour that no story states.
 
-## 10. What is not done
+## 10. How the file was checked, and what is not done
 
-- **No linter has been run on `openapi.yaml`.** Issue #41 asks for one. The
-  session that wrote the file was not permitted to download and run a lint
-  tool. A script, `docs/design/tools/check_openapi.py`, checks that every
-  reference resolves, operation names are unique, path parameters match
-  their paths, every operation has a success response, every route that
-  changes state requires the forgery-protection token, and no schema is
-  unused. That is **not** a substitute for a linter. Issue #41 stays open
-  until a linter passes, by hand or in the CI pipeline of M2.
+- **Linter.** Pull request #172 added `redocly.yaml` and reports that
+  `npx @redocly/cli lint docs/design/openapi.yaml` gives no errors and no
+  warnings, with the recommended rules and one rule turned off
+  (`no-server-example.com`, because the file lists only the local
+  development server). That run was made in a different session from the one
+  that wrote this document, which was not permitted to run a lint tool and
+  **has not repeated the run**. The lint becomes a CI step in M2, which is
+  where it is next verified.
+- **Structural check.** `docs/design/tools/check_openapi.py` checks that
+  every reference resolves, operation names are unique, path parameters
+  match their paths, every operation has a success response, every route
+  that changes state requires the forgery-protection token, and no schema is
+  unused. It passes on the current file.
 - The channel's payload is not described.
 - Rate limits are mostly unset (section 7).
 - Not independently reviewed; Gate 2 covers it.

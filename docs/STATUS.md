@@ -85,11 +85,15 @@ M0 Inception met its exit criteria on 2026-11-16; see
   43 paths and 55 operations. **No linter has been run on the OpenAPI file**;
   the session was not permitted to download one. A structural check script
   passes. Issue #41 stays open until a linter passes.
+- 2026-11-16 — API merged as #171. Pull request #172, from another session,
+  added `redocly.yaml` and reports a clean lint of the OpenAPI file. This
+  session has not repeated that run. `api.md` now says so, and #41 is closed
+  on that basis.
 
 ## Next
 
-1. Maintainer reviews and merges the API (#41), and decides how the OpenAPI
-   file gets linted: by hand now, or in the CI pipeline of M2.
+1. Maintainer merges the three stacked pull requests: the lint status
+   (#41), the keyed hash (#160) and operator access (#161).
 2. Before Gate 2: the two open design gaps from the threat model, #160
    (keyed hash) and #161 (operator access).
 3. Open review findings are checked against the state machines and ADRs as
