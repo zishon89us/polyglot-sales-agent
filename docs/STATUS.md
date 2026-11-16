@@ -16,14 +16,16 @@ acceptance criteria.
   milestone and issues #1–#7 created.
 - 2026-11-16 — Working agreement and repository scaffold opened as a pull
   request for #1; merged by the maintainer as #8.
-- 2026-11-16 — Product vision and personas opened as a pull request for #2.
+- 2026-11-16 — Product vision and personas merged by the maintainer as #9.
+- 2026-11-16 — Milestones M1–M6 created. 23 MVP user stories written, each
+  opened as its own issue (#10–#32) and assigned to its milestone;
+  traceability table started. Opened as a pull request for #3.
 
 ## Next
 
-1. #3 MVP user stories with acceptance criteria, one issue per story, and the
-   traceability table.
-2. #4 Non-functional requirements.
-3. #5 Risk register.
+1. #4 Non-functional requirements.
+2. #5 Risk register.
+3. M0 retro and tag, then milestone M1 (design).
 
 ## Blocked on the maintainer
 
