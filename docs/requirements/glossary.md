@@ -57,7 +57,7 @@ only whether the message may be free-form or must be a template (US-C9).
 
 | Message | Rule when its due time falls in quiet hours |
 | --- | --- |
-| Appointment reminder | Set for one minute before those quiet hours begin, if that moment is still in the future when the reminder is scheduled or rescheduled. Otherwise set for the end of those quiet hours, if that is at least 60 minutes before the appointment starts. Otherwise withheld as `too-late`. A reminder is never sent later than 60 minutes before its appointment, however it came to be late. The full rule, with worked examples, is in `docs/design/state-machines.md` section 5 (US-B3). |
+| Appointment reminder | Set for one minute before those quiet hours begin, if that moment is still in the future when the reminder is scheduled or rescheduled. Otherwise set for the end of those quiet hours, if that is at least 60 minutes before the appointment starts. Otherwise withheld as `too-late`. A reminder is never scheduled later than 60 minutes before its appointment, nor accepted by the channel later than 55 minutes before, however it came to be late. The full rule, with worked examples, is in `docs/design/state-machines.md` section 5 (US-B3). |
 | Booking-change notice | Sent at once if the booking's start time, or for a moved booking the earlier of its old and new start times, is within 12 hours. Otherwise sent at the end of quiet hours (US-D12). |
 | A message queued for the channel's daily limit | When capacity returns, the message's own rule in this table is applied as if it had just become due (US-C9). |
 | `handover_followup` | Held to the end of quiet hours. |
@@ -125,7 +125,7 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Model call timeout and attempts | 20 seconds, 3 attempts, waits of 1 and 4 seconds | US-C15, NFR-R4 |
 | Awaiting-retry attempts | Every 60 seconds and on the customer's next message, until the message is 15 minutes old; at most one provider-failure fallback per session per 15 minutes | US-C15 |
 | Age limit of a tool result used to state a slot or booking time | 10 minutes | US-C4 |
-| Reminder floor after quiet hours | At least 60 minutes before the appointment | US-B3 |
+| Reminder floor | Scheduled no later than 60 minutes before the appointment; accepted by the channel no later than 55 minutes before | US-B3 |
 | Urgent booking-change notice | Appointment starts within 12 hours | US-D12 |
 | Credential check | Daily, and on any channel authentication error | US-D6 |
 | Degraded-mode trigger and probe | 5 sessions marked awaiting retry within 2 minutes; health check every 30 seconds | US-C15 |
@@ -133,7 +133,7 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Wait for delivery before the next message | 10 seconds | US-C18, NFR-R7 |
 | Unanswered follow-up expiry | 7 days after `handover_followup` | US-C14 |
 | Detached handover expiry | 14 days after its session ended | US-C14 |
-| Handover escalation clock | Counts only while the tenant is inside business hours | US-C14 |
+| Handover escalation clock | Counts only while the tenant is inside business hours; runs while a handover is unanswered, attached or detached; stops when a follow-up is sent and restarts from zero on re-attachment | US-C14 |
 | Credential check that cannot complete | No state change; retried within the hour | US-D6 |
 | Notification email throttle | 1 email per tenant per 5 minutes; 3 send attempts | US-C14 |
 | Sign-in lockout | 5 failures in 15 minutes, then 15 minutes | US-D1, NFR-S6 |

@@ -2,7 +2,7 @@
 
 Status: revised after the independent Gate 1 review and the state-machine design · Phase 1 (requirements) · Issues #3, #46, #61, #126
 
-Version 1.0 has 36 stories with 214 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
+Version 1.0 has 36 stories with 219 acceptance criteria. Each story has its own issue, which is where the work is tracked; this document is the readable overview.
 
 - Personas are in [`personas.md`](personas.md).
 - Every term, metric, setting and default used here is defined in [`glossary.md`](glossary.md). Words such as *session*, *supported language*, *business-initiated message*, *grounded fact*, *fallback message* and *business hours* have the meanings given there.
@@ -230,22 +230,24 @@ As a staff agent, I want to be notified when a session is handed over, so that t
 1. **Given** a session is handed over, **when** the handover is recorded, **then** it appears in the dashboard waiting list with its reason and waiting time.
 2. **Given** a session is handed over, **when** the handover is recorded, **then** an email is sent to the tenant's notification address, with at most one email per tenant in any 5 minutes, listing all sessions waiting.
 3. **Given** the notification email fails to send, **when** 3 attempts have failed, **then** the failure is logged and the waiting list remains the record of what is waiting.
-4. **Given** a handover with no staff message, **when** the handover escalation time, counted only while the tenant is inside business hours, has elapsed, **then** it is marked overdue at the top of the waiting list, once.
-5. **Given** a handover that becomes overdue while the contact's reply window is open, **when** it is marked overdue, **then** the customer receives one holding message with the tenant's support contact, and no further automatic message is sent for that handover.
-6. **Given** a handover that becomes overdue after the contact's reply window has closed, **when** it is marked overdue, **then** no holding message is sent.
-7. **Given** a session handed over outside business hours, or whose escalation time has not elapsed at closing, **when** the escalation time is counted, **then** counting stops at closing and continues at the next opening time.
-8. **Given** the customer writes again while the session is handed over, **when** the message arrives, **then** the assistant does not reply and the message is added to the waiting session.
-9. **Given** an unanswered handover whose session has ended, **when** staff open the waiting list, **then** it is still listed, marked unanswered, with the date of the request.
-10. **Given** an unanswered handover whose reply window has closed, **when** staff choose to follow up, **then** the `handover_followup` template is sent once as a service notice, in the language chosen under US-C9 criterion 2, inviting the customer to reply so that a person can answer; the handover stays open and unanswered.
-11. **Given** an unanswered handover for which `handover_followup` has already been sent, for which no approved template exists, or whose contact opted out after asking, **when** staff open it, **then** the follow-up action is unavailable and the dashboard says why.
-12. **Given** a `handover_followup` that is withheld or fails to send, **when** that happens, **then** the reason is shown on the handover, the handover stays as it was, and the follow-up action is available again.
-13. **Given** a contact with an unanswered handover for which `handover_followup` was sent, **when** they send a message, **then** the session that message belongs to is handed over under that same handover, the customer is told a person will reply, staff are notified as in criteria 1 and 2, and the assistant does not answer.
-14. **Given** a contact with an unanswered handover for which no follow-up was sent, **when** they send a message in a new session, **then** the assistant answers it, and the old handover stays listed as unanswered.
-15. **Given** an unanswered handover whose session has ended, for a contact whose later message has opened the reply window, **when** a staff user sends a staff message from it, **then** the contact's current session is handed over under that handover, and the handover is answered.
-16. **Given** an unanswered handover, **when** staff close it, **then** it ends with outcome `closed-unanswered` and the reason staff chose.
-17. **Given** an unanswered handover for which `handover_followup` was sent, **when** 7 days pass with no message from the contact, **then** it ends with outcome `closed-unanswered`, reason `no-response`.
-18. **Given** an unanswered handover whose session has ended and for which no follow-up is pending, **when** 14 days pass since that session ended, **then** it ends with outcome `closed-unanswered`, reason `expired`.
-19. **Given** any handover, **when** it ends, **then** it is stored with exactly one outcome: `handed-back`, `answered` or `closed-unanswered`.
+4. **Given** a handover with no staff message, whether or not its session has ended, **when** the handover escalation time, counted only while the tenant is inside business hours, has elapsed, **then** it is marked overdue at the top of the waiting list.
+5. **Given** a handover for which `handover_followup` has been accepted by the channel, **when** the escalation time would elapse, **then** it is not marked overdue; the clock is stopped, and restarts from zero if the handover is attached to a session again.
+6. **Given** a handover that becomes overdue while the contact's reply window is open, **when** it is marked overdue, **then** the customer receives one holding message with the tenant's support contact, and no further automatic message is sent for that handover.
+7. **Given** a handover that becomes overdue after the contact's reply window has closed, **when** it is marked overdue, **then** no holding message is sent.
+8. **Given** a session handed over outside business hours, or whose escalation time has not elapsed at closing, **when** the escalation time is counted, **then** counting stops at closing and continues at the next opening time.
+9. **Given** the customer writes again while the session is handed over, **when** the message arrives, **then** the assistant does not reply and the message is added to the waiting session.
+10. **Given** an unanswered handover whose session has ended, **when** staff open the waiting list, **then** it is still listed, marked unanswered, with the date of the request.
+11. **Given** an unanswered handover whose reply window has closed, **when** staff choose to follow up, **then** the `handover_followup` template is sent once as a service notice, in the language chosen under US-C9 criterion 2, inviting the customer to reply so that a person can answer; the handover stays open and unanswered.
+12. **Given** an unanswered handover for which `handover_followup` has already been sent, for which no approved template exists, or whose contact opted out after asking, **when** staff open it, **then** the follow-up action is unavailable and the dashboard says why.
+13. **Given** a `handover_followup` that is withheld or fails to send, **when** that happens, **then** the reason is shown on the handover, the handover stays as it was, and the follow-up action is available again.
+14. **Given** a contact with an unanswered handover for which `handover_followup` was sent, **when** they send a message other than an opt keyword, a stop or start button, or a reminder's Confirm button, **then** the session that message belongs to is handed over under that same handover and the assistant does not answer.
+15. **Given** a handover attached in that way, for a tenant that is answering and a contact who is not paused for rate, **when** it is attached, **then** the customer is told a person will reply and staff are notified as in criteria 1 and 2.
+16. **Given** a contact with an unanswered handover for which no follow-up was sent, **when** they send a message in a new session, **then** the assistant answers it, and the old handover stays listed as unanswered.
+17. **Given** an unanswered handover whose session has ended, for a contact whose later message has opened the reply window, **when** a staff user sends a staff message from it, **then** the contact's current session is handed over under that handover, and the handover is answered.
+18. **Given** an unanswered handover, **when** staff close it, **then** it ends with outcome `closed-unanswered` and the reason staff chose.
+19. **Given** an unanswered handover for which `handover_followup` was sent, **when** 7 days pass with no message from the contact, **then** it ends with outcome `closed-unanswered`, reason `no-response`.
+20. **Given** an unanswered handover whose session has ended and for which no follow-up is pending, **when** 14 days pass since that session ended, **then** it ends with outcome `closed-unanswered`, reason `expired`.
+21. **Given** any handover, **when** it ends, **then** it is stored with exactly one outcome: `handed-back`, `answered` or `closed-unanswered`.
 
 ### US-C15 — Stay usable when the AI provider fails
 
@@ -283,7 +285,7 @@ As a business owner, I want one phone number to be unable to run up cost or floo
 
 1. **Given** a contact who sends more than 20 messages in 5 minutes, **when** the 21st arrives, **then** the assistant sends one notice that it will pause, and does not reply to that contact for 15 minutes.
 2. **Given** a contact paused for rate, **when** they send more messages, **then** the messages are stored, no model call is made, no handover is created and no notification is sent.
-3. **Given** a contact paused for rate, **when** they tap the person button or ask for a person, **then** no handover is created until the pause has ended.
+3. **Given** a contact paused for rate, **when** they tap the person button or ask for a person, **then** no handover is created and the request is not kept; they must ask again after the pause.
 4. **Given** the 15 minutes have passed, **when** the contact sends a message, **then** the assistant replies as usual.
 
 ### US-C18 — Know whether each message arrived
@@ -347,15 +349,18 @@ As an end customer, I want a reminder before my appointment that I can answer wi
 2. **Given** a booking created or moved when its start is nearer than the reminder lead time, **when** it is created or moved, **then** it has no reminder.
 3. **Given** a scheduled reminder whose time is reached, for a contact who has consent and is not opted out, **when** the time is reached, **then** it is sent under US-C9, with Confirm, Reschedule and Cancel buttons.
 4. **Given** a scheduled reminder whose time is reached, for a contact who has no consent or is opted out, **when** the time is reached, **then** it is withheld with reason `no-consent` or `opted-out`.
-5. **Given** a reminder that for any reason has not been sent by 60 minutes before the appointment, **when** that moment passes, **then** it is withheld with reason `too-late`.
-6. **Given** a reminder whose due time falls in quiet hours, when one minute before those quiet hours begin is still in the future at the moment of scheduling, **when** it is scheduled or rescheduled, **then** it is set for one minute before those quiet hours begin.
-7. **Given** a reminder whose due time falls in quiet hours, in every other case, **when** it is scheduled or rescheduled, **then** it is set for the end of those quiet hours if that is at least 60 minutes before the appointment, and is otherwise withheld with reason `too-late`.
-8. **Given** a reminder was sent, **when** the customer taps Confirm, **then** the booking is marked confirmed.
-9. **Given** a reminder was sent, **when** the customer taps Reschedule or Cancel, **then** the assistant continues under US-B4.
-10. **Given** a reminder was sent, **when** the customer does not answer, **then** the booking is unchanged and no second reminder is sent.
-11. **Given** a booking with a pending reminder, **when** it is rescheduled, **then** the reminder is rescheduled for the new time and any confirmed mark is cleared.
-12. **Given** a booking with a pending reminder, **when** it is cancelled, **then** the reminder is cancelled.
-13. **Given** an opted-out contact, **when** they book an appointment, **then** the booking confirmation says that no reminder will be sent unless they opt back in.
+5. **Given** any reminder, **when** it is scheduled, **then** its time is no later than 60 minutes before the appointment.
+6. **Given** a reminder that for any reason the channel has not accepted by 55 minutes before the appointment, **when** that moment passes, **then** it is withheld with reason `too-late`.
+7. **Given** a reminder whose due time falls in quiet hours, when one minute before those quiet hours begin is still in the future at the moment of scheduling, **when** it is scheduled or rescheduled, **then** it is set for one minute before those quiet hours begin.
+8. **Given** a reminder whose due time falls in quiet hours, in every other case, **when** it is scheduled or rescheduled, **then** it is set for the end of those quiet hours if that is at least 60 minutes before the appointment, and is otherwise withheld with reason `too-late`.
+9. **Given** a reminder was sent and the booking has not been moved or cancelled since, **when** the customer taps Confirm before the start, **then** the booking is marked confirmed by code, whether or not the tenant is answering, the contact is paused, the session is handed over or the service is in degraded mode.
+10. **Given** a reminder was sent and the booking has since been moved, **when** the customer taps Confirm on it, **then** the booking is not confirmed and the customer is told its current time.
+11. **Given** a reminder was sent, **when** the customer taps Reschedule or Cancel in a session that is not handed over, **then** the tap is treated as that request and the assistant continues under US-B4.
+12. **Given** a reminder was sent, **when** the customer taps Reschedule or Cancel in a handed-over session, **then** the booking is not changed, the customer is told so and that a person will deal with the request, and the tap joins the waiting session.
+13. **Given** a reminder was sent, **when** the customer does not answer, **then** the booking is unchanged and no second reminder is sent.
+14. **Given** a booking with a pending reminder, **when** it is rescheduled, **then** the reminder is rescheduled for the new time and any confirmed mark is cleared.
+15. **Given** a booking with a pending reminder, **when** it is cancelled, **then** the reminder is cancelled.
+16. **Given** an opted-out contact, **when** they book an appointment, **then** the booking confirmation says that no reminder will be sent unless they opt back in.
 
 ### US-B4 — Reschedule or cancel
 
