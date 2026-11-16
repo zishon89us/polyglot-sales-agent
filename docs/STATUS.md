@@ -2,10 +2,13 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M0 Inception
+## Current milestone: M1 Design
 
-Exit criteria: requirements merged; every MVP story exists as an issue with
-acceptance criteria.
+Exit criteria: design documents merged; open questions listed for the
+maintainer. Issues #37–#44.
+
+M0 Inception met its exit criteria on 2026-11-16; see
+[`retros/m0-inception.md`](retros/m0-inception.md).
 
 ## Done
 
@@ -21,21 +24,27 @@ acceptance criteria.
   opened as its own issue (#10–#32) and assigned to its milestone;
   traceability table started. Merged by the maintainer as #33.
 - 2026-11-16 — Branch ruleset for `main` set to active by the maintainer.
-- 2026-11-16 — Non-functional requirements (#4) and risk register (#5) opened
-  as pull requests.
+- 2026-11-16 — Non-functional requirements and risk register merged by the
+  maintainer as #34 and #35.
+- 2026-11-16 — M1 issues #37–#44 opened. M0 retro opened as a pull request
+  for #36.
 
 ## Next
 
-1. M0 retro in `docs/retros/`, close the milestone.
-2. Milestone M1 (design): open its issues, starting with verifying channel
-   rules from official documentation for `docs/compliance.md`.
+1. #37 Verify channel rules and data-protection obligations from official
+   sources; write `docs/compliance.md`.
+2. #38 First ADRs, then #39 architecture, #40 data model, #42 threat model.
+3. #43 Eval plan and #44 guardrail policy.
+4. #41 API specification.
 
 ## Blocked on the maintainer
 
 - #6 Still open: project board, private vulnerability reporting, and which
   pull requests (if any) the agent may merge itself.
 - #7 Licence, product name, copyright holder, LLM provider, hosting target,
-  Meta developer app, commit identity. None of these block M0 or M1.
+  Meta developer app, commit identity. Needed before M2; none block M1.
+- Squash merge or merge commits: practice and `AGENTS.md` differ (see the M0
+  retro).
 
 ## Not done yet
 
