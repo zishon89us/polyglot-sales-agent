@@ -26,23 +26,41 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-16 — Branch ruleset for `main` set to active by the maintainer.
 - 2026-11-16 — Non-functional requirements and risk register merged by the
   maintainer as #34 and #35.
-- 2026-11-16 — M1 issues #37–#44 opened. M0 retro opened as a pull request
-  for #36.
+- 2026-11-16 — M1 issues #37–#44 opened. M0 retro merged as #45.
+- 2026-11-16 — Author's own requirements review merged as #56: 12 findings,
+  9 stories added (32 in total, issues #47–#55), glossary added.
+- 2026-11-16 — Named standards and independent phase-gate review adopted,
+  with checklists; merged as #60.
+- 2026-11-16 — First independent review run on the requirements (#58): 44
+  findings, 9 High, all accepted. Report and response opened as a pull
+  request. Fixes tracked in #61.
 
 ## Next
 
 1. #37 Verify channel rules and data-protection obligations from official
-   sources; write `docs/compliance.md`.
-2. #38 First ADRs, then #39 architecture, #40 data model, #42 threat model.
-3. #43 Eval plan and #44 guardrail policy.
-4. #41 API specification.
+   sources; write `docs/compliance.md`. Not blocked: it is research, and
+   decision D3 depends on it.
+2. #61 Fix the 44 findings of the independent requirements review, once the
+   maintainer has answered decisions D1 to D3 and the scope question.
+3. A second independent review of the fixed requirements.
+
+## Gate status
+
+**Gate 1 (requirements) is not passed.** The independent review found 44
+defects, 9 of them High; see
+[`reviews/2026-11-16-gate1-requirements.md`](reviews/2026-11-16-gate1-requirements.md).
+The M1 design issues #38 to #44 are blocked until a second review has no open
+High finding.
 
 ## Blocked on the maintainer
 
-- #6 Still open: project board, private vulnerability reporting, and which
-  pull requests (if any) the agent may merge itself.
+- Decisions D1 to D3 and the MVP scope question in the author's response to
+  the independent review. D4 to D8 have recommendations that will be applied
+  unless the maintainer objects.
+- #6 Project board, private vulnerability reporting, and which pull requests
+  (if any) the agent may merge itself.
 - #7 Licence, product name, copyright holder, LLM provider, hosting target,
-  Meta developer app, commit identity. Needed before M2; none block M1.
+  Meta developer app, commit identity. Needed before M2.
 - Squash merge or merge commits: practice and `AGENTS.md` differ (see the M0
   retro).
 
