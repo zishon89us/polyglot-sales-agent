@@ -80,17 +80,21 @@ M0 Inception met its exit criteria on 2026-11-16; see
   naming how it is enforced and tested. It settles findings #120, #121 and
   #122, the reply-content rule #159 and open question OQ-5, and changes
   US-C4 and US-C6; version 1.0 now has 222 acceptance criteria.
+- 2026-11-16 — Eval plan and guardrail policy merged as #169 and #170. API
+  written (#41): `docs/design/api.md` and `docs/design/openapi.yaml`, with
+  43 paths and 55 operations. **No linter has been run on the OpenAPI file**;
+  the session was not permitted to download one. A structural check script
+  passes. Issue #41 stays open until a linter passes.
 
 ## Next
 
-1. Maintainer reviews and merges the eval plan (#43) and the guardrail
-   policy (#44); the second is stacked on the first.
-2. API (#41).
-3. Before Gate 2: the two open design gaps from the threat model, #160
+1. Maintainer reviews and merges the API (#41), and decides how the OpenAPI
+   file gets linted: by hand now, or in the CI pipeline of M2.
+2. Before Gate 2: the two open design gaps from the threat model, #160
    (keyed hash) and #161 (operator access).
-4. Open review findings are checked against the state machines and ADRs as
+3. Open review findings are checked against the state machines and ADRs as
    design reaches each story.
-5. Gate 2: independent review of all design documents together.
+4. Gate 2: independent review of all design documents together.
 
 ## Gate status
 
