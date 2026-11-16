@@ -51,10 +51,32 @@ CASES = [
     ("7 booked Mon 10:00 for Wed 08:00, lead 24h", d(16, 10), d(18, 8), 24 * H),
     ("8 booked Mon 21:59:30 for Wed 07:30, lead 24h", datetime(2026, 11, 16, 21, 59, 30), d(18, 7, 30), 24 * H),
     ("9 booked Tue 06:00 for Tue 09:30, lead 2h", d(17, 6), d(17, 9, 30), 2 * H),
+    # Boundary cases at the 60-minute floor (verification finding V3).
+    ("10 booked Mon 10:00 for Tue 15:00, lead 1h", d(16, 10), d(17, 15), 1 * H),
+    ("11 booked Tue 02:00 for Tue 09:00, lead 2h", d(17, 2), d(17, 9), 2 * H),
+    ("12 booked Tue 07:00 for Tue 09:00, lead 1h", d(17, 7), d(17, 9), 1 * H),
+    ("13 booked Tue 07:00 for Tue 08:59, lead 1h", d(17, 7), d(17, 8, 59), 1 * H),
 ]
+
+GRACE = timedelta(minutes=5)
+
+
+def may_send(at, start):
+    """Send-time check 5: the channel must accept the reminder no later than
+    55 minutes before the appointment."""
+    return at <= start - (FLOOR - GRACE)
 
 if __name__ == "__main__":
     for name, now, start, lead in CASES:
         kind, val = schedule(now, start, lead)
         shown = val.strftime("%a %H:%M") if isinstance(val, datetime) else val
         print(f"{name:48s} -> {kind}: {shown}")
+    # Property: the rule never schedules later than the floor, and a reminder
+    # sent up to 5 minutes after its scheduled time still passes check 5.
+    for name, now, start, lead in CASES:
+        kind, val = schedule(now, start, lead)
+        if kind == "scheduled":
+            assert val <= start - FLOOR, name
+            assert may_send(val + GRACE, start), name
+            assert not may_send(val + GRACE + MIN, start) or val < start - FLOOR, name
+    print("floor property holds for all cases")
