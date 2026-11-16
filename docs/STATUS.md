@@ -41,15 +41,31 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-16 — Second independent review (52 findings, 8 High), two narrow
   verification reviews, and their fixes, all in pull request #72. Gate 1
   passed with 62 Medium and Low findings tracked as issues.
+- 2026-11-16 — Pull request #72 merged by the maintainer. Design started
+  with `design/state-machines.md` (#126): transition tables for eight
+  machines and one order of checks for inbound messages. Thirteen decisions
+  were made there and applied to the requirements; it resolves #118, #119,
+  #123 and #124.
+- 2026-11-16 — Independent verification of the state machines: 33 findings,
+  4 High. All four fixed. The handover machine now has an executable model
+  that explores event sequences and asserts its invariants. 27 findings
+  tracked as issues #128 to #147. Version 1.0 now has 219 acceptance
+  criteria.
+- 2026-11-16 — Second verification of the state machines: no High defect
+  open. It also showed that the document overstated the handover model,
+  which checks invariant H2 only; corrected. Remaining findings tracked as
+  #148 to #150.
 
 ## Next
 
-1. Maintainer merges pull request #72.
-2. M1 design starts with state machines for session, handover, booking,
-   reminder and outbound message (transition tables), resolving #118 and
-   #124 first, then the ADRs (#38) and the remaining design issues.
-3. The open review findings (#73 to #125) are resolved against those tables
-   as design reaches each story.
+1. Maintainer merges pull request #127. Its second verification found no
+   High defect open.
+2. ADRs (#38), then architecture (#39), data model (#40), threat model (#42),
+   eval plan (#43), guardrail policy (#44) and API (#41). The output-check
+   findings #120 to #122 are settled in the guardrail policy.
+3. The remaining review findings (#73 to #117, #120 to #122, #125) are checked
+   against the state machines as design reaches each story.
+4. Gate 2: independent review of all design documents.
 
 ## Gate status
 
@@ -73,7 +89,7 @@ requirements in detail.
 
 Decided on 2026-11-16 (`adr/0001-positioning-and-v1-scope.md`): the project
 is a portfolio and reference implementation. Version 1.0 is the core engine,
-the dashboard and the `booking` pack, with 36 stories and 203 acceptance
+the dashboard and the `booking` pack, with 36 stories and 219 acceptance
 criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 
