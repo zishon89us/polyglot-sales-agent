@@ -29,7 +29,7 @@ at step 12.
 | 2 | Message ID already stored? | Yes: HTTP 200. **Ends.** |
 | 3 | Receiving number maps to a tenant? | No: store as unroutable, HTTP 200. **Ends.** |
 | 4 | Store the message in its conversation; start or extend the session; open or extend the reply window; HTTP 200 | Always |
-| 4a | Does the text contain a phrase from the emergency list of the guardrail policy? Checked by code after the message is stored, in every tenant, contact, session and service state, and before the rate pause. | Yes: apply the emergency event of machine 2 (reason `emergency`, urgent, the immediate email under its hourly ceiling). If the tenant has verified channel credentials and no emergency text was sent in this session, send it; it replaces the ordinary handover message. A later emergency message in the same session changes nothing more. **Continues** to step 5. |
+| 4a | Does the text contain a phrase from the emergency list of the guardrail policy? Checked by code after the message is stored, in every tenant, contact, session and service state, and before the rate pause. | Yes: apply the emergency event of machine 2 (reason `emergency`, urgent, the immediate email under its hourly ceiling). If the tenant has verified channel credentials, send the emergency text, unless one was sent to this contact in the last 60 minutes; it replaces the ordinary handover message. While an urgent handover is open, a further emergency message adds nothing but is shown to staff like any message. If staff have closed or handed back and a new emergency message arrives, a new urgent handover opens and the same rule decides whether the text is sent again. **Continues** to step 5. |
 | 5 | Is it the stop or start button, or a message whose whole text, trimmed and case-folded, equals an opt-out or opt-in keyword? | Yes: apply it by code (machine 6). Send the confirmation only if the tenant is answering. **Ends.** |
 | 6 | Is it the Confirm button of a reminder? | Yes: apply it by code (machine 4), in every tenant, contact and session state. Send the result as a system reply only if the tenant is answering. **Ends.** |
 | 7 | Does the contact have an open handover in state `followed-up`? | Yes: attach it to this session (machine 2 → `waiting`). If the tenant is answering and the contact is not paused, tell the customer a person will reply and notify staff. **Ends.** |
@@ -152,8 +152,8 @@ stays urgent until it ends. With no open handover, an emergency opens one in
   gets at most 5 such immediate emails an hour; beyond that an urgent
   handover is still first on the list and is covered by the next throttled
   email, whose subject says urgent.
-- The customer gets the fixed emergency text, once per session, in place of
-  the ordinary handover message.
+- The customer gets the fixed emergency text in place of the ordinary
+  handover message, at most once in 60 minutes (step 4a of section 1).
 
 The escalation clock, the holding message, the follow-up and every staff
 action work as for any other handover. The executable model does not cover
@@ -351,7 +351,7 @@ business-initiated message may be sent.
 
 | Event | Effect |
 | --- | --- |
-| Contact books in chat | Add a consent record, source `chat-booking`. The fixed confirmation text, sent by code, says that a reminder will be sent and how to stop it. |
+| Contact books in chat | Add a consent record, source `chat`, about that booking. The fixed confirmation text, sent by code, says that a reminder will be sent and how to stop it. |
 | Staff tick consent on a manual booking | Add a consent record, source `staff`. |
 | Opt-out keyword or stop button | Set opted out. Applied by code at step 5 of section 1, **whether or not the tenant is answering**. The confirmation is sent only if the tenant is answering. |
 | Opt-out asked for in free text | Recognised by the model at step 15, so only when the message reaches that step. Set opted out; send the confirmation. A customer whose message cannot reach step 15 can always use the keyword or the button. |

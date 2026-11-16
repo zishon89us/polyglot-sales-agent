@@ -446,8 +446,8 @@ check when an owner enters credentials, which `api` makes while the owner
 waits). Each is designed so that a repeat is harmless or is not made; see
 "Sending a message once".
 
-**Idempotency.** Inbound: a unique channel message ID. Tools: a key made
-from what the call does ("Processing one turn", step 4). Outbound: a message
+**Idempotency.** Inbound: a unique channel message ID. Tools: no key; a
+repeat is recognised from the thing changed ("Processing one turn", step 4). Outbound: a message
 row is created before the send, moves through `sending`, and is re-sent or
 not according to its class ("Sending a message once"). Jobs: a dedupe key
 where two events could enqueue the same work.

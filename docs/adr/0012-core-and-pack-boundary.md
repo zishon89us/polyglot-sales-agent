@@ -144,8 +144,20 @@ on in M2:
 - The package diagram in `architecture.md` lacks the edge from `api` to
   `pack`.
 
-Until they are removed, the claim is: **the core's tables, API schemas and
-packages hold nothing about bookings; a few core rule texts still do.**
+The second verification found more (see the response in
+`docs/reviews/2026-11-16-gate2-verification-2.md`): the handover reason
+`late-change` is also in the core API schema; the OpenAPI descriptions of
+`pack_settings` and `pack_metrics` list the booking pack's keys; two core
+operations mention bookings in their descriptions; the withheld-messages
+route is marked as the booking pack's although core messages appear in it;
+and three sentences in `architecture.md` and the data model still describe
+the old placement.
+
+So the accurate claim today is narrower than this record's title: **booking
+state machines, tables, settings, metrics and routes are designed as the
+pack's; the core still names bookings in the places listed here, and the
+boundary test would fail on them.** Removing them is tracked work for M2,
+before the test is switched on.
 
 ## Pros and Cons of the Options
 

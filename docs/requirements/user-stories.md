@@ -221,7 +221,7 @@ Persona P4 · Milestone M5 · Issue [#49](https://github.com/zishon89us/polyglot
 As an end customer, I want to receive reminders only if I agreed to be contacted, so that I am not messaged by a business I never dealt with.
 
 1. **Given** a contact with no recorded consent, **when** a business-initiated message is due, **then** it is not sent, the reason is logged, and it appears in the withheld-messages list (US-D12).
-2. **Given** a contact who books an appointment in chat, **when** the booking is created, **then** consent to messages about that booking is recorded with source `chat-booking` and the time.
+2. **Given** a contact who books an appointment in chat, **when** the booking is created, **then** consent to messages about that booking is recorded with source `chat` and the time.
 3. **Given** staff add a booking by hand (US-D9), **when** they tick that the customer agreed to be messaged, **then** consent is recorded with source `staff`, the staff user and the time; without the tick no consent is recorded.
 4. **Given** a contact who opted out (US-C7), **when** a business-initiated message is due, **then** the opt-out overrides every consent, whenever it was recorded, until the opt-out is lifted under US-C7.
 

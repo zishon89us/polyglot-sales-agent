@@ -82,7 +82,7 @@ what the model is given and allowed to do, not on spotting bad input.
 | A1 | Call only the tools its tenant's pack registers | Code: an unknown tool name fails the call | Hostile-output test |
 | A2 | Tool arguments match the tool's schema | Code | Unit tests per tool |
 | A3 | Tools for the `booking` pack: read services and policies; find free slots; create, move or cancel this contact's bookings | Code: no other tool exists | Tool inventory test |
-| A4 | A state-changing tool call is idempotent | Code: call key (data model, `tool_calls`) | NFR-R3 test |
+| A4 | A state-changing tool call is idempotent | Code: the partial unique index on active bookings, the conditional move and the idempotent cancel (`architecture.md`, "Processing one turn", step 4) | NFR-R3 test |
 | A5 | At most 3 future bookings per contact | Code | US-B2 test |
 | A6 | A bounded number of tool rounds and a bounded output length per reply | Code | Once #158 sets the numbers |
 
@@ -278,13 +278,15 @@ degraded, so an emergency there got nothing. The rule is now:
 2. **The model is a second net.** If the message reaches the model and it
    sets the emergency flag, the same thing happens.
 3. **What happens.** The fixed emergency text is sent, once per session,
-   telling the customer to contact their local emergency services now. It
+   telling the customer to contact their local emergency services now, at most
+   once in 60 minutes. It
    gives no phone number, because the system does not know where the
    customer is. It is sent in the contact's language if supported, otherwise
    in the tenant's default language **and** in English. The session is
    handed over with its own reason, `emergency`, marked urgent: it is first
    on the waiting list, and staff are emailed at once, outside the
-   five-minute throttle, with a subject that says urgent and no customer
+   five-minute throttle (once per handover, and at most 5 such emails per
+   tenant per hour; state machines section 2), with a subject that says urgent and no customer
    content.
 4. **What is measured.** E17 is a fixed gate: every emergency case, in every
    supported language, must be caught by the phrase list or by the flag.
