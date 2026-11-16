@@ -90,6 +90,13 @@ find a change that does what its message says.
    write an ADR before the code.
 6. At every phase gate, get the independent review described in section 11
    and answer its findings before asking the human to merge.
+7. In the build milestones, work in **units** as each milestone's plan in
+   `docs/plans/` lays out (ADR 0013): confirm the design, write the tests,
+   write the code, run every check, then an independent code review of that
+   pull request. Before asking for a merge, search for every other statement
+   of any fact the change touched.
+8. If a check fails twice for the same reason, stop and open a `needs-human`
+   issue. Do not try a third variation.
 
 ### History must be honest
 
