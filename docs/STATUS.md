@@ -107,11 +107,12 @@ M0 Inception met its exit criteria on 2026-11-16; see
   1.0 has 224 acceptance criteria; the API has 44 paths and 57 operations.
   The regenerated OpenAPI file passes the structural check and has not been
   re-linted.
+- 2026-11-17 — Gate 2 pull request merged as #254. README rewritten (#255)
+  to say what the product is for, for whom, and that no code exists yet.
 
 ## Next
 
-1. Maintainer reviews and merges the Gate 2 pull request (#176). Merging
-   accepts ADR 0012.
+1. Maintainer merges the README (#255).
 2. M1 retro, and the evaluation of AWS AI-DLC rules for M2 (#59).
 3. M2, the walking skeleton. Before the boundary test of ADR 0012 is
    switched on, the places where the core still names bookings must be
@@ -122,8 +123,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
 
 ## Gate status
 
-**Gate 2 (design) passes on the rule of `AGENTS.md` section 11, once the
-maintainer merges #176:** no High finding is open. That is all it means.
+**Gate 2 (design) passed on 2026-11-17 on the rule of `AGENTS.md` section
+11, when the maintainer merged #254:** no High finding is open. That is all it means.
 
 | Review | Scope | High findings |
 | --- | --- | --- |
