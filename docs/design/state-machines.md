@@ -19,7 +19,9 @@ Terms and numbers are those of `docs/requirements/glossary.md`.
 ## 1. Order of checks for an inbound message
 
 Many defects were questions of precedence. This is the single order in which
-an inbound webhook is handled. A step that ends handling says so.
+an inbound webhook is handled. A step that ends handling says so. Each
+inbound message is taken through the steps on its own; batching happens only
+at step 12.
 
 | # | Check | Result |
 | --- | --- | --- |
@@ -27,26 +29,41 @@ an inbound webhook is handled. A step that ends handling says so.
 | 2 | Message ID already stored? | Yes: HTTP 200. **Ends.** |
 | 3 | Receiving number maps to a tenant? | No: store as unroutable, HTTP 200. **Ends.** |
 | 4 | Store the message in its conversation; start or extend the session; open or extend the reply window; HTTP 200 | Always |
-| 5 | Is it an opt-out or opt-in keyword or button? | Yes: apply it by code (machine 6). Send the confirmation only if the tenant is answering. **Ends**, unless the batch holds other text. |
-| 6 | Tenant answering? | No: mark the message `received-while-not-answering`; if the session is handed over it joins the waiting session. **Ends.** |
-| 7 | Contact paused for rate? | Yes: no reply, no model call, no handover. **Ends.** If this message is the one that crosses the limit, send the rate notice once and start the pause. |
-| 8 | Contact has an open handover in state `followed-up`? | Yes: attach it to this session (machine 2), tell the customer a person will reply, notify staff. **Ends.** |
-| 9 | Session handed over? | Yes: the message joins the waiting session; no assistant reply. **Ends.** |
-| 10 | Is it the person button? | Yes: hand over with reason `requested`. **Ends.** |
-| 11 | Wait for the batching window to close. If another message arrives, restart from step 5 for it and discard any unsent reply | |
-| 12 | Batch holds no text? | Yes: send the unsupported-type reply; count it; on the third consecutive such batch hand over with `unsupported-content`. **Ends.** |
-| 13 | Degraded mode? | Yes: mark the session `awaiting-retry`; send the fallback under the 15-minute rule. **Ends.** |
-| 14 | Call the model (machine 8 on failure); run the handover triggers and output checks; send the reply | |
+| 5 | Is it the stop or start button, or a message whose whole text, trimmed and case-folded, equals an opt-out or opt-in keyword? | Yes: apply it by code (machine 6). Send the confirmation only if the tenant is answering. **Ends.** |
+| 6 | Is it the Confirm button of a reminder? | Yes: apply it by code (machine 4), in every tenant, contact and session state. Send the result as a system reply only if the tenant is answering. **Ends.** |
+| 7 | Does the contact have an open handover in state `followed-up`? | Yes: attach it to this session (machine 2 → `waiting`). If the tenant is answering and the contact is not paused, tell the customer a person will reply and notify staff. **Ends.** |
+| 8 | Tenant answering? | No: mark the message `received-while-not-answering`; if the session is handed over it joins the waiting session. **Ends.** |
+| 9 | Contact paused for rate? | Yes: no reply, no model call, no handover. **Ends.** If this message is the one that crosses the limit, send the rate notice once and start the pause. |
+| 10 | Session handed over? | Yes: the message joins the waiting session; no assistant reply. If it is a Reschedule or Cancel button, send one system reply saying the booking is unchanged and a person will deal with the request. **Ends.** |
+| 11 | Is it the person button? | Yes: hand over with reason `requested`. **Ends.** |
+| 12 | Wait for the batching window to close; a later message that reaches this step joins the batch, and any reply not yet sent is discarded | |
+| 13 | Does the batch hold no text? A Reschedule or Cancel button counts as text. | Yes: send the unsupported-type reply; count it; on the third consecutive such batch hand over with `unsupported-content`. **Ends.** |
+| 14 | Degraded mode? | Yes: mark the session `awaiting-retry`; send the fallback under the 15-minute rule. **Ends.** |
+| 15 | Call the model (machine 8 on failure); run the handover triggers and output checks; send the reply | A Reschedule or Cancel button is given to the model as that request (US-B4) |
+
+Messages that end at steps 5 to 9 all count towards the per-contact rate
+limit.
+
+In the handover machine, **"customer message" means an inbound message that
+reaches step 7**: any message that is not an opt keyword, a stop or start
+button, or a Confirm button. A call, and a message that ends at step 5 or 6,
+opens the reply window but is not a customer message for the handover.
 
 Consequences worth stating, because each was once a defect:
 
-- Opt-out (step 5) is applied before the tenant-answering check (step 6), so
+- Opt-out (step 5) is applied before the tenant-answering check (step 8), so
   it takes effect even when the tenant cannot reply.
-- Rate limiting (step 7) comes before handover (steps 8 to 10), so a flood
-  cannot create handovers or notifications. A paused contact who taps the
-  person button is not handed over until the pause ends.
-- A handed-over session (step 9) never reaches the model, whatever else is
-  true.
+- A reminder's Confirm button (step 6) is applied whatever else is true:
+  tenant not answering, contact paused, session handed over, or degraded
+  mode. It needs no model and changes only the customer's own booking.
+- A customer's reply to a follow-up (step 7) re-attaches the handover even if
+  the tenant is not answering or the contact is paused; only the
+  acknowledgement and the notification wait on those.
+- Rate limiting (step 9) comes before the person button (step 11), so a flood
+  cannot create handovers. A paused contact's request for a person is not
+  remembered; they must ask again after the pause.
+- A handed-over session (step 10) never reaches the model. A Reschedule or
+  Cancel tap there is not acted on, and the customer is told so.
 
 ## 2. Handover
 
@@ -56,10 +73,17 @@ A handover is a request for staff attention about one contact.
 while one is open adds its reason to that handover and re-attaches it to the
 current session; it does not create a second.
 
-**Invariant H2.** Every handover reaches exactly one terminal state.
+**Invariant H2.** Every handover reaches exactly one terminal state, and does
+so even if no customer or staff member ever acts again.
 
-**Invariant H3.** While a handover is `waiting` or `in-progress`, the session
-it is attached to is handed over and the assistant does not reply in it.
+**Invariant H3.** A session is handed over, and the assistant does not reply
+in it, exactly while a handover in `waiting` or `in-progress` is attached to
+it.
+
+These are checked mechanically by `docs/design/models/handover_machine.py`,
+an executable copy of the table below that explores every sequence of events
+to a depth of 8 and asserts each invariant. Its output lists the same 21
+transitions between states that the table and diagram show.
 
 ### States
 
@@ -68,7 +92,7 @@ it is attached to is handed over and the assistant does not reply in it.
 | `waiting` | Attached to an active session. No staff message yet. | Yes |
 | `in-progress` | Attached to an active session. Staff have sent at least one message. | Yes |
 | `detached` | Its session ended with no staff message. Attached to no session. | Yes |
-| `followed-up` | Detached, and `handover_followup` has been sent. | Yes |
+| `followed-up` | `handover_followup` has been sent and no customer message has arrived since. Attached to no session. | Yes |
 | `handed-back` | Staff handed back after answering. | Terminal |
 | `answered` | Its session ended after staff answered. | Terminal |
 | `closed-unanswered` | Ended with no staff message. Stores a reason. | Terminal |
@@ -76,20 +100,25 @@ it is attached to is handed over and the assistant does not reply in it.
 "Unanswered", as counted in the handover-rate metric, means open in
 `waiting`, `detached` or `followed-up`, or terminal in `closed-unanswered`.
 
+A staff message **answers** the handover at the moment the channel accepts
+it (status `sent`).
+
 ```mermaid
 stateDiagram-v2
     [*] --> waiting: trigger
     waiting --> in_progress: staff message
     waiting --> detached: session ends
-    waiting --> closed_unanswered: staff close / staff hand back
+    waiting --> followed_up: follow-up sent
+    waiting --> closed_unanswered: staff close / staff hand back / contact deleted
     in_progress --> handed_back: staff hand back
-    in_progress --> answered: session ends
+    in_progress --> answered: session ends / contact deleted
     detached --> followed_up: follow-up sent
-    detached --> waiting: new trigger in a later session
-    detached --> in_progress: staff message in a later session
-    detached --> closed_unanswered: staff close / 14 days
-    followed_up --> waiting: customer message
-    followed_up --> closed_unanswered: staff close / 7 days
+    detached --> waiting: new trigger
+    detached --> in_progress: staff message
+    detached --> closed_unanswered: staff close / 14 days / contact deleted
+    followed_up --> waiting: customer message / new trigger
+    followed_up --> in_progress: staff message
+    followed_up --> closed_unanswered: staff close / 7 days / contact deleted
     handed_back --> [*]
     answered --> [*]
     closed_unanswered --> [*]
@@ -101,30 +130,33 @@ A dash means the event cannot occur in that state.
 
 | Event | `waiting` | `in-progress` | `detached` | `followed-up` |
 | --- | --- | --- | --- | --- |
-| Customer message | Joins the waiting session. Stay. | Joins the session. Stay. | Not a handover event: the assistant answers it in a new session. Stay. | Attach to the customer's current session, which becomes handed over. Tell the customer a person will reply. Notify staff. → `waiting` |
-| New handover trigger (story US-C6) | Add the reason. Stay. | Add the reason. Stay. | Attach to the current session, which becomes handed over. → `waiting` | As for a customer message. → `waiting` |
-| Staff message | → `in-progress` | Stay. | Possible only if a later session has opened the reply window. Attach to that session, which becomes handed over. → `in-progress` | — (the reply window stays closed until the customer writes, and that message moves the handover to `waiting`) |
+| Customer message (reaches step 7) | Joins the waiting session. Stay. | Joins the session. Stay. | Not a handover event: the assistant answers it in a new session. Stay. | Attach to the customer's current session, which becomes handed over. → `waiting`. The escalation clock restarts. |
+| New handover trigger (US-C6), including staff taking over a session | Add the reason. Stay. | Add the reason. Stay. | Attach to the current session. → `waiting`. Clock restarts. | Same as `detached`. → `waiting` |
+| Staff message, possible only while the reply window is open | → `in-progress` | Stay. | Attach to the contact's current session, which becomes handed over. → `in-progress` | Same as `detached`. → `in-progress` |
 | Staff hand back | → `closed-unanswered`, reason `handed-back-unanswered`. The assistant answers the customer's next message. | → `handed-back`. The assistant answers the customer's next message. | — | — |
 | Staff close, with a reason | → `closed-unanswered` | — (hand back instead) | → `closed-unanswered` | → `closed-unanswered` |
-| Staff send follow-up | — (reply window is open; write a message) | — | If sent → `followed-up`. If withheld or failed: stay, show the reason on the handover, and the action stays available. | — (one follow-up per handover) |
+| Staff send follow-up: available only while the reply window is closed and no follow-up has been sent for this handover | Detach from the session. If the channel accepts it → `followed-up`. | — | If the channel accepts it → `followed-up`. | — (one follow-up per handover) |
+| Follow-up held, withheld or failed | Stay. Show the reason on the handover. The action stays available; a held follow-up moves the handover only when the channel accepts it. | — | Same. | — |
 | Session ends | → `detached` | → `answered` | — | — |
-| 7 days since the follow-up, no customer message | — | — | — | → `closed-unanswered`, reason `no-response` |
-| 14 days since it was last detached | — | — | → `closed-unanswered`, reason `expired` | — |
-| Escalation time elapses, counted in business hours only | Mark overdue. Send the holding message if the reply window is open. Once per handover. | — | — | — |
+| 7 days since the follow-up was accepted, still `followed-up` | — | — | — | → `closed-unanswered`, reason `no-response` |
+| 14 days since it last became `detached`, still `detached` | — | — | → `closed-unanswered`, reason `expired` | — |
+| Escalation time elapses. The clock counts business hours only, runs in `waiting` and `detached`, and is stopped and reset in every other state | Mark overdue. Send the holding message if the reply window is open and none was sent for this handover. | — | Mark overdue. No holding message. | — |
 | Contact opts out | Stay. Staff may still reply in the session; `handover_followup` becomes unavailable. | Stay. | Stay; follow-up unavailable. | Stay. |
 | Contact deleted (US-D5) | → `closed-unanswered`, reason `contact-deleted` | → `answered` | → `closed-unanswered`, reason `contact-deleted` | → `closed-unanswered`, reason `contact-deleted` |
 | Removed staff user held it (US-D7) | Stay, unheld. | Stay, unheld. | — | — |
 
-Checks against the invariants:
+A handover is marked overdue at most once each time it is `waiting` or
+`detached` without interruption; the mark is cleared when it leaves both.
 
-- **H2.** `waiting` leaves by staff action or session end. `in-progress`
-  leaves by hand back or session end, and a session always ends after 24
-  hours of silence. `detached` leaves by staff action, a new trigger or 14
-  days. `followed-up` leaves by a customer message, staff action or 7 days.
-  A handover can cycle `waiting` → `detached` → `waiting`, but only when the
-  customer writes again; with no further customer message it ends within 14
-  days of detaching.
-- **H1.** Triggers in every open state are absorbed, as the second row shows.
+Checks against the invariants, each also asserted by the model:
+
+- **H2.** With nobody acting: `waiting` detaches when its session ends, and a
+  `detached` handover closes after 14 days; `in-progress` ends as `answered`
+  when its session ends; `followed-up` closes after 7 days. A handover can
+  cycle between `waiting` and `detached` only when the customer writes again.
+- **H1.** A trigger is absorbed in every open state.
+- **H3.** A customer message in `detached` does not hand the new session
+  over; in `followed-up` it does.
 
 ## 3. Session
 
@@ -163,7 +195,8 @@ written.
 
 | Event | `booked` | `confirmed` | `attended` / `missed` | `cancelled` |
 | --- | --- | --- | --- | --- |
-| Customer taps Confirm, before the start | → `confirmed` | Stay. | — | Tell the customer the booking was cancelled. |
+| Customer taps Confirm, before the start, and the start time carried by the button equals the booking's | → `confirmed` | Stay. | — | Tell the customer the booking was cancelled. |
+| Customer taps Confirm on a reminder sent for an earlier start time, or after the start | No change. Tell the customer the booking's current time. | Same. | No change. | Tell the customer the booking was cancelled. |
 | Customer reschedules, earlier than the change cut-off | Move; free the old slot. Stay `booked`. Reminder: machine 5 "rescheduled". | Move. → `booked`. Reminder as before. | — | Say no booking is found. |
 | Customer cancels, earlier than the change cut-off | → `cancelled`; free the slot. | → `cancelled`; free the slot. | — | Say it is already cancelled. |
 | Customer asks to change or cancel inside the cut-off | No change; hand over with `late-change`. | Same. | — | — |
@@ -199,7 +232,9 @@ Each booking has at most one reminder.
 ### Timing rule
 
 Run when a booking is created or moved. `now` is that moment; `lead` is the
-reminder lead time; the floor is 60 minutes.
+reminder lead time; the floor is 60 minutes. Times are instants in the
+tenant's time zone, and `start - lead` is computed on the local clock, so a
+reminder keeps its local time across a daylight-saving change.
 
 ```text
 due = start - lead
@@ -225,6 +260,10 @@ running `docs/design/models/reminder_timing.py`.
 | Moved on Tue 09:00 to Tue 15:00, lead 24 h | None |
 | Booked Mon 10:00 for Wed 22:00, lead 24 h | Scheduled Tue 21:59 (22:00 itself is quiet) |
 | Booked Mon 10:00 for Wed 08:00, lead 24 h | Scheduled Tue 08:00 (08:00 itself is not quiet) |
+| Booked Mon 10:00 for Tue 15:00, lead 1 h | Scheduled Tue 14:00, exactly at the floor |
+| Booked Tue 02:00 for Tue 09:00, lead 2 h | Scheduled Tue 08:00, exactly at the floor |
+| Booked Tue 07:00 for Tue 09:00, lead 1 h | Scheduled Tue 08:00, exactly at the floor |
+| Booked Tue 07:00 for Tue 08:59, lead 1 h | Withheld, too-late (08:00 is 59 minutes before) |
 
 ### Transitions
 
@@ -232,8 +271,8 @@ running `docs/design/models/reminder_timing.py`.
 | --- | --- | --- | --- | --- |
 | Booking moved | Run the timing rule. | Run the timing rule again; clear the booking's confirmed state. | Run the timing rule; a second reminder may be sent for the new time. | Run the timing rule. |
 | Booking cancelled | Stay. | → `cancelled` | Stay. | Stay. |
-| Send time reached | — | Apply the send-time checks below. → `sent` or `withheld` | — | — |
-| Customer taps Confirm, Reschedule or Cancel | — | — | Machine 4. | — |
+| Send time reached | — | Apply the send-time checks below. Stays `scheduled` while queued or held; → `sent` when the channel accepts it; → `withheld` if a check fails or the send fails | — | — |
+| Customer taps Confirm (step 6 of section 1) | Machine 4, using the tap's booking and start time. | Same. | Same. | Same. |
 
 ### Send-time checks
 
@@ -246,10 +285,15 @@ scheduled, because they can change in between.
 | 2 | Contact is not opted out | Withheld `opted-out` |
 | 3 | An approved template exists in the contact's last known language or the tenant default | Withheld `no-template` or `template-unavailable` |
 | 4 | The channel's daily recipient limit has room | Queue. When released, apply check 5, and if it is quiet hours hold to their end and apply check 5 again |
-| 5 | The time is no later than 60 minutes before the start | Withheld `too-late` |
+| 5 | The time is no later than 55 minutes before the start | Withheld `too-late` |
 
-Check 5 applies however the reminder came to be late, so a reminder is never
-sent less than 60 minutes before its appointment.
+The timing rule never schedules a reminder later than 60 minutes before its
+appointment, and it can schedule one at exactly that moment. Check 5 allows a
+grace of 5 minutes for the checks, the ordering wait and send retries of
+machine 7, and is applied again immediately before each send attempt. So a
+reminder is never scheduled later than 60 minutes before, and never accepted
+by the channel later than 55 minutes before, however it came to be late. The
+model asserts both for every worked example.
 
 ## 6. Contact messaging permission
 
@@ -267,7 +311,8 @@ business-initiated message may be sent.
 | --- | --- |
 | Contact books in chat | Add a consent record, source `chat-booking`. |
 | Staff tick consent on a manual booking | Add a consent record, source `staff`. |
-| Opt-out keyword, button, or recognised free-text request | Set opted out. Applied at step 5 of section 1, **whether or not the tenant is answering**. The confirmation is sent only if the tenant is answering. |
+| Opt-out keyword or stop button | Set opted out. Applied by code at step 5 of section 1, **whether or not the tenant is answering**. The confirmation is sent only if the tenant is answering. |
+| Opt-out asked for in free text | Recognised by the model at step 15, so only when the message reaches that step. Set opted out; send the confirmation. A customer whose message cannot reach step 15 can always use the keyword or the button. |
 | Opt-in keyword, or explicit request to receive messages again | Clear opted out; add a consent record, source `opt-in`. |
 | Contact deleted while opted out | Keep only a one-way hash of the number, marked opted out. |
 | A number whose hash is marked opted out messages again | The new contact starts `opted-out`. |
@@ -381,6 +426,22 @@ match in the same pull request.
 | 11 | Consent and opt-out are checked when a reminder is due, not when it is scheduled. A reminder for an opted-out contact is scheduled and then withheld unless they opt back in. | New; replaces "no reminder is scheduled" | US-B3 |
 | 12 | A credential check that cannot complete changes nothing. | #117 (D4 note) | US-D6 |
 | 13 | Rate limiting is applied before handover, so a paused contact cannot create handovers. | New | US-C17 |
+| 14 | A customer's reply to a follow-up re-attaches the handover before the tenant-answering and rate checks; "customer message" for the handover is defined by step 7. | V1 | Section 1; US-C14 |
+| 15 | A reminder's Confirm button is applied by code in every state; Reschedule and Cancel go to the assistant, and in a handed-over session the customer is told the booking is unchanged. | V2 | Section 1; US-B3 |
+| 16 | Reminders are scheduled no later than 60 minutes before the appointment and accepted by the channel no later than 55 minutes before. | V3 | Section 5; US-B3; glossary |
+| 17 | The escalation clock also runs in `detached`, restarts on re-attachment, and stops when a follow-up is sent. | V4 | Section 2; US-C14 |
+| 18 | The follow-up is available whenever the reply window is closed and no staff message has been sent, including in `waiting`. | V5 | Section 2; US-C14 |
+
+## Models
+
+| File | What it checks |
+| --- | --- |
+| `docs/design/models/handover_machine.py` | Explores every event sequence of the handover machine to depth 8; asserts H1, H2, H3, reachability of every state, one follow-up per handover, and that a `detached` handover can become overdue |
+| `docs/design/models/reminder_timing.py` | Computes the worked examples; asserts the 60-minute and 55-minute bounds for each |
+
+The models are Python because they are small and need nothing installed. They
+are design evidence, not product code; the product's own tests replace them
+in milestone M2 and later.
 
 ## Not covered here
 
