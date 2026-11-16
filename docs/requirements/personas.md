@@ -1,12 +1,18 @@
 # Personas
 
-Status: draft for maintainer review · Phase 1 (requirements) · Issue #2
+Status: revised after the independent Gate 1 review · Phase 1 (requirements) · Issues #2, #61
 
 These personas are invented to guide design. They are not based on interviews
-and must be revised after the first pilot. No real person or business is
-described.
+and must be revised after a pilot, if one happens. No real person or business
+is described.
 
-## P1 — Owner of a small clinic (`booking` pack)
+Stories name three personas: P1 (business owner), P3 (staff agent) and P4
+(end customer). P2 belongs to the pack deferred to v1.1.
+
+## P1 — Business owner (shown here as the owner of a small clinic)
+
+The core engine and the dashboard serve any business owner. The `booking`
+pack is designed around this example.
 
 **Context.** Runs a dental clinic with two chairs and a receptionist who works
 day shifts. Advertises on social media with a "message us" button. Most
@@ -33,36 +39,25 @@ inquiries arrive in the evening.
 **Technical comfort.** Uses a phone for everything; will not read
 documentation.
 
-## P2 — Owner of a small online store (`cod-confirm` pack)
+**Known mismatches with v1.0**
+- The dashboard is in English only (assumption A7).
+- Connecting a WhatsApp number needs steps in Meta's own tools that this
+  persona is unlikely to complete alone. Version 1.0 assumes the operator
+  helps (open question OQ-2).
+- Two chairs means two patients at once. Version 1.0 models this as a
+  capacity of 2 per time slot for a service, not as two schedulable chairs.
 
-**Context.** Sells clothing through a hosted store. Most customers choose
-cash on delivery. Ships a few dozen parcels a day through a courier.
+## P2 — Owner of a small online store (deferred to v1.1)
 
-**Goals**
-- Fewer parcels refused or returned, because each one costs shipping both
-  ways.
-- Correct addresses before the parcel leaves.
-
-**Pain points**
-- Phones customers one by one to confirm orders; many do not pick up.
-- Fake and impulse orders are only discovered at the door.
-- Confirmation calls happen during working hours, when customers are also at
-  work.
-
-**What they need from the product**
-- A confirmation message sent automatically after each order, with a clear
-  confirm, change or cancel choice.
-- The result written back so that only confirmed orders are shipped.
-- A list of orders that need a person: no reply, changed address, unclear
-  answer.
-
-**Technical comfort.** Can paste a webhook URL into store settings if given
-exact steps.
+Kept for the `cod-confirm` pack. Not used by any v1.0 story. The independent
+review found that this persona's main need, getting the confirmation result
+back so that only confirmed orders ship, had no story (finding R6). That must
+be fixed when the pack is taken up.
 
 ## P3 — Staff agent
 
-**Context.** The receptionist or the store's customer-service person. Shares
-the business's WhatsApp number with the assistant.
+**Context.** The receptionist. Shares the business's WhatsApp number with the
+assistant.
 
 **Goals**
 - Spend time only on conversations that need judgment.
@@ -74,19 +69,23 @@ the business's WhatsApp number with the assistant.
 
 **What they need from the product**
 - A clear signal when a conversation is handed over, and why.
-- The full history, readable even when the customer wrote in another
-  language.
+- The full history of the conversation.
 - A way to take over at any moment and to hand back.
+- A view of upcoming bookings and of any reminder that was not sent.
+
+**Known mismatch with v1.0.** The history is shown in the language the
+customer wrote. There is no translation (assumption A8), so a conversation in
+a language this person does not read can only be handled by someone who does.
 
 ## P4 — End customer
 
-**Context.** Saw an advert or placed an order, and is messaging from a phone,
-often late in the day. May write in a first language, a second language, a
-mix of both, or their language typed in Latin letters.
+**Context.** Saw an advert and is messaging from a phone, often late in the
+day. May write in a first language, a second language, a mix of both, or
+their language typed in Latin letters.
 
 **Goals**
 - A quick, correct answer to a simple question.
-- To finish the task (book, confirm, change) without phoning anyone.
+- To finish the task (book, change, cancel) without phoning anyone.
 
 **Pain points**
 - Scripted menus that do not understand free text.
@@ -98,8 +97,7 @@ mix of both, or their language typed in Latin letters.
 - Honesty when the assistant does not know, and a person on request.
 - A way to stop receiving messages, respected immediately.
 
-## Not a persona for the MVP
+## Not a persona for v1.0
 
 - **Marketing manager running campaigns.** Broadcasts are out of scope.
-- **Developer integrating a custom system.** A public API for third parties is
-  out of scope; only the signed `order.created` webhook is supported.
+- **Developer integrating a custom system.** There is no public API.
