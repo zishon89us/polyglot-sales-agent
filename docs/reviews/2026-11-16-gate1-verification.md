@@ -291,3 +291,37 @@ Defects that remain from the original findings, not new, are stated in their sec
 - Daylight-saving behaviour in the quiet-hours and slot rules, and month arithmetic in retention.
 - Whether the channel in fact rejects free-form messages outside the window in the way N2 assumes; that rests on the glossary's "Reply window" entry.
 - Pre-existing gaps noticed in passing but outside the fixes, for example an escalation time that passes outside business hours for a handover made inside them.
+
+---
+
+# Author's response
+
+Everything above this line is the verifier's report, committed unedited in
+`5f977a2`. Everything below is written by the authoring agent.
+
+Date: 2026-11-16 · Issue #61 · Pull request #72
+
+## Outcome
+
+**All findings are accepted. Gate 1 is not passed**: the verifier found that
+two of my fixes introduced new High defects, N1 and N3. Both are fixed below
+and are being re-verified, along with the other changes made here. Only those
+items are re-verified, as agreed.
+
+This is the third time a review has found serious defects in text written to
+fix earlier ones. Each round has found fewer: 9 High, then 8, then 2.
+
+## What was changed
+
+| Item | Severity | Fix | Where |
+| --- | --- | --- | --- |
+| N1 | High | An unanswered handover now has a defined end. The follow-up template is sent at most once and leaves the handover open. If the customer then writes, that session is handed over under the same handover and staff are notified. The handover is answered when staff send a message from it, and closes as unanswered if staff close it or 7 days pass after the follow-up with no reply. Outcomes are defined on the handover, not on its session | Glossary "Handover"; US-C14 criteria 10 to 16 |
+| N3 | High | Claims now cover every kind of grounded fact that carries an amount, a time or a date, including opening hours and policies, each with its own pass rule. A criterion states that a correct opening-hours reply passes | Glossary "Grounded fact"; US-C4 criteria 2 and 5 to 7 |
+| N2 | Medium | A holding message is sent only while the reply window is open; otherwise the handover is only marked overdue | US-C14 criteria 4 to 6; message classes "Service notice" |
+| D3, remaining | Medium | Reminder scheduling compares with the moment of scheduling or rescheduling, not the booking's creation time. For a moved booking, the urgent-notice rule uses the earlier of the old and new start times | US-B3 criteria 3 and 4; US-D12 criterion 3; "Quiet hours rules" |
+| D4, remaining | Medium | A message for a tenant that is not answering is stored in its conversation, joins the waiting session if one exists, and is listed as unanswered when the tenant answers again. It is no longer "unroutable", which removes the conflict with US-C14 | US-C1 criteria 5 to 7 |
+| N4 | Low | Follow-up template: language rule, one per handover, unavailable when unapproved, recorded as withheld when it cannot be sent | US-C14 criteria 10 and 11; message classes "Service notice" |
+| N5 | Low | The second reminder criterion now reads "in every other case" | US-B3 criterion 4 |
+| N6; D2 remaining; Low notes | Low | Not fixed. Tracked in issue #117 | |
+
+Version 1.0 now has 36 stories and 203 acceptance criteria.
