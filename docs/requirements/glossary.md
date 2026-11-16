@@ -142,3 +142,11 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Password length | At least 12 characters | US-D10 |
 | Deletion deadline | 24 hours | US-D5, NFR-V3 |
 | Daily token budget per tenant | Not yet set; see open question OQ-7 | US-C6, NFR-C2 |
+
+## Names checked by code
+
+The handover reasons and the message classes in this glossary are also
+defined in `packages/core/src/names.ts`, which is the single source for
+them. `make check` fails if this file and that one disagree. To change one,
+change the code first, then this glossary and the other documents the check
+names.

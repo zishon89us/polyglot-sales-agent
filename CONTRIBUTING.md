@@ -70,5 +70,10 @@ merging it, so update a branch that is behind `main` before it is merged.
   every decision record has its sections and is in the index; relative
   links resolve, except in `docs/reviews/`, which is kept as received; the
   OpenAPI file lints, with warnings treated as errors.
+- **Shared names.** Handover states and reasons, message statuses, classes
+  and directions are defined once, in `packages/core/src/names.ts`. The
+  check fails if the glossary, the data model, the state machines or the
+  OpenAPI file lists them differently. Settings and their units are not
+  covered yet.
 - **Commit messages** on your branch are linted against `AGENTS.md` section
   4. The 72-character limit applies to the whole first line.
