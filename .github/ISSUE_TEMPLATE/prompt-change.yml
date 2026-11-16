@@ -1,0 +1,22 @@
+name: Prompt or model change
+description: A change to a versioned prompt, model setting or guardrail
+labels: ["area:ai"]
+body:
+  - type: input
+    id: prompt
+    attributes:
+      label: Prompt, model setting or guardrail affected
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis
+      description: What behaviour should improve, and which eval scores should move.
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: What could get worse
+      description: Languages, packs or guardrails that might regress.
