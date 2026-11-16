@@ -1,0 +1,11 @@
+{
+  "name": "@polyglot-sales-agent/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Rules common to every pack, as pure code. No I/O. Nothing about bookings (ADR 0012).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
