@@ -45,34 +45,37 @@ has not been tested. No business has been asked.
   take one over and see results.
 
 An illustration of the intended behaviour, written by hand. It is not
-output from a running system.
+output from a running system. Text in square brackets is fixed text added by
+code, not written by the model.
 
-```text
-Customer   السلام عليكم، كم سعر تنظيف البشرة؟
-Assistant  [You are chatting with an automated assistant.]
-           وعليكم السلام. تنظيف البشرة 150 ريال ومدته 45 دقيقة.
-           هل تودين حجز موعد؟
-Customer   yes, tomorrow after 5 pm
-Assistant  Tomorrow, Wednesday 18 November, I have 17:30 and 18:15.
-           Which suits you?
-Customer   5:30
-Assistant  [Booked: Facial, Wednesday 18 November, 17:30. You will get a
-           reminder; reply STOP to opt out.]
-```
+| Who | Message |
+| --- | --- |
+| Customer | <span dir="rtl">السلام عليكم، كم سعر تنظيف البشرة؟</span> |
+| Assistant | [You are chatting with an automated assistant.] |
+| Assistant | <span dir="rtl">وعليكم السلام. سعر تنظيف البشرة 150 ريالًا ومدته 45 دقيقة. هل تودين حجز موعد؟</span> |
+| Customer | yes, tomorrow after 5 pm |
+| Assistant | Tomorrow, Wednesday 18 November, I have 17:30 and 18:15. Which suits you? |
+| Customer | 5:30 |
+| Assistant | [Booked: Facial, Wednesday 18 November, 17:30. You will get a reminder; reply STOP to opt out.] |
+
+The customer asks in Arabic what a facial costs; the assistant gives the
+stored price and duration and offers to book. The customer then switches to
+English, and the assistant follows.
 
 ## How it is designed
 
 ```mermaid
-flowchart LR
-    C(["Customer<br/>on WhatsApp"]) --> W["Webhook<br/>verify, store, queue"]
-    W --> Q[("Jobs in<br/>PostgreSQL")]
-    Q --> K["Worker<br/>checks before the model"]
-    K --> M["Model<br/>reply, claims, tool calls"]
-    M --> G["Checks after the model"]
-    G -->|passes| S["Send"]
-    G -->|fails| F["Fallback or<br/>hand over to staff"]
-    K -.-> P["Booking pack<br/>slots, bookings, reminders"]
-    D(["Owner and staff<br/>dashboard"]) --> A["API"]
+flowchart TB
+    C(["Customer on WhatsApp"]) --> W["Webhook: verify, store, queue"]
+    W --> Q[("PostgreSQL: data and jobs")]
+    Q --> K["Worker: checks before the model"]
+    K --> M["Model: reply, claims, tool calls"]
+    K -.-> P["Booking pack: slots, bookings, reminders"]
+    M --> G{"Checks after the model"}
+    G -->|passes| S["Send the reply"]
+    G -->|fails| F["Fallback, or hand over to staff"]
+    D(["Owner and staff dashboard"]) --> A["API"]
+    A --> Q
 ```
 
 - **Multi-tenant from the start.** Every business's data is separated in the
