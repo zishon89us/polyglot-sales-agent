@@ -155,6 +155,7 @@ it; the ADR is the authority, and this table is a summary.
 | Business data for the model | Structured profile in the prompt, tools for live data, no vector search | 0006 | |
 | Guardrails | Code first, in layers; no second model at run time | 0007 | |
 | Operator access | Commands run on the server, each recorded in an insert-only log; no operator route | 0011 | One operator in v1.0 |
+| Core and pack boundary | The core holds nothing about bookings; the booking pack owns its state machines, tables, routes and settings | 0012 | Checked by a boundary test, not only by the trial pack |
 | Packaging | Docker and docker-compose | | `docker compose up` must give a working local stack |
 | CI/CD | GitHub Actions | | See section 8 |
 | Infrastructure | Infrastructure-as-code for one target | 0009, proposed | Target chosen by the human |
@@ -164,11 +165,13 @@ it; the ADR is the authority, and this table is a summary.
 
 - `docs/design/architecture.md`: context, containers, packages and their
   responsibilities, runtime flows, and the dependency rule. `packages/core`
-  holds the rules as pure functions and imports nothing else from this
-  repository.
+  holds the rules common to every pack as pure functions and imports nothing
+  else from this repository. "Processing one turn" and "Sending a message
+  once" there define the lease, tool effects and the send policy.
 - `docs/design/state-machines.md`: the order of checks for an inbound message
   and the transition tables. For the behaviour they cover, they are the
-  authority.
+  authority. Sections 4 and 5 (booking, reminder) are implemented in the
+  booking pack (ADR 0012).
 - `docs/design/data-model.md`, `docs/design/api.md`,
   `docs/design/threat-model.md`: tables, interfaces and threats.
 - `docs/adr/`: the decision behind each choice.

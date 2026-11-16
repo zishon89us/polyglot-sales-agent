@@ -49,8 +49,18 @@ Specifics:
 - Timers are jobs with a future run-at time. Cancelling a timer (a reminder
   for a cancelled booking) deletes or marks its row in the same transaction
   as the change that cancels it.
-- Per-conversation ordering: a worker takes a transaction-scoped advisory
-  lock on the conversation before processing; a second worker skips it.
+- Per-conversation ordering: a worker takes a **lease** on the conversation
+  before processing: in a short transaction it writes its own random token
+  and an expiry two minutes ahead to the conversation row, if no unexpired
+  lease is there. A second worker that finds a live lease leaves the job for
+  later. The lease is renewed before each model attempt. The model call
+  happens outside any transaction. When the work is done, the transaction
+  that stores the result first checks that the token is still the worker's
+  own; if it is not, because the lease expired and another worker took over,
+  the result is thrown away and nothing is sent. A transaction-scoped lock
+  was the first design; it cannot span a model call that is made outside a
+  transaction (Gate 2 finding S1). The full sequence is in
+  `docs/design/architecture.md`, "Processing one turn".
 - Retries: attempt count and next run-at time are updated on failure with
   exponential backoff; after the last attempt the job moves to a dead-letter
   state and raises the operator alert (NFR-R5).
@@ -74,8 +84,9 @@ Specifics:
   would need revisiting.
 - Bad, because job rows add write load and table churn to the primary
   database; completed jobs must be deleted or archived on a schedule.
-- Bad, because the advisory lock for ordering and the one for booking
-  capacity (ADR 0003) must use distinct key spaces, or they will collide.
+- Bad, because a lease can expire while a slow model call is still running.
+  The token check makes the late result harmless, at the cost of one wasted
+  model call.
 - Bad, because it departs from the stack many reviewers expect, so the README
   must explain it.
 
