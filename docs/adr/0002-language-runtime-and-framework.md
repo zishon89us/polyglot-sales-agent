@@ -131,7 +131,7 @@ vulnerabilities on that date.
 | Vitest | 5.1.0 | MIT | 2026-11-02 | Runs TypeScript and ES modules without a build step | Node's built-in test runner: no dependency, fewer features |
 | commitlint | 21.2.4 | MIT | 2026-10-18 | Enforces the commit format of `AGENTS.md` section 4 | A hand-written check |
 | @types/node | 22.20.5 | MIT | — | Types for the Node.js line above | — |
-| yaml | 2.9.1 | ISC | Not recorded; added in unit U3 | Reads the OpenAPI file in the shared-names check | A hand-written extraction of the enums, which would be fragile |
+| yaml | 2.9.1 | ISC | Not recorded; added in unit U3, when `pnpm audit` again reported no known vulnerabilities | Reads the OpenAPI file in the shared-names check | A hand-written extraction of the enums, which would be fragile |
 | @redocly/cli | 2.79.0 | MIT | Not recorded; added in unit U2 | Lints the OpenAPI file; the rule set was already in `redocly.yaml` | Spectral |
 
 CI actions, added in unit U2 and pinned to the commit each release tag

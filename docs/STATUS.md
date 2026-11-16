@@ -139,8 +139,13 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-17 — U2 merged as #275. M2 unit U3 (#264): the first package,
   `packages/core`, holding the shared names (handover states and reasons,
   message statuses, classes and directions) and a check, with tests, that
-  the glossary, data model, state machines and OpenAPI file agree with it.
-  Settings and their units are not covered; #204 and #249 stay open.
+  seventeen places that list them agree with it, including the script that
+  generates the OpenAPI file. **U3 did less than its plan said:** model
+  flags, settings with their units, and several other lists are not
+  defined, and the same names still appear unchecked in prose. That work
+  is #278; #183, #204 and #249 stay open. The code review found 14 defects,
+  two High: the generator restated the lists unchecked, and the shortfall
+  against the plan was not stated.
 
 ## Next
 

@@ -72,8 +72,11 @@ merging it, so update a branch that is behind `main` before it is merged.
   OpenAPI file lints, with warnings treated as errors.
 - **Shared names.** Handover states and reasons, message statuses, classes
   and directions are defined once, in `packages/core/src/names.ts`. The
-  check fails if the glossary, the data model, the state machines or the
-  OpenAPI file lists them differently. Settings and their units are not
-  covered yet.
+  check compares that file with seventeen places that list them: the
+  glossary (two), the data model, the state machines (two), the OpenAPI
+  file (five), the script that generates it (five), the handover model and
+  the guardrail policy. It does not find every mention: the same names
+  also appear in prose and in other tables, listed in #278. Model flags,
+  settings and their units, and several other lists are not defined yet.
 - **Commit messages** on your branch are linted against `AGENTS.md` section
   4. The 72-character limit applies to the whole first line.

@@ -114,7 +114,7 @@ their subject. Those that M2 must settle, by unit:
 | Unit | Findings |
 | --- | --- |
 | U2 | #163 (CI hardening) |
-| U3 | #183 (status names), #204 (units and names of settings), #249 (pack settings) |
+| U3 | #183 in part (status names only). Not done in U3 and moved to #278: model flags, #204 (units and names of settings), #249 (pack settings), the rest of #183 |
 | U4 | #162 (roles and keys), #191 (cross-tenant role and the policy test), #184 in part (tables the skeleton needs) |
 | U5 | #187 (worker health), #195 in part (timers that exist in M2) |
 | U6 | #154 (webhook limits), #202 (two mocks) |

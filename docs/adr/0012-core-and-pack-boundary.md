@@ -138,7 +138,9 @@ on in M2:
 - The order of checks names the Reschedule and Cancel buttons (steps 10, 13
   and 15).
 - The contact-permission machine lists "contact books in chat" as an event.
-- The handover reason `late-change`.
+- The handover reason `late-change`. Since M2 unit U3 it is also in code, in
+  `packages/core/src/names.ts`, as a member of the closed list of reasons, so
+  a pack cannot yet add a reason of its own (#278).
 - The glossary's containment metric and quiet-hours rules mention bookings
   and reminders.
 - The package diagram in `architecture.md` lacks the edge from `api` to
