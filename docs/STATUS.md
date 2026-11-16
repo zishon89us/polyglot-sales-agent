@@ -66,16 +66,23 @@ M0 Inception met its exit criteria on 2026-11-16; see
   table with its tenant scoping, the constraints that carry invariants, and
   a personal-data inventory with retention and deletion behaviour. One
   open handover per contact is now a database constraint.
+- 2026-11-16 — Data model merged as #153. Threat model written (#42): 58
+  threats over nine data flows under the STRIDE headings, with the
+  AI-specific ones mapped to the titles of the OWASP Top 10 for LLM
+  Applications 2026. Thirteen gaps with no requirement behind them were
+  opened as issues #154 to #166, labelled `security`.
 
 ## Next
 
-1. Maintainer reviews and merges the data model (#40).
-2. Threat model (#42), eval plan (#43), guardrail policy (#44) and API
-   (#41). The output-check findings #120 to
-   #122 are settled in the guardrail policy.
-3. Open review findings are checked against the state machines and ADRs as
+1. Maintainer reviews and merges the threat model (#42).
+2. Eval plan (#43), guardrail policy (#44) and API (#41). The output-check
+   findings #120 to #122 and the reply-content rule #159 are settled in the
+   guardrail policy.
+3. Before Gate 2: the three open design gaps from the threat model, #160
+   (keyed hash), #161 (operator access) and #159.
+4. Open review findings are checked against the state machines and ADRs as
    design reaches each story.
-4. Gate 2: independent review of all design documents together.
+5. Gate 2: independent review of all design documents together.
 
 ## Gate status
 
