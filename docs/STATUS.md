@@ -111,12 +111,16 @@ M0 Inception met its exit criteria on 2026-11-16; see
   to say what the product is for, for whom, and that no code exists yet.
 - 2026-11-17 — README merged as #256. M1 retro written (#257), with three
   items added to the Gate 2 checklist.
+- 2026-11-17 — Retro and README fix merged as #258 and #260. AWS AI-DLC
+  evaluated (#59) in ADR 0013: borrow four practices, install nothing.
 
 ## Next
 
-1. Maintainer merges the M1 retro (#257).
-2. The evaluation of AWS AI-DLC rules for M2 (#59), and triage of the open
-   review findings into milestones.
+1. Maintainer reads ADR 0013 and merges it, or says to install AI-DLC
+   instead.
+2. Plan M2: cut it into units of work with their order, triage the open
+   review findings into milestones, and name the CI checks of the first
+   pull request.
 3. M2, the walking skeleton. Before the boundary test of ADR 0012 is
    switched on, the places where the core still names bookings must be
    removed (#237, #253).
