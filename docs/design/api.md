@@ -1,0 +1,305 @@
+# API
+
+Status: draft for maintainer review · Phase 2 (design) · Issue #41
+
+This document describes the HTTP interface of the `api` process: the webhook
+the channel calls, the API the dashboard calls, and two operational
+endpoints. The machine-readable contract is
+[`openapi.yaml`](openapi.yaml), in the same folder. Where the two differ,
+the OpenAPI file is right about shapes and this document is right about
+behaviour, and the difference is a defect.
+
+Nothing here is built. **The OpenAPI file has not been run through a
+linter**; see "What is not done".
+
+## Method and sources
+
+- The contract is written as an OpenAPI 3.1.1 description. The list of
+  published versions was read on 2026-11-16 from
+  <https://spec.openapis.org/oas/v3.1.1>, as a search extract; it also lists
+  3.1.2 and 3.2.0. Version 3.1 was chosen because tools that generate and
+  lint 3.1 are common, and no feature of 3.2 is needed. The text of the
+  specification was not read in full, and no conformance is claimed.
+- Errors use the shape of RFC 9457 ("problem details"). That document was
+  not read for this work; the shape is used as commonly described.
+- From milestone M2 the OpenAPI file is generated from the route schemas
+  (ADR 0002). The file here was produced by
+  `docs/design/tools/gen_openapi.py`, a script kept only so the design-time
+  file can be regenerated; it is retired when the routes exist. The first
+  generated file is compared with this one in its pull request, and each
+  difference is either fixed or explained.
+
+## 1. Scope
+
+| Surface | Called by | Paths |
+| --- | --- | --- |
+| Channel webhook | The channel (or `mock-whatsapp`) | `/webhooks/whatsapp` |
+| Dashboard API | The dashboard, in a staff user's browser session | `/api/v1/...` |
+| Operations | The platform's health checks | `/healthz`, `/readyz` |
+
+The file has 43 paths and 55 operations: 8 public, 29 open to any signed-in
+user, and 18 for owners only.
+
+Not part of v1.0:
+
+- **The `order.created` webhook** named in issue #41. It belongs to the
+  `cod-confirm` pack, deferred to v1.1 (ADR 0001).
+- **An operator interface.** How the operator creates a tenant is not
+  designed (#161). No dashboard route can create a tenant.
+- **An API for third parties.** The only clients are the dashboard and the
+  channel.
+- **Sign-up.** There is no route that creates an account without an
+  invitation (NFR-S8).
+
+## 2. Conventions
+
+| Topic | Rule |
+| --- | --- |
+| Format | JSON in and out. Unknown fields in a request are refused, not ignored |
+| Identifiers | UUIDs. An identifier from another tenant is answered exactly as one that does not exist: 404 (US-D1 criterion 2) |
+| Time | RFC 3339 in UTC. The dashboard converts to the tenant's time zone, which it reads from the tenant settings |
+| Money | An integer in the currency's smallest unit (`price_minor`), with the tenant's currency |
+| Lists | `cursor` and `limit` (at most 100) in; `items` and `next_cursor` out. Short lists that are bounded by nature, such as services, are returned whole |
+| Versioning | The path carries `v1`. A change that breaks a client needs `v2`; adding a field does not |
+| Text from customers and the model | Returned as plain strings. The dashboard must render them as characters, never as markup (threat T25, #155) |
+| Phone numbers | Never in a path or query string, so that they do not reach access logs. A contact is found by a POST with the number in the body |
+| Updates | Last write wins. There is no version check in v1.0; a tenant has few editors. A decision, listed in section 9 |
+| Live updates | None pushed. The dashboard asks again at an interval while a list or a conversation is open. A decision, listed in section 9 |
+
+### Errors
+
+Every error is `application/problem+json` with `type`, `title`, `status` and
+a stable `code`. A validation error also lists each field with its problem
+and, where there is one, the allowed range (US-D2 criterion 2, US-D11
+criterion 3).
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `malformed` | The body is not valid JSON, or has an unknown field |
+| 401 | `unauthenticated` | No session, or it has ended |
+| 401 | `sign-in-failed` | Wrong email or password, **or the account is locked**. One answer for all three, so that the response does not show which addresses have accounts or are locked |
+| 401 | `bad-signature` | Webhook only |
+| 403 | `forbidden-role` | The user's role does not allow the route |
+| 403 | `csrf-failed` | The forgery-protection token is missing or wrong |
+| 404 | `not-found` | No such resource in this tenant |
+| 409 | `not-holder` | Another staff user holds the handover, or nobody does |
+| 409 | `reply-window-closed` | Free-form text is not allowed now; the follow-up template may be |
+| 409 | `contact-opted-out` | The staff-message block of state machines section 7 applies |
+| 409 | `handover-state` | The action is not available in the handover's current state |
+| 409 | `followup-unavailable` | Already sent, the window is open, or the contact opted out |
+| 409 | `no-capacity` | The slot is full, or the move would exceed capacity |
+| 409 | `contains-bookings` | The period to block contains bookings; the response lists them |
+| 409 | `not-started` | An outcome cannot be recorded before the start time |
+| 409 | `booking-state` | The booking is cancelled or already has an outcome |
+| 409 | `last-owner` | The only owner cannot remove or demote themselves |
+| 409 | `already-user` | The address already belongs to a user of this tenant |
+| 409 | `credentials-rejected` | The channel refused the credentials; nothing was stored |
+| 409 | `channel-unavailable` | The check could not complete; the tenant's state is unchanged |
+| 409 | `key-reused` | The idempotency key was used before with a different request |
+| 410 | `link-invalid` | An invitation or reset link is used, expired or unknown. One answer for all three |
+| 413 | `too-large` | Webhook only |
+| 422 | `validation-failed` | A value is missing or outside its range |
+| 429 | `rate-limited` | Too many requests; `Retry-After` says when to try again |
+
+### Repeating a request safely
+
+Operations that send a message or change a booking require an
+`Idempotency-Key` header: `sendStaffMessage`, `sendFollowUp`,
+`createBooking`, `moveBooking` and `cancelBooking`. A repeat with the same
+key and the same body returns the first result and does nothing more. Keys
+are kept for 24 hours; that figure is the agent's proposal.
+
+## 3. The channel webhook
+
+### Registration check — `GET /webhooks/whatsapp`
+
+The channel calls this once when the webhook address is registered. The
+verify token in the query is compared with a configured secret, and the
+challenge is echoed as plain text. A wrong token gets 403.
+
+### Events — `POST /webhooks/whatsapp`
+
+The request does four things and nothing else (NFR-P1):
+
+1. Refuse a body larger than the limit with 413, before reading it in full
+   (#154).
+2. Compute the signature over the **raw** body and compare it in constant
+   time. If it is missing or wrong: 401, and nothing is stored (NFR-S2).
+3. In one transaction: store each event, with the channel's message
+   identifier under a unique constraint, and enqueue its job (ADR 0004).
+4. Answer 200.
+
+| Case | Answer | Why |
+| --- | --- | --- |
+| A valid event | 200 | |
+| A duplicate of an event already stored | 200 | The channel must stop redelivering it; the unique constraint makes it harmless |
+| A valid signature, but the receiving number belongs to no tenant | 200 | Metadata only is stored (data model, decision 1). An error would make the channel retry |
+| A valid signature, but a payload this version cannot parse | 200 | The raw event is stored as unparsed for the operator, and an alert is raised |
+| A bad or missing signature | 401 | |
+| The database is unavailable | 503 | The channel redelivers later |
+
+What is trusted from a signed event: that the channel sent it, the sender's
+number and the receiving number (threat-model assumption A1). What is never
+trusted: the message text, the profile name, and any media.
+
+The shape of the payload is the channel's and is not restated in the OpenAPI
+file. Statements about it come from `docs/compliance.md`; no live event has
+been seen. Contract tests in M2 use dated, synthetic fixtures (R-T3).
+
+## 4. Signing in
+
+Decided in ADR 0008; gaps found by the threat model are in #156.
+
+- `signIn` sets a cookie named `__Host-session`: not readable by scripts,
+  HTTPS only, same-site. The server stores only a hash of its value. A
+  session ends after 60 minutes idle or 12 hours in total (US-D1).
+- `getSession` returns the user, the role and a `csrf_token`. Every request
+  that is not a GET must send that token in the `X-CSRF-Token` header.
+- The tenant is taken from the session row and nowhere else. No request
+  carries a tenant identifier.
+- `requestPasswordReset` always answers 202 with the same body, for a known
+  or an unknown address (US-D10 criterion 4).
+- Invitation and reset tokens travel in the request body, not in the path
+  the API sees, so they do not reach the API's access log. The link in the
+  email points at a dashboard page, which posts the token.
+- `changePassword`, and a completed reset, end the user's other sessions.
+
+## 5. Roles
+
+Each operation carries `x-role` in the OpenAPI file: `public`, `agent`
+(any signed-in user) or `owner`. A test will fail on any route that has no
+declared role (ADR 0008).
+
+| Area | Agent | Owner only |
+| --- | --- | --- |
+| Tenant | Read the tenant, channel status and template status | Change settings; enter or check channel credentials |
+| Users | — | List, invite, change role, remove |
+| Business data | Read services, opening hours, policies | Create, change, delete |
+| Conversations and handovers | Everything | — |
+| Bookings, blocked periods, withheld messages | Everything | — |
+| Metrics | — | Read |
+| Contact data | — | Find, export, delete |
+
+This follows US-D7 criterion 2. Two readings were needed and are listed as
+decisions: agents may **read** business data and settings, because they
+answer customers and need the prices; and metrics are owner-only, because
+US-D4 gives them to the owner.
+
+## 6. Behaviour worth stating
+
+**Taking over and holding** (US-D3). `takeOver` hands the current session
+over with reason `staff`, or takes hold of an open handover that nobody
+holds. Only the holder may send. A second user sees `held_by_user_id` and
+gets `not-holder` if they try. `releaseHandover` gives up the hold without
+ending the handover, which returns it to the waiting list unheld.
+
+**Sending a staff message.** `sendStaffMessage` answers 202 once the message
+is stored and queued; the message is sent by the worker, and its `status`
+changes as the channel reports. The handover is answered when the channel
+accepts the message, not when the request returns (state machines section
+2).
+
+**Hand back, close, follow-up.** `handBack`, `closeHandover` and
+`sendFollowUp` are the three staff events of the handover machine. Each is
+refused with `handover-state` or `followup-unavailable` in a state where the
+machine's table does not allow it. `sendFollowUp` may answer 202 with
+`followup_status` of `held` (quiet hours) or `withheld`, with the reason
+shown on the handover.
+
+**Blocking time** (US-D9). A period that contains bookings is refused with
+`contains-bookings` and the list of them. The client sends it again with
+`keep_bookings: true` to block the period and keep them. Nothing is ever
+cancelled by blocking.
+
+**Opening hours** (US-D2). The change is saved even if future bookings fall
+outside the new hours; those bookings are kept and returned in
+`affected_bookings`.
+
+**Settings** (US-D6, US-D11). A PATCH with any subset. One value out of
+range saves nothing. Warnings are returned with a successful save. After a
+save the tenant's state is evaluated again, and `getTenant` reports
+`answering` and what is `missing`.
+
+**Channel credentials** (US-D6). `setChannelCredentials` checks them with
+the channel before storing. The access token is write-only: no response
+ever contains it, only its last four characters.
+
+**Deleting a service.** A service with bookings is deactivated, not deleted
+(data model). Both answer 204.
+
+**Finding a contact** (US-D5). `findContact` answers 404 with the message
+that no data is held for that number, both for a number never seen and for
+one already deleted.
+
+**Export.** `exportContact` streams the JSON to the owner's session as a
+download. Nothing is stored and there is no link to it (#164). It is
+rate-limited and written to the audit log without the phone number.
+
+**Deletion.** `deleteContact` needs `confirm: true`, answers 202, and the
+work completes within 24 hours.
+
+**Metrics** (US-D4). Each rate is returned with its numerator and
+denominator. When the denominator is zero the value is null, and the
+dashboard shows "no data".
+
+## 7. Limits on use
+
+| Limit | Value | Source |
+| --- | --- | --- |
+| Failed sign-ins per account | 5 in 15 minutes, then refused for 15 minutes | NFR-S6 |
+| Sign-in and reset requests per source | Not set | #156 |
+| Webhook requests with a bad signature, per source | Not set | #154 |
+| Webhook body size | Not set | #154 |
+| Contact exports per tenant | Not set | #164 |
+| Any signed-in session | Not set; a general ceiling is added with the code in M4 | — |
+
+## 8. Stories to operations
+
+| Story | Operations |
+| --- | --- |
+| US-C1, US-C18 Receive messages and statuses | `verifyWebhook`, `receiveWebhook` |
+| US-C14 Waiting list and follow-up | `listHandovers`, `sendFollowUp`, `closeHandover` |
+| US-D1 Sign in | `signIn`, `signOut`, `getSession`, `changePassword` |
+| US-D2 Business information | `listServices`, `createService`, `updateService`, `deleteService`, `getOpeningHours`, `setOpeningHours`, `listPolicies`, `createPolicy`, `updatePolicy`, `deletePolicy` |
+| US-D3 Conversations and takeover | `listConversations`, `getConversation`, `listMessages`, `takeOver`, `sendStaffMessage`, `releaseHandover`, `handBack` |
+| US-D4 Metrics | `getMetrics` |
+| US-D5 Export or delete | `findContact`, `exportContact`, `deleteContact` |
+| US-D6 Setup and channel | `getTenant`, `updateSettings`, `getChannel`, `setChannelCredentials`, `checkChannel`, `listTemplates` |
+| US-D7 Staff access | `listUsers`, `inviteUser`, `changeUserRole`, `removeUser` |
+| US-D8 Attendance | `recordOutcome` |
+| US-D9 Blocked time and manual bookings | `listBlockedPeriods`, `createBlockedPeriod`, `deleteBlockedPeriod`, `listSlots`, `createBooking` |
+| US-D10 Invitation and reset | `acceptInvitation`, `requestPasswordReset`, `confirmPasswordReset` |
+| US-D11 Settings | `getTenant`, `updateSettings` |
+| US-D12 Bookings and withheld messages | `listBookings`, `moveBooking`, `cancelBooking`, `listWithheldMessages` |
+| NFR-O1 Health | `getHealth`, `getReadiness` |
+
+Every operation in the file appears in this table; a script checked it.
+
+## 9. Decisions made here
+
+| # | Decision | Why | Open to challenge because |
+| --- | --- | --- | --- |
+| 1 | One answer, `sign-in-failed`, for a wrong password, an unknown address and a locked account | The response must not show which addresses exist or are locked | A locked-out user is not told plainly; the message has to say "or too many attempts" |
+| 2 | Agents may read business data and settings | They answer customers | US-D7 says only what they cannot edit |
+| 3 | No pushed updates; the dashboard asks again at an interval | No second protocol to secure and test in v1.0 | A staff user sees a new message a few seconds late. The interval is set with the dashboard in M4 |
+| 4 | Last write wins on edits | Few editors per tenant | Two owners editing the same service can overwrite each other silently |
+| 5 | `releaseHandover` exists | US-D3 criterion 3 says "until it is released" | The state machines name no release event; it changes the holder, not the state. For the Gate 2 review |
+| 6 | A manual booking may have no contact | A booking made by phone is not a WhatsApp contact; the data model has no free-text field for a name | Staff cannot see whose booking it is. May need a decision in M5 |
+| 7 | An unparseable but validly signed event is stored and answered 200 | Otherwise the channel redelivers it forever | Nothing in the requirements covers it; the operator alert is new |
+| 8 | A contact is found by POST | A phone number must not be in a URL | — |
+
+Decisions 5, 6 and 7 add behaviour that no story states.
+
+## 10. What is not done
+
+- **No linter has been run on `openapi.yaml`.** Issue #41 asks for one. The
+  session that wrote the file was not permitted to download and run a lint
+  tool. A script, `docs/design/tools/check_openapi.py`, checks that every
+  reference resolves, operation names are unique, path parameters match
+  their paths, every operation has a success response, every route that
+  changes state requires the forgery-protection token, and no schema is
+  unused. That is **not** a substitute for a linter. Issue #41 stays open
+  until a linter passes, by hand or in the CI pipeline of M2.
+- The channel's payload is not described.
+- Rate limits are mostly unset (section 7).
+- Not independently reviewed; Gate 2 covers it.

@@ -1,0 +1,2974 @@
+# Design-time contract for issue #41. See docs/design/api.md.
+openapi: 3.1.1
+info:
+  title: Polyglot Sales Agent API
+  version: 0.1.0
+  summary: Channel webhook and dashboard API. Design-time contract.
+  description: Written by hand in the design phase. From milestone M2 this file is generated from the route schemas. Conventions,
+    error codes and the role of each route are explained in docs/design/api.md.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+- url: http://localhost:3000
+  description: Local development
+tags:
+- name: Operations
+- name: Channel webhook
+- name: Authentication
+- name: Tenant
+- name: Users
+- name: Business data
+- name: Conversations
+- name: Handovers
+- name: Bookings
+- name: Metrics
+- name: Contact data
+security:
+- sessionCookie: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags:
+      - Operations
+      summary: Process is running
+      x-role: public
+      security: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /readyz:
+    get:
+      operationId: getReadiness
+      tags:
+      - Operations
+      summary: Process can reach the database
+      x-role: public
+      security: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          description: Not ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /webhooks/whatsapp:
+    get:
+      operationId: verifyWebhook
+      tags:
+      - Channel webhook
+      summary: Answer the channel's subscription check
+      x-role: public
+      description: The channel calls this once when the webhook is registered. The token is compared with a configured secret.
+      parameters:
+      - name: hub.mode
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: hub.verify_token
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: hub.challenge
+        in: query
+        required: true
+        schema:
+          type: string
+      security: []
+      responses:
+        '200':
+          description: The challenge, echoed as plain text.
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '403':
+          description: The verify token is wrong.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    post:
+      operationId: receiveWebhook
+      tags:
+      - Channel webhook
+      summary: Receive messages and status events
+      x-role: public
+      description: Verified, stored and queued in one transaction, then acknowledged. Nothing else happens in the request.
+        A duplicate event is acknowledged and ignored. An event for an unknown number is acknowledged and stored as metadata
+        only.
+      parameters:
+      - name: X-Hub-Signature-256
+        in: header
+        required: true
+        schema:
+          type: string
+        description: HMAC-SHA256 of the raw request body, as the channel sends it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookEvent'
+      security: []
+      responses:
+        '200':
+          description: Stored, or a duplicate.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '401':
+          description: The signature is missing or wrong. Nothing is stored.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          description: The body is larger than the limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/auth/sign-in:
+    post:
+      operationId: signIn
+      tags:
+      - Authentication
+      summary: Sign in
+      x-role: public
+      description: Sets the session cookie. The response is the same for a wrong password and an unknown address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignIn'
+      security: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/Invalid'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '401':
+          description: The email or password is wrong, or the account is locked.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/auth/sign-out:
+    post:
+      operationId: signOut
+      tags:
+      - Authentication
+      summary: Sign out
+      x-role: agent
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '204':
+          description: Signed out.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/session:
+    get:
+      operationId: getSession
+      tags:
+      - Authentication
+      summary: The current user, tenant and forgery-protection token
+      x-role: agent
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/auth/password:
+    post:
+      operationId: changePassword
+      tags:
+      - Authentication
+      summary: Change your own password
+      x-role: agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '204':
+          description: Changed. Every other session of this user has ended.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/auth/password-reset/request:
+    post:
+      operationId: requestPasswordReset
+      tags:
+      - Authentication
+      summary: Ask for a reset link
+      x-role: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailOnly'
+      security: []
+      responses:
+        '202':
+          description: Always this response, whether or not the address has an account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Accepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/Invalid'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      tags:
+      - Authentication
+      summary: Set a new password with a reset link
+      x-role: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenPassword'
+      security: []
+      responses:
+        '204':
+          description: Password set. Every session of this user has ended.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/Invalid'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '410':
+          description: The link is used, expired or unknown.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/auth/invitations/accept:
+    post:
+      operationId: acceptInvitation
+      tags:
+      - Authentication
+      summary: Set a password with an invitation link
+      x-role: public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenPassword'
+      security: []
+      responses:
+        '204':
+          description: The account is active. Sign in next.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/Invalid'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '410':
+          description: The link is used, expired or unknown.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/tenant:
+    get:
+      operationId: getTenant
+      tags:
+      - Tenant
+      summary: The tenant, its settings and whether it is answering
+      x-role: agent
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/tenant/settings:
+    patch:
+      operationId: updateSettings
+      tags:
+      - Tenant
+      summary: Change settings
+      x-role: owner
+      description: Any subset of settings. A value outside its range saves nothing. Warnings, such as a default language whose
+        templates are not approved, do not stop the save.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Settings'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/tenant/channel:
+    get:
+      operationId: getChannel
+      tags:
+      - Tenant
+      summary: Channel connection status
+      x-role: agent
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: setChannelCredentials
+      tags:
+      - Tenant
+      summary: Enter channel credentials
+      x-role: owner
+      description: The credentials are checked with the channel before they are stored. They are stored encrypted and never
+        returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelCredentials'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/tenant/channel/check:
+    post:
+      operationId: checkChannel
+      tags:
+      - Tenant
+      summary: Check the stored credentials now
+      x-role: owner
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/tenant/templates:
+    get:
+      operationId: listTemplates
+      tags:
+      - Tenant
+      summary: Approval status of each template and language
+      x-role: agent
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      tags:
+      - Users
+      summary: List users
+      x-role: owner
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: inviteUser
+      tags:
+      - Users
+      summary: Invite a person by email
+      x-role: owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInvite'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '201':
+          description: Invited. A link is emailed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/users/{userId}:
+    patch:
+      operationId: changeUserRole
+      tags:
+      - Users
+      summary: Change a user's role
+      x-role: owner
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRole'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+    delete:
+      operationId: removeUser
+      tags:
+      - Users
+      summary: Remove a user
+      x-role: owner
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '204':
+          description: Removed. Their sessions have ended.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/services:
+    get:
+      operationId: listServices
+      tags:
+      - Business data
+      summary: List services
+      x-role: agent
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createService
+      tags:
+      - Business data
+      summary: Add a service
+      x-role: owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceInput'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '201':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/services/{serviceId}:
+    patch:
+      operationId: updateService
+      tags:
+      - Business data
+      summary: Change a service
+      x-role: owner
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceInput'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
+    delete:
+      operationId: deleteService
+      tags:
+      - Business data
+      summary: Remove a service
+      x-role: owner
+      parameters:
+      - name: serviceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '204':
+          description: Deleted, or deactivated if it has bookings.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/opening-hours:
+    get:
+      operationId: getOpeningHours
+      tags:
+      - Business data
+      summary: Opening hours
+      x-role: agent
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpeningHours'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      operationId: setOpeningHours
+      tags:
+      - Business data
+      summary: Replace opening hours
+      x-role: owner
+      description: Saved even if future bookings now fall outside the hours; those bookings are kept and returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpeningHours'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpeningHoursResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/policies:
+    get:
+      operationId: listPolicies
+      tags:
+      - Business data
+      summary: List policies
+      x-role: agent
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createPolicy
+      tags:
+      - Business data
+      summary: Add a policy
+      x-role: owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyInput'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '201':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/policies/{policyId}:
+    patch:
+      operationId: updatePolicy
+      tags:
+      - Business data
+      summary: Change a policy
+      x-role: owner
+      parameters:
+      - name: policyId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyInput'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
+    delete:
+      operationId: deletePolicy
+      tags:
+      - Business data
+      summary: Remove a policy
+      x-role: owner
+      parameters:
+      - name: policyId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '204':
+          description: Success.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/conversations:
+    get:
+      operationId: listConversations
+      tags:
+      - Conversations
+      summary: List conversations
+      x-role: agent
+      parameters:
+      - name: filter
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - all
+          - handed-over
+          - unanswered
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: The next_cursor of the previous page.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Conversation'
+                  next_cursor:
+                    anyOf:
+                    - type: string
+                    - type: 'null'
+                additionalProperties: false
+                required:
+                - items
+                - next_cursor
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/conversations/{conversationId}:
+    get:
+      operationId: getConversation
+      tags:
+      - Conversations
+      summary: One conversation
+      x-role: agent
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/conversations/{conversationId}/messages:
+    get:
+      operationId: listMessages
+      tags:
+      - Conversations
+      summary: Message history, newest first
+      x-role: agent
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: The next_cursor of the previous page.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+                  next_cursor:
+                    anyOf:
+                    - type: string
+                    - type: 'null'
+                additionalProperties: false
+                required:
+                - items
+                - next_cursor
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: sendStaffMessage
+      tags:
+      - Conversations
+      summary: Send a staff message
+      x-role: agent
+      description: Only the user holding the handover may send. Free-form text is allowed only while the reply window is open.
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffMessageInput'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '202':
+          description: Queued for sending. Its status changes as the channel reports.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/conversations/{conversationId}/takeover:
+    post:
+      operationId: takeOver
+      tags:
+      - Conversations
+      summary: Take the conversation over
+      x-role: agent
+      description: Hands the current session over with reason `staff`, or takes hold of an open handover nobody holds. An
+        assistant reply not yet sent is discarded.
+      parameters:
+      - name: conversationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handover'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/handovers:
+    get:
+      operationId: listHandovers
+      tags:
+      - Handovers
+      summary: The waiting list
+      x-role: agent
+      parameters:
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - open
+          - unanswered
+          - closed
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: The next_cursor of the previous page.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Handover'
+                  next_cursor:
+                    anyOf:
+                    - type: string
+                    - type: 'null'
+                additionalProperties: false
+                required:
+                - items
+                - next_cursor
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/handovers/{handoverId}/release:
+    post:
+      operationId: releaseHandover
+      tags:
+      - Handovers
+      summary: Give up the hold without ending the handover
+      x-role: agent
+      parameters:
+      - name: handoverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handover'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/handovers/{handoverId}/hand-back:
+    post:
+      operationId: handBack
+      tags:
+      - Handovers
+      summary: Hand the conversation back to the assistant
+      x-role: agent
+      parameters:
+      - name: handoverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handover'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/handovers/{handoverId}/close:
+    post:
+      operationId: closeHandover
+      tags:
+      - Handovers
+      summary: Close an unanswered handover with a reason
+      x-role: agent
+      parameters:
+      - name: handoverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoverClose'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handover'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/handovers/{handoverId}/follow-up:
+    post:
+      operationId: sendFollowUp
+      tags:
+      - Handovers
+      summary: Send the follow-up template
+      x-role: agent
+      description: Available only while the reply window is closed and no follow-up has been sent for this handover.
+      parameters:
+      - name: handoverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '202':
+          description: Queued, held to the end of quiet hours, or withheld; see followup_status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handover'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/bookings:
+    get:
+      operationId: listBookings
+      tags:
+      - Bookings
+      summary: List bookings by start time
+      x-role: agent
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - booked
+          - confirmed
+          - cancelled
+          - attended
+          - missed
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: The next_cursor of the previous page.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Booking'
+                  next_cursor:
+                    anyOf:
+                    - type: string
+                    - type: 'null'
+                additionalProperties: false
+                required:
+                - items
+                - next_cursor
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createBooking
+      tags:
+      - Bookings
+      summary: Add a booking by hand
+      x-role: agent
+      description: Refused with `no-capacity` if the slot is full.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingInput'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '201':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/slots:
+    get:
+      operationId: listSlots
+      tags:
+      - Bookings
+      summary: Free slots for a service
+      x-role: agent
+      parameters:
+      - name: service_id
+        in: query
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Slot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/bookings/{bookingId}/move:
+    post:
+      operationId: moveBooking
+      tags:
+      - Bookings
+      summary: Move a booking
+      x-role: agent
+      description: No cut-off applies to staff. Creates a booking-change notice to the customer.
+      parameters:
+      - name: bookingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingMove'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/bookings/{bookingId}/cancel:
+    post:
+      operationId: cancelBooking
+      tags:
+      - Bookings
+      summary: Cancel a booking
+      x-role: agent
+      description: Creates a booking-change notice to the customer.
+      parameters:
+      - name: bookingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/bookings/{bookingId}/outcome:
+    put:
+      operationId: recordOutcome
+      tags:
+      - Bookings
+      summary: Record attended or missed
+      x-role: agent
+      description: Refused with `not-started` before the start time.
+      parameters:
+      - name: bookingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingOutcome'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/blocked-periods:
+    get:
+      operationId: listBlockedPeriods
+      tags:
+      - Bookings
+      summary: List blocked periods
+      x-role: agent
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlockedPeriod'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createBlockedPeriod
+      tags:
+      - Bookings
+      summary: Block a period
+      x-role: agent
+      description: If the period contains bookings and keep_bookings is not true, the request is refused with `contains-bookings`
+        and nothing is saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlockedPeriodInput'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '201':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedPeriod'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/v1/blocked-periods/{blockedPeriodId}:
+    delete:
+      operationId: deleteBlockedPeriod
+      tags:
+      - Bookings
+      summary: Remove a blocked period
+      x-role: agent
+      parameters:
+      - name: blockedPeriodId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '204':
+          description: Success.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/withheld-messages:
+    get:
+      operationId: listWithheldMessages
+      tags:
+      - Bookings
+      summary: Messages that were withheld or failed
+      x-role: agent
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: The next_cursor of the previous page.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WithheldMessage'
+                  next_cursor:
+                    anyOf:
+                    - type: string
+                    - type: 'null'
+                additionalProperties: false
+                required:
+                - items
+                - next_cursor
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/metrics:
+    get:
+      operationId: getMetrics
+      tags:
+      - Metrics
+      summary: Results for a period
+      x-role: owner
+      parameters:
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metrics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/contacts/search:
+    post:
+      operationId: findContact
+      tags:
+      - Contact data
+      summary: Find a contact by phone number
+      x-role: owner
+      description: A POST so that the number is never in a URL or an access log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactSearch'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+        '404':
+          description: No data is held for that number.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/contacts/{contactId}/export:
+    get:
+      operationId: exportContact
+      tags:
+      - Contact data
+      summary: Export everything held about a contact
+      x-role: owner
+      parameters:
+      - name: contactId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: A JSON file, sent as a download.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /api/v1/contacts/{contactId}/deletion:
+    post:
+      operationId: deleteContact
+      tags:
+      - Contact data
+      summary: Delete a contact's data
+      x-role: owner
+      parameters:
+      - name: contactId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeletionRequest'
+      security:
+      - sessionCookie: []
+        csrfToken: []
+      responses:
+        '202':
+          description: Accepted. Deletion completes within 24 hours.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Accepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-session
+      description: Set at sign-in. Not readable by scripts, HTTPS only, same-site.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: The csrf_token of the current session. Required on every request that is not a GET.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 64
+      description: A value the client makes up once per intended action. A repeat with the same key returns the first result.
+  responses:
+    BadRequest:
+      description: The request is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthenticated:
+      description: Not signed in, or the session has ended.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: The role does not allow this, or the forgery-protection token is missing or wrong.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: No such resource in this tenant.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: The request conflicts with the current state. The code says how.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Invalid:
+      description: A value is outside its allowed range. Each field is named.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TooManyRequests:
+      description: Too many requests.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type:
+          type: string
+          description: A URI naming the problem type.
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          description: A stable code from the table in api.md.
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+              allowed:
+                type: string
+            additionalProperties: false
+            required:
+            - field
+            - message
+      additionalProperties: false
+      required:
+      - type
+      - title
+      - status
+      - code
+      description: An error, in the shape of RFC 9457 problem details.
+    SignIn:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          maxLength: 1024
+      additionalProperties: false
+      required:
+      - email
+      - password
+    Session:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        tenant_id:
+          type: string
+          format: uuid
+        csrf_token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - user
+      - tenant_id
+      - csrf_token
+      - expires_at
+    TokenPassword:
+      type: object
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          minLength: 12
+          maxLength: 1024
+      additionalProperties: false
+      required:
+      - token
+      - password
+    PasswordChange:
+      type: object
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+          minLength: 12
+          maxLength: 1024
+      additionalProperties: false
+      required:
+      - current_password
+      - new_password
+    EmailOnly:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      additionalProperties: false
+      required:
+      - email
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum:
+          - owner
+          - agent
+        status:
+          type: string
+          enum:
+          - invited
+          - active
+          - removed
+      additionalProperties: false
+      required:
+      - id
+      - email
+      - role
+      - status
+    UserInvite:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum:
+          - owner
+          - agent
+      additionalProperties: false
+      required:
+      - email
+      - role
+    UserRole:
+      type: object
+      properties:
+        role:
+          type: string
+          enum:
+          - owner
+          - agent
+      additionalProperties: false
+      required:
+      - role
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        pack:
+          type: string
+          enum:
+          - booking
+          - faq-only
+        answering:
+          type: boolean
+        missing:
+          type: array
+          items:
+            type: string
+            description: A required setting or check that is not yet satisfied.
+        settings:
+          $ref: '#/components/schemas/Settings'
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - pack
+      - answering
+      - missing
+      - settings
+    Settings:
+      type: object
+      properties:
+        name:
+          type: string
+        time_zone:
+          type: string
+          description: IANA time zone.
+        default_language:
+          type: string
+        template_languages:
+          type: array
+          items:
+            type: string
+            enum:
+            - ar
+            - en
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+        support_contact:
+          type: string
+        notification_email:
+          type: string
+          format: email
+        business_hours:
+          type: array
+          items:
+            type: object
+            properties:
+              weekday:
+                type: integer
+                minimum: 1
+                maximum: 7
+                description: 1 is Monday.
+              opens:
+                type: string
+                pattern: ^[0-2][0-9]:[0-5][0-9]$
+              closes:
+                type: string
+                pattern: ^[0-2][0-9]:[0-5][0-9]$
+            additionalProperties: false
+            required:
+            - weekday
+            - opens
+            - closes
+        booking_horizon_days:
+          type: integer
+          minimum: 7
+          maximum: 365
+        slot_interval_minutes:
+          type: integer
+          minimum: 5
+          maximum: 120
+        total_concurrent_bookings:
+          anyOf:
+          - type: integer
+            minimum: 1
+            maximum: 50
+          - type: 'null'
+        minimum_notice_hours:
+          type: integer
+          minimum: 0
+          maximum: 72
+        change_cutoff_hours:
+          type: integer
+          minimum: 0
+          maximum: 72
+        reminder_lead_hours:
+          type: integer
+          minimum: 1
+          maximum: 72
+        quiet_hours:
+          anyOf:
+          - type: object
+            properties:
+              start:
+                type: string
+              end:
+                type: string
+            additionalProperties: false
+            required:
+            - start
+            - end
+          - type: 'null'
+        handover_escalation_minutes:
+          type: integer
+          minimum: 5
+          maximum: 240
+        message_retention_months:
+          type: integer
+          minimum: 1
+          maximum: 36
+      additionalProperties: false
+      description: The tenant settings of the glossary. A PATCH may send any subset.
+    SettingsResult:
+      type: object
+      properties:
+        settings:
+          $ref: '#/components/schemas/Settings'
+        warnings:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+      required:
+      - settings
+      - warnings
+    ChannelCredentials:
+      type: object
+      properties:
+        phone_number_id:
+          type: string
+        business_account_id:
+          type: string
+        access_token:
+          type: string
+          writeOnly: true
+      additionalProperties: false
+      required:
+      - phone_number_id
+      - business_account_id
+      - access_token
+    ChannelStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        phone_number_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+        token_hint:
+          anyOf:
+          - type: string
+            description: The last four characters only.
+          - type: 'null'
+        last_checked_at:
+          anyOf:
+          - type: string
+            format: date-time
+            description: RFC 3339, in UTC.
+          - type: 'null'
+        last_error:
+          anyOf:
+          - type: string
+            description: A sanitised code, never the channel's raw message.
+          - type: 'null'
+      additionalProperties: false
+      required:
+      - connected
+    Template:
+      type: object
+      properties:
+        name:
+          type: string
+        language:
+          type: string
+        status:
+          type: string
+          enum:
+          - not-submitted
+          - pending
+          - approved
+          - rejected
+          - paused
+          - disabled
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - name
+      - language
+      - status
+    Service:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        price_minor:
+          type: integer
+          minimum: 0
+        duration_minutes:
+          type: integer
+          minimum: 5
+          maximum: 480
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 50
+        active:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - price_minor
+      - duration_minutes
+      - capacity
+      - active
+      - updated_at
+    ServiceInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        price_minor:
+          type: integer
+          minimum: 0
+        duration_minutes:
+          type: integer
+          minimum: 5
+          maximum: 480
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 50
+        active:
+          type: boolean
+      additionalProperties: false
+      required:
+      - name
+      - price_minor
+      - duration_minutes
+      - capacity
+    OpeningHours:
+      type: object
+      properties:
+        periods:
+          type: array
+          items:
+            type: object
+            properties:
+              weekday:
+                type: integer
+                minimum: 1
+                maximum: 7
+                description: 1 is Monday.
+              opens:
+                type: string
+                pattern: ^[0-2][0-9]:[0-5][0-9]$
+              closes:
+                type: string
+                pattern: ^[0-2][0-9]:[0-5][0-9]$
+            additionalProperties: false
+            required:
+            - weekday
+            - opens
+            - closes
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - periods
+    OpeningHoursResult:
+      type: object
+      properties:
+        periods:
+          type: array
+          items:
+            type: object
+            properties:
+              weekday:
+                type: integer
+                minimum: 1
+                maximum: 7
+                description: 1 is Monday.
+              opens:
+                type: string
+                pattern: ^[0-2][0-9]:[0-5][0-9]$
+              closes:
+                type: string
+                pattern: ^[0-2][0-9]:[0-5][0-9]$
+            additionalProperties: false
+            required:
+            - weekday
+            - opens
+            - closes
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        affected_bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Booking'
+      additionalProperties: false
+      required:
+      - periods
+      - affected_bookings
+    Policy:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - id
+      - title
+      - body
+      - updated_at
+    PolicyInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+      additionalProperties: false
+      required:
+      - title
+      - body
+    BlockedPeriod:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        ends_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - id
+      - starts_at
+      - ends_at
+    BlockedPeriodInput:
+      type: object
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        ends_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        keep_bookings:
+          type: boolean
+          description: Must be true to block a period that contains bookings.
+      additionalProperties: false
+      required:
+      - starts_at
+      - ends_at
+    Contact:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+        profile_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+        language:
+          anyOf:
+          - type: string
+          - type: 'null'
+        opted_out:
+          type: boolean
+        consent:
+          type: string
+          enum:
+          - none
+          - recorded
+      additionalProperties: false
+      required:
+      - id
+      - phone
+      - opted_out
+      - consent
+    ContactSearch:
+      type: object
+      properties:
+        phone:
+          type: string
+          description: In international format.
+      additionalProperties: false
+      required:
+      - phone
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        contact:
+          $ref: '#/components/schemas/Contact'
+        last_message_at:
+          anyOf:
+          - type: string
+            format: date-time
+            description: RFC 3339, in UTC.
+          - type: 'null'
+        reply_window_open:
+          type: boolean
+        session_state:
+          type: string
+          enum:
+          - none
+          - active
+          - handed-over
+        handover:
+          anyOf:
+          - $ref: '#/components/schemas/Handover'
+          - type: 'null'
+      additionalProperties: false
+      required:
+      - id
+      - contact
+      - reply_window_open
+      - session_state
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum:
+          - inbound
+          - outbound
+        class:
+          anyOf:
+          - type: string
+            enum:
+            - assistant-reply
+            - system-reply
+            - staff-message
+            - service-notice
+            - business-initiated
+          - type: 'null'
+        type:
+          type: string
+          description: text, button, or the unsupported type's name.
+        text:
+          anyOf:
+          - type: string
+            description: Untrusted. Render as characters, never as markup.
+          - type: 'null'
+        status:
+          anyOf:
+          - type: string
+            enum:
+            - sent
+            - delivered
+            - read
+            - failed
+            - withheld
+          - type: 'null'
+        status_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+        sent_by_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - id
+      - direction
+      - type
+      - created_at
+    StaffMessageInput:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+      additionalProperties: false
+      required:
+      - text
+    Handover:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+          - waiting
+          - in-progress
+          - detached
+          - followed-up
+          - handed-back
+          - answered
+          - closed-unanswered
+        reasons:
+          type: array
+          items:
+            type: string
+            enum:
+            - requested
+            - repeated-failure
+            - sensitive-topic
+            - data-request
+            - limit
+            - unsupported-content
+            - late-change
+            - provider-failure
+            - staff
+        held_by_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+        overdue:
+          type: boolean
+        followup_status:
+          anyOf:
+          - type: string
+            enum:
+            - available
+            - held
+            - sent
+            - withheld
+            - failed
+          - type: 'null'
+        closed_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+        opened_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - id
+      - conversation_id
+      - state
+      - reasons
+      - overdue
+      - opened_at
+    HandoverClose:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 200
+      additionalProperties: false
+      required:
+      - reason
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        service_id:
+          type: string
+          format: uuid
+        contact_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+        starts_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        ends_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        state:
+          type: string
+          enum:
+          - booked
+          - confirmed
+          - cancelled
+          - attended
+          - missed
+        created_via:
+          type: string
+          enum:
+          - chat
+          - staff
+      additionalProperties: false
+      required:
+      - id
+      - service_id
+      - starts_at
+      - ends_at
+      - state
+      - created_via
+    BookingInput:
+      type: object
+      properties:
+        service_id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        contact_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+      additionalProperties: false
+      required:
+      - service_id
+      - starts_at
+    BookingMove:
+      type: object
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - starts_at
+    BookingOutcome:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum:
+          - attended
+          - missed
+      additionalProperties: false
+      required:
+      - outcome
+    Slot:
+      type: object
+      properties:
+        starts_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        remaining:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+      required:
+      - starts_at
+      - remaining
+    WithheldMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        contact_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+        purpose:
+          type: string
+        status:
+          type: string
+          enum:
+          - withheld
+          - failed
+        reason:
+          type: string
+        due_at:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+      additionalProperties: false
+      required:
+      - id
+      - purpose
+      - status
+      - reason
+      - due_at
+    Metric:
+      type: object
+      properties:
+        value:
+          anyOf:
+          - type: number
+          - type: 'null'
+        numerator:
+          type: integer
+        denominator:
+          type: integer
+      additionalProperties: false
+      required:
+      - value
+      - numerator
+      - denominator
+      description: value is null when the denominator is zero; the dashboard then shows "no data".
+    Metrics:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        to:
+          type: string
+          format: date-time
+          description: RFC 3339, in UTC.
+        first_reply_seconds_median:
+          anyOf:
+          - type: number
+          - type: 'null'
+        inquiry_to_booking_rate:
+          $ref: '#/components/schemas/Metric'
+        no_show_rate:
+          $ref: '#/components/schemas/Metric'
+        appointments_without_outcome:
+          type: integer
+        handover_rate:
+          $ref: '#/components/schemas/Metric'
+        unanswered_handovers:
+          type: integer
+        containment_rate:
+          $ref: '#/components/schemas/Metric'
+        model_cost_per_session_minor:
+          anyOf:
+          - type: number
+          - type: 'null'
+        channel_fees_per_session_minor:
+          anyOf:
+          - type: number
+          - type: 'null'
+      additionalProperties: false
+      required:
+      - from
+      - to
+      - inquiry_to_booking_rate
+      - no_show_rate
+      - handover_rate
+      - containment_rate
+    DeletionRequest:
+      type: object
+      properties:
+        confirm:
+          type: boolean
+          const: true
+      additionalProperties: false
+      required:
+      - confirm
+    Accepted:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - accepted
+      additionalProperties: false
+      required:
+      - status
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - ok
+          - unavailable
+      additionalProperties: false
+      required:
+      - status
+    WebhookEvent:
+      type: object
+      additionalProperties: true
+      description: The channel's own payload. Its shape is defined by the channel, not here; contract tests use dated, synthetic
+        fixtures.
