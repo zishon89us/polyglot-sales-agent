@@ -12,14 +12,18 @@
     "format": "biome check --write .",
     "lint": "biome ci --error-on-warnings .",
     "typecheck": "tsc --project tsconfig.json",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "selftest": "sh tools/selftest/run.sh",
-    "commitlint": "commitlint --from origin/main --to HEAD --verbose"
+    "commitlint": "commitlint --from origin/main --to HEAD --verbose",
+    "lint:openapi": "redocly lint docs/design/openapi.yaml",
+    "check:docs": "node tools/check-docs.ts",
+    "audit": "pnpm audit --audit-level high"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
     "@commitlint/cli": "21.2.4",
     "@commitlint/config-conventional": "21.2.4",
+    "@redocly/cli": "2.79.0",
     "@types/node": "22.20.5",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
