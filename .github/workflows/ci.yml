@@ -1,0 +1,81 @@
+# The pull-request pipeline of AGENTS.md section 8, as far as M2 unit U2.
+#
+# Hardening (issue #163):
+#   - every action is pinned to a commit, with the release it was read from;
+#   - the workflow token can only read the repository;
+#   - no secret is used, so a run from a fork sees none;
+#   - dependencies install from the lockfile and fail if it would change.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: make check (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 is the oldest line the code must run on; 26 is the newest
+        # long-term-support line (ADR 0002, amendment of 2026-11-17).
+        node: ["22", "26"]
+    steps:
+      - name: Check out the branch, with history for the commit lint
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # On a pull request, check out its head, not GitHub's merge commit:
+          # the commit lint and the author check are about the branch's own
+          # commits.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Make origin/main available
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - name: Install from the lockfile
+        run: make setup
+      - name: make check
+        run: make check
+      - name: Lint the pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
+
+  security:
+    name: Dependency audit and secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install from the lockfile
+        run: make setup
+      - name: Dependency audit
+        run: make audit
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
