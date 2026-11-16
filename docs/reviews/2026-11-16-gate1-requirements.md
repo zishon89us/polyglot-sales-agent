@@ -310,3 +310,74 @@ needs no decision and will be made in #61.
 4. A second independent review checks the fixed set. Gate 1 passes only when
    that review has no open High finding.
 5. The remaining M1 design issues (#38 to #44) stay blocked until then.
+
+## Resolution
+
+Date: 2026-11-16 · Issue #61 · Pull request #72
+
+The maintainer answered the decisions and the scope question: the project is
+positioned as a portfolio and reference implementation, and v1.0 ships the
+core, the dashboard and the `booking` pack only
+(`docs/adr/0001-positioning-and-v1-scope.md`). Decisions D2 and D4 to D8 were
+applied as recommended. D1 falls away with the deferred pack. D3 was answered
+by the channel research in `docs/compliance.md`: templates in Arabic and
+English.
+
+**Of the 44 findings: 34 fixed, 6 fixed in part, 4 not fixed because they
+belong to the deferred `cod-confirm` pack.** The six partial fixes include two
+High findings, R5 and R9, whose remaining parts concern only the deferred
+pack. Nothing here has been checked by anyone but the author; the second
+independent review does that.
+
+"Fixed" means the requirements now say what the finding asked for. It does
+not mean the behaviour is built or tested.
+
+| ID | Severity | Status | Where |
+| --- | --- | --- | --- |
+| R1 | High | Fixed | Glossary "Business-initiated message" and "Reply window"; NFR-V1; US-C7, US-C13 |
+| R2 | High | Fixed | Glossary "Handover", "Business hours"; US-C6 criteria 5 to 7; US-C14 criteria 4 and 5 |
+| R3 | High | Fixed | New story US-C15; US-C6 criterion 2; NFR-R4; risk R-T7 |
+| R4 | High | Fixed | New story US-C16; US-C9 criteria 2 and 3; US-D6 criterion 4; US-D12 |
+| R5 | High | Fixed in part | Withheld and failed messages are now defined and listed (glossary "Message status", US-C9, US-C13, US-C18, US-D12). The `order.created` payload and consent carried with an order are **not fixed**: deferred with `cod-confirm` |
+| R6 | High | Not fixed: deferred | Belongs to `cod-confirm`. Recorded against the deferred stories in `user-stories.md` and `personas.md` |
+| R7 | High | Fixed | US-D5; US-C6 criterion 3 (`data-request`); NFR-V3, NFR-V4. Whether the rules are legally sufficient is open question OQ-4 |
+| R8 | High | Fixed | New story US-C19; glossary "Inquiry", "Contained session"; US-D4 |
+| R9 | High | Fixed in part | New story US-D10; US-D7 criterion 1; US-D1 criterion 4; NFR-S8. Store webhook secret provisioning is **not fixed**: deferred with `cod-confirm` |
+| R10 | Medium | Fixed | Milestones re-sequenced (`AGENTS.md` section 9); "Criteria delivered later than their story" in `user-stories.md` |
+| R11 | Medium | Not fixed: deferred | US-O2 belongs to `cod-confirm`. The general language rule for business-initiated messages is fixed in US-C9 criterion 2 |
+| R12 | Medium | Not fixed: deferred | Belongs to `cod-confirm` |
+| R13 | Medium | Fixed | US-B3 criteria 5 to 9 |
+| R14 | Medium | Fixed | US-B2 criteria 3 to 8; US-B4; US-D2 criterion 1; glossary settings and fixed values |
+| R15 | Medium | Fixed | New story US-D12; US-D9 criterion 2; US-D2 criterion 5; US-C13 criterion 3 |
+| R16 | Medium | Fixed | US-D7 criteria 3 to 6 |
+| R17 | Medium | Fixed | US-D3 criteria 2 to 5; US-C9 criterion 4; translation removed from persona P3 and recorded as assumption A8 |
+| R18 | Medium | Fixed | New story US-D11; glossary settings with ranges; US-D6 criteria 1 and 2; US-C14 criterion 3 |
+| R19 | Medium | Fixed | "Supported language" throughout; US-C7 criterion 1 (keyword and button handled by code) |
+| R20 | Medium | Fixed | Glossary "Grounded fact"; US-C4 criteria 2, 3 and 5; risk R-P4 |
+| R21 | Medium | Fixed in part | Failure counter and customer messages defined (US-C6 criteria 2, 5, 6); "low confidence" removed from risk R-A3. The topic list is still unwritten: OQ-5, criterion marked not yet testable |
+| R22 | Medium | Fixed | Glossary "Fallback message", "Person button" |
+| R23 | Medium | Fixed | US-C5 criteria 1 and 2 |
+| R24 | Medium | Fixed | US-C11 criteria 4 and 5; US-C12 criteria 2 and 4 |
+| R25 | Medium | Fixed | US-C1 criteria 1 to 5; NFR-S2 |
+| R26 | Medium | Fixed | New story US-C18; glossary "Message status"; NFR-R5 |
+| R27 | Medium | Fixed | US-C8 split into six criteria; new story US-C17; NFR-S7; NFR-A1; US-C14 criterion 2 |
+| R28 | Medium | Fixed in part | Numbers given for the reply window, retries, lockout, session lifetime and throttling profile. Eval thresholds, token budget, cost target and coverage floor are still unset, each tied to an open question (OQ-6, OQ-7, OQ-8) and marked not yet testable |
+| R29 | Medium | Fixed | Glossary "Metrics": a "Counted by" column, sessions used consistently, unanswered sessions and staff takeovers defined |
+| R30 | Medium | Not fixed: deferred | The metric left v1.0 with `cod-confirm` |
+| R31 | Medium | Fixed | US-D4 |
+| R32 | Medium | Fixed | US-C10 criteria 1 and 2; NFR-V2 |
+| R33 | Medium | Fixed | US-C15, US-C6 criterion 4; "Engineering work with no user story" in `traceability.md`; trial pack named `faq-only`; risk mitigations reworded to cite requirements |
+| R34 | Medium | Fixed | US-C7 criteria 3 to 5; US-B3 criterion 9; US-D12 criterion 3 |
+| R35 | Medium | Fixed | US-B3, US-B4, US-D5 criterion 6, US-D8 criteria 2 and 3, US-D2 criterion 3. The US-O criteria are deferred |
+| R36 | Medium | Fixed | New `docs/requirements/open-questions.md`; the earlier author's review is marked historical |
+| R37 | Low | Fixed | Persona P1 is "business owner" in every story |
+| R38 | Low | Fixed | `nfr.md` Reliability renumbered in order |
+| R39 | Low | Fixed in part | Bundled criteria split in US-C1, US-C2, US-C8, US-C11, US-B2, US-B5; validation rules listed in US-D2. Some criteria still state two linked responses, for example "marked opted out and one confirmation is sent" |
+| R40 | Low | Fixed | `vision.md` "Problem" is marked as assumptions |
+| R41 | Low | Fixed | `vision.md` principles 1 and 2 |
+| R42 | Low | Fixed | `vision.md` out of scope and assumption A7; `user-stories.md` introduction |
+| R43 | Low | Fixed | `nfr.md` "Usability and accessibility" names the screens, tool and levels; NFR-P4 names the profile |
+| R44 | Low | Fixed in part | Quiet hours are part of the definition of every business-initiated message and referenced in US-B3; a late-message rule exists (US-B3 criterion 3, US-C9 criterion 5). Stories still repeat some numbers; the glossary is named as the authority |
+
+The scope grew as predicted: v1.0 has 36 stories and 171 acceptance criteria,
+against 32 stories before, even with four stories deferred.
