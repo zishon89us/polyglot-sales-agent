@@ -141,20 +141,23 @@ assumption.
 
 Build a modular monolith in TypeScript with a queue between the webhook and
 the AI work, so the webhook always answers Meta quickly and every message is
-processed exactly once. These are the default choices; confirm each one in an
-ADR, and change it there if you find a better fit.
+processed exactly once. Each choice below is decided in the ADR named beside
+it; the ADR is the authority, and this table is a summary.
 
-| Concern | Default | Notes |
-| --- | --- | --- |
-| Language and runtime | TypeScript on Node.js LTS, strict mode | One language for API, workers and dashboard |
-| API | Fastify | Schema-validated routes, OpenAPI generated from schemas |
-| Database | PostgreSQL with a typed query layer and versioned migrations | Row-level tenant scoping on every table |
-| Queue and cache | Redis with a job queue | Retries with backoff, dead-letter queue |
-| Dashboard | Next.js | Auth, tenant data editor, conversation view, metrics |
-| LLM access | A provider-agnostic `LlmClient` interface | One real provider adapter plus a deterministic fake for tests |
-| Packaging | Docker and docker-compose | `docker compose up` must give a working local stack |
-| CI/CD | GitHub Actions | See section 8 |
-| Infrastructure | Infrastructure-as-code for one cloud target | Target chosen by the human |
+| Concern | Choice | ADR | Notes |
+| --- | --- | --- | --- |
+| Language and runtime | TypeScript on Node.js LTS, strict mode | 0002 | One language for API, workers and dashboard |
+| API | Fastify | 0002 | Schema-validated routes, OpenAPI generated from schemas |
+| Database | PostgreSQL, one schema, row-level security per tenant | 0003 | Typed SQL query builder, plain SQL migrations |
+| Jobs and timers | A jobs table in PostgreSQL, enqueued in the same transaction as the data. No Redis in v1.0 | 0004 | Retries with backoff, dead-letter state |
+| Dashboard | Next.js, as a client of the API | 0002, 0008 | Email and password, server-side sessions |
+| LLM access | A thin `LlmClient` interface owned by this project | 0005 | One real provider adapter plus a deterministic fake for tests |
+| Business data for the model | Structured profile in the prompt, tools for live data, no vector search | 0006 | |
+| Guardrails | Code first, in layers; no second model at run time | 0007 | |
+| Packaging | Docker and docker-compose | | `docker compose up` must give a working local stack |
+| CI/CD | GitHub Actions | | See section 8 |
+| Infrastructure | Infrastructure-as-code for one target | 0009, proposed | Target chosen by the human |
+| Model provider | Not chosen | 0010, proposed | Chosen by the human, by measurement |
 
 ### Components
 
@@ -458,7 +461,7 @@ deployable after every merge. `make check` runs locally exactly what CI runs.
 | Layer | What it covers | Notes |
 | --- | --- | --- |
 | Unit | Pure logic: state machines, guardrails, validators, pack tools | Fast, no network; the fake `LlmClient` only |
-| Integration | API and workers against real PostgreSQL and Redis in containers | Includes tenant-isolation and idempotency tests |
+| Integration | API and workers against real PostgreSQL in containers | Includes tenant-isolation and idempotency tests |
 | Contract | Our payloads against recorded WhatsApp Cloud API fixtures | Fixtures are synthetic and dated |
 | End-to-end | Full conversations through `mock-whatsapp` to a booking | One happy path and the main failure paths per pack |
 | AI evals | Section 6 | Separate job, separate report |
