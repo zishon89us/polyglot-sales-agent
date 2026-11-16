@@ -1,8 +1,8 @@
 # MVP user stories
 
-Status: draft for maintainer review · Phase 1 (requirements) · Issue #3
+Status: draft for maintainer review · Phase 1 (requirements) · Issues #3 and #46
 
-The MVP has 23 stories. Each has its own issue, which is where the work is tracked; this document is the readable overview. Personas are in [`personas.md`](personas.md). Numeric targets referred to as "the target" are set in `nfr.md`.
+The MVP has 32 stories. Each has its own issue, which is where the work is tracked; this document is the readable overview. Personas are in [`personas.md`](personas.md). Numeric targets referred to as "the target" are set in `nfr.md`.
 
 Stories marked **AI** change or depend on model behaviour and need eval cases as well as tests.
 
@@ -20,10 +20,15 @@ Stories marked **AI** change or depend on model behaviour and need eval cases as
 | US-C8 | Resist manipulation and stay in scope (AI) | P1 | M3 | [#17](https://github.com/zishon89us/polyglot-sales-agent/issues/17) |
 | US-C9 | Follow the channel's rules for business-initiated messages | P1 | M4 | [#18](https://github.com/zishon89us/polyglot-sales-agent/issues/18) |
 | US-C10 | Record how every reply was produced (AI) | P1 | M3 | [#19](https://github.com/zishon89us/polyglot-sales-agent/issues/19) |
+| US-C11 | Handle several messages sent in a row (AI) | P4 | M3 | [#47](https://github.com/zishon89us/polyglot-sales-agent/issues/47) |
+| US-C12 | Respond sensibly to messages the assistant cannot read | P4 | M3 | [#48](https://github.com/zishon89us/polyglot-sales-agent/issues/48) |
+| US-C13 | Message customers first only with their agreement | P4 | M4 | [#49](https://github.com/zishon89us/polyglot-sales-agent/issues/49) |
+| US-C14 | Tell staff when a conversation needs them | P3 | M4 | [#50](https://github.com/zishon89us/polyglot-sales-agent/issues/50) |
 | US-B1 | Ask about services and prices (AI) | P4 | M4 | [#20](https://github.com/zishon89us/polyglot-sales-agent/issues/20) |
 | US-B2 | Book an appointment (AI) | P4 | M4 | [#21](https://github.com/zishon89us/polyglot-sales-agent/issues/21) |
 | US-B3 | Get a reminder and confirm it (AI) | P4 | M4 | [#22](https://github.com/zishon89us/polyglot-sales-agent/issues/22) |
 | US-B4 | Reschedule or cancel (AI) | P4 | M4 | [#23](https://github.com/zishon89us/polyglot-sales-agent/issues/23) |
+| US-B5 | See and book times in the clinic's time zone (AI) | P4 | M4 | [#51](https://github.com/zishon89us/polyglot-sales-agent/issues/51) |
 | US-O1 | Receive new orders from the store | P2 | M5 | [#24](https://github.com/zishon89us/polyglot-sales-agent/issues/24) |
 | US-O2 | Confirm an order and its address (AI) | P4 | M5 | [#25](https://github.com/zishon89us/polyglot-sales-agent/issues/25) |
 | US-O3 | Change the address or cancel an order (AI) | P4 | M5 | [#26](https://github.com/zishon89us/polyglot-sales-agent/issues/26) |
@@ -33,6 +38,10 @@ Stories marked **AI** change or depend on model behaviour and need eval cases as
 | US-D3 | Read conversations and take over | P3 | M5 | [#30](https://github.com/zishon89us/polyglot-sales-agent/issues/30) |
 | US-D4 | See whether it is working | P1 | M5 | [#31](https://github.com/zishon89us/polyglot-sales-agent/issues/31) |
 | US-D5 | Export or delete a customer's data | P1 | M5 | [#32](https://github.com/zishon89us/polyglot-sales-agent/issues/32) |
+| US-D6 | Connect my business and its number | P1 | M5 | [#52](https://github.com/zishon89us/polyglot-sales-agent/issues/52) |
+| US-D7 | Give staff their own limited access | P1 | M5 | [#53](https://github.com/zishon89us/polyglot-sales-agent/issues/53) |
+| US-D8 | Record whether a customer attended | P3 | M5 | [#54](https://github.com/zishon89us/polyglot-sales-agent/issues/54) |
+| US-D9 | Block time and add bookings by hand | P3 | M5 | [#55](https://github.com/zishon89us/polyglot-sales-agent/issues/55) |
 
 ## Core engine
 
@@ -131,6 +140,46 @@ As a clinic owner, I want each assistant reply to carry a record of the prompt v
 1. **Given** any model call, **when** it completes or fails, **then** one trace row is stored and linked to the conversation.
 2. **Given** stored logs and traces, **when** they are inspected, **then** phone numbers and message text are redacted from logs.
 
+### US-C11 — Handle several messages sent in a row
+
+Persona P4 · Milestone M3 · Issue [#47](https://github.com/zishon89us/polyglot-sales-agent/issues/47) · **AI**
+
+As an end customer, I want to send my question as several short messages, as people do in chat, so that I get one coherent answer, not a separate reply to each fragment.
+
+1. **Given** a customer sends several messages within the batching window in `nfr.md`, **when** the worker picks them up, **then** they are answered together in one reply, in the order they were sent.
+2. **Given** a new message arrives while a reply is being generated, **when** the reply is ready, **then** the new message is taken into account before anything is sent, or answered next, and no message is skipped.
+3. **Given** messages for one conversation processed by two workers, **when** they run at the same time, **then** replies are never interleaved or sent out of order.
+
+### US-C12 — Respond sensibly to messages the assistant cannot read
+
+Persona P4 · Milestone M3 · Issue [#48](https://github.com/zishon89us/polyglot-sales-agent/issues/48)
+
+As an end customer, I want a clear response when I send a voice note, image, location, sticker or other unsupported content, so that I know to type my question or ask for a person, and I am not ignored.
+
+1. **Given** a customer sends an unsupported message type, **when** it is received, **then** one reply explains that the assistant can only read text and offers a person, in the conversation's language or the tenant's default language if none is known yet.
+2. **Given** an unsupported message type, **when** it is processed, **then** its content is not sent to the model and the event is stored with its type.
+3. **Given** three unsupported messages in a row, **when** the third arrives, **then** the conversation is handed over.
+
+### US-C13 — Message customers first only with their agreement
+
+Persona P4 · Milestone M4 · Issue [#49](https://github.com/zishon89us/polyglot-sales-agent/issues/49)
+
+As an end customer, I want to receive reminders or order messages only if I agreed to be contacted, so that I am not messaged by a business I never dealt with.
+
+1. **Given** a contact with no recorded consent, **when** a business-initiated message is due, **then** it is not sent and the reason is logged.
+2. **Given** a contact who messaged the business first or whose consent arrived with an order, **when** the consent is recorded, **then** its source and time are stored with the contact.
+3. **Given** a contact who later opts out (US-C7), **when** any business-initiated message is due, **then** opt-out overrides earlier consent.
+
+### US-C14 — Tell staff when a conversation needs them
+
+Persona P3 · Milestone M4 · Issue [#50](https://github.com/zishon89us/polyglot-sales-agent/issues/50)
+
+As a staff agent, I want to be notified when a conversation is handed over, so that the customer is not left waiting for a person who does not know.
+
+1. **Given** a conversation is handed over, **when** the handover is recorded, **then** it appears in the dashboard's waiting list with its reason, and a notification is sent through the tenant's configured method.
+2. **Given** a handed-over conversation with no staff reply within the tenant's configured time, **when** the time passes, **then** it is escalated once in the waiting list and the customer receives one holding message.
+3. **Given** the customer writes again while waiting, **when** the message arrives, **then** the assistant stays silent and the message is added to the waiting conversation.
+
 ## Booking pack
 
 ### US-B1 — Ask about services and prices
@@ -170,6 +219,16 @@ As an end customer, I want to move or cancel my appointment in the chat, so that
 
 1. **Given** an existing booking, **when** the customer asks to reschedule and picks a free slot, **then** the booking moves and the old slot becomes free.
 2. **Given** an existing booking, **when** the customer cancels, **then** the booking is cancelled and the slot becomes free.
+
+### US-B5 — See and book times in the clinic's time zone
+
+Persona P4 · Milestone M4 · Issue [#51](https://github.com/zishon89us/polyglot-sales-agent/issues/51) · **AI**
+
+As an end customer, I want appointment times shown clearly in the clinic's local time, so that I arrive at the right time.
+
+1. **Given** a clinic with a configured time zone, **when** slots are offered or a booking is confirmed, **then** times are in the clinic's time zone with the date and weekday stated.
+2. **Given** a slot outside opening hours, in the past, or shorter than the service's duration, **when** availability is computed, **then** it is never offered.
+3. **Given** a daylight-saving change between booking and appointment, **when** the reminder is scheduled, **then** it is sent relative to the appointment's local time.
 
 ## Cash-on-delivery confirmation pack
 
@@ -256,6 +315,44 @@ As a clinic owner, I want to export or delete everything held about one customer
 
 1. **Given** a contact with conversations, **when** the owner requests an export, **then** a file with that contact's data is produced.
 2. **Given** a contact with conversations, **when** the owner requests deletion, **then** the contact's messages and personal fields are deleted or anonymised and the action is recorded in the audit log.
+
+### US-D6 — Connect my business and its number
+
+Persona P1 · Milestone M5 · Issue [#52](https://github.com/zishon89us/polyglot-sales-agent/issues/52)
+
+As a clinic owner, I want to set up my business, connect my WhatsApp number and choose a pack, so that the assistant starts answering for me.
+
+1. **Given** a new owner account, **when** they complete setup with business name, time zone, default language, currency and pack, **then** a tenant exists with those settings and no access to any other tenant.
+2. **Given** channel credentials are entered, **when** they are saved, **then** they are verified against the channel, stored encrypted, and never shown again in full.
+3. **Given** setup is incomplete or credentials are invalid, **when** a message arrives on that number, **then** no reply is sent and the owner sees what is missing.
+
+### US-D7 — Give staff their own limited access
+
+Persona P1 · Milestone M5 · Issue [#53](https://github.com/zishon89us/polyglot-sales-agent/issues/53)
+
+As a clinic owner, I want to invite staff with an agent role, so that they can handle conversations without changing prices, settings or other users.
+
+1. **Given** an agent-role user, **when** they use the dashboard, **then** they can read and reply to conversations and record attendance, and cannot edit business data, settings, users or export and delete contact data.
+2. **Given** an owner removes a user, **when** the removal is saved, **then** that user's sessions end and they can no longer sign in.
+
+### US-D8 — Record whether a customer attended
+
+Persona P3 · Milestone M5 · Issue [#54](https://github.com/zishon89us/polyglot-sales-agent/issues/54)
+
+As a staff agent, I want to mark an appointment as attended or missed, so that the no-show rate the owner sees is real.
+
+1. **Given** a past appointment, **when** staff mark it attended or missed, **then** the outcome is stored and counted in the no-show rate.
+2. **Given** past appointments with no outcome recorded, **when** the no-show rate is shown, **then** they are excluded and the number of unrecorded appointments is shown beside it.
+
+### US-D9 — Block time and add bookings by hand
+
+Persona P3 · Milestone M5 · Issue [#55](https://github.com/zishon89us/polyglot-sales-agent/issues/55)
+
+As a staff agent, I want to block time off and to add bookings made by phone or in person, so that the assistant never offers a slot that is already taken.
+
+1. **Given** staff block a period or add a manual booking, **when** a customer asks for availability afterwards, **then** the blocked or booked time is not offered.
+2. **Given** a manual booking that overlaps an existing one, **when** it is saved, **then** it is refused with a clear message.
+3. **Given** a manual booking for a contact with consent, **when** a reminder is due, **then** it is sent as for any other booking.
 
 ## Deliberately not stories
 
