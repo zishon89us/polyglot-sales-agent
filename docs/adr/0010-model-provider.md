@@ -88,3 +88,11 @@ read; the full eval report for the chosen model is stored in the repository.
 - The agent must not create accounts or enter payment details.
 - No real customer conversation may be sent to any provider during this
   comparison; the eval dataset is synthetic (NFR-V5, NFR-V6).
+
+## Note, 2026-11-16 (Gate 2 finding A30)
+
+Candidates are compared on the **development** set of the eval plan, not the
+held-out set, so that the held-out set is not used both to choose the model
+and to set its thresholds. Prompts written while working with one candidate
+favour it; the comparison report must say which candidate the prompts were
+written against.

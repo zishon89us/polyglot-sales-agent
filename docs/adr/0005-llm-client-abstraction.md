@@ -109,3 +109,20 @@ added by code holds the contact's number or name (NFR-V7).
 - Which provider gets the first real adapter is ADR 0010.
 - Reopen if a second provider's adapter shows the interface cannot express
   something both need.
+
+## Amendment, 2026-11-16 (Gate 2 findings S19, A23, A43)
+
+- **A second operation.** The interface has two operations, not one: the
+  call that produces a reply, and `health()`, a minimal request that tells
+  whether the provider is reachable. The provider state machine needs it
+  (state machines section 8). It is run by one worker at a time, under a
+  lease, so that several workers do not repeat it.
+- **Flags.** The structured result carries the flags listed in the guardrail
+  policy, section 11.
+- **Retries.** The adapter makes one attempt and never retries. The three
+  attempts and the waits between them belong to the caller, which is the
+  turn-processing code; where this record calls them "parameters of the
+  interface" it means parameters the caller passes for the timeout only.
+- Not settled here: the model call that labels a session as an inquiry when
+  it ends (US-C19), its failure behaviour and its cost. Tracked as a
+  `review-finding` issue from S19.

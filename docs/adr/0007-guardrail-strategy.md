@@ -67,9 +67,16 @@ No second model judges replies at run time in v1.0.
 
 ### Consequences
 
-- Good, because the rules with the worst failure (another tenant's data, a
-  message to someone who opted out, an invented price) hold even if the model
-  is fully manipulated: layers 1, 2, 3 and 5 do not consult it.
+- Good, because two of the rules with the worst failure (another tenant's
+  data, a message to someone who opted out) hold even if the model is fully
+  manipulated: layers 1, 2 and 3 do not consult it.
+- **Corrected after the Gate 2 review (finding A2).** This record first said
+  an invented price also holds under full manipulation. It does not. Layer 5
+  blocks a false value only in a form code can detect, and only checks that
+  the value equals a value of the item the model's own claim names. A
+  manipulated model can state a false price without a currency, in words, or
+  attached to the wrong service. The guardrail policy, section 4, lists the
+  gaps; evals measure them.
 - Good, because each deterministic guardrail is an ordinary unit test.
 - Good, because no extra model call per reply.
 - Bad, because rules that need judgment (is this medical advice? did the
@@ -120,3 +127,14 @@ independent review checks the policy against this record.
   guardrail policy (#44), within this strategy.
 - Reopen if evals show a judgment rule failing at a rate the maintainer will
   not accept; a targeted judge for that rule is then the first candidate.
+
+## Amendment, 2026-11-16 (Gate 2 findings A2, A23)
+
+- The flags the model may return are the seven listed in
+  `docs/ai/guardrail-policy.md`, section 11, not three: asks for a person,
+  asks to stop, sensitive topic, data request, emergency, asks to receive
+  messages again, asks whether it is a person. The policy is the authority
+  for the list.
+- A model response that does not match the schema is a failed output check,
+  not a provider failure.
+- The Consequences section above is corrected as marked.

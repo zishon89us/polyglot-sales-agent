@@ -134,7 +134,7 @@ requirements in detail.
 
 Decided on 2026-11-16 (`adr/0001-positioning-and-v1-scope.md`): the project
 is a portfolio and reference implementation. Version 1.0 is the core engine,
-the dashboard and the `booking` pack, with 36 stories and 222 acceptance
+the dashboard and the `booking` pack, with 36 stories and 224 acceptance
 criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 
