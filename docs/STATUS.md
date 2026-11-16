@@ -41,23 +41,27 @@ M0 Inception met its exit criteria on 2026-11-16; see
 
 ## Next
 
-1. Second independent review of the fixed requirements (running).
-2. Answer its findings. Gate 1 passes only when no High finding is open.
-3. Then the M1 design issues #38 to #44, starting with the ADRs.
+1. Narrow verification review of the eight High fixes (running).
+2. If it confirms them, Gate 1 passes and the M1 design issues #38 to #44
+   start, beginning with the ADRs and with state machines for session,
+   handover, booking and message.
+3. The 44 Medium and Low findings (#73 to #116) are fixed as design or build
+   reaches each story.
 
 ## Gate status
 
-**Gate 1 (requirements) is not passed.** The first independent review found
-44 defects, 9 High. The fixes are in pull request #72: 34 fixed, 6 fixed in
-part, 4 not fixed because they belong to the deferred `cod-confirm` pack. A
-second independent review is checking the fixed set. The M1 design issues
-#38 to #44 stay blocked until it has no open High finding.
+**Gate 1 (requirements) is not passed.** Two independent reviews have run.
+The first found 44 defects, 9 High. After fixes, the second found 52, 8 High,
+almost all in how rules interact. All eight are fixed in pull request #72 and
+a narrow review is verifying those fixes. The 44 Medium and Low findings are
+tracked as issues #73 to #116. This route was agreed with the maintainer and
+is recorded in `AGENTS.md` section 11.
 
 ## Scope
 
 Decided on 2026-11-16 (`adr/0001-positioning-and-v1-scope.md`): the project
 is a portfolio and reference implementation. Version 1.0 is the core engine,
-the dashboard and the `booking` pack, with 36 stories and 171 acceptance
+the dashboard and the `booking` pack, with 36 stories and 192 acceptance
 criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 

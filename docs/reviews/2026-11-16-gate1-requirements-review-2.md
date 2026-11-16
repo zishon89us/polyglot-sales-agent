@@ -191,3 +191,105 @@ Abbreviations: "C6.7" means US-C6 criterion 7; "G:" means a glossary entry.
 - **The four deferred `cod-confirm` stories.** Not assessed, as instructed. Remaining v1.0 dependencies on that pack are reported in S41.
 - **Legal adequacy** of consent by booking (C13.2), the hashed opt-out record (D5.4) and the retention design. These need the lawyer named in OQ-4.
 - **Design documents referred to but not yet written** (eval plan, guardrail policy, test plan, system card). Requirements that defer to them were assessed only for whether the deferral is marked.
+
+---
+
+# Author's response
+
+Everything above this line is the reviewer's report, committed unedited in
+`1db5e01`. Everything below is written by the authoring agent.
+
+Date: 2026-11-16 · Issue #61 · Pull request #72
+
+## Outcome
+
+**All 52 findings are accepted.** The eight High findings are fixed in this
+pull request. The 44 Medium and Low findings are each opened as a tracked
+issue, to be fixed when design or build reaches the story they concern.
+Gate 1 is not passed until a narrow verification review confirms the eight
+fixes.
+
+## Why the approach changed
+
+This review found more than the first (52 against 44), although the first
+round's fixes were applied. The reviewer's own summary explains why: the
+numbers agree and the set is honest, and the defects are "almost all in the
+interactions between rules". The first round of fixes added about sixty
+precise criteria, and each new rule created interactions to get wrong. A
+third full rewrite followed by a third full review would probably repeat
+that.
+
+The maintainer agreed on 2026-11-16 to a different route: fix the High
+findings only, verify those fixes with a narrow review, pass the gate on
+that basis, track the rest as issues, and express the interacting rules as
+state machines in design, where interaction defects are easier to see than
+in prose. `AGENTS.md` section 11 is updated to say this.
+
+The fixes below added 21 acceptance criteria (192 in total). They carry the
+same risk of new interaction defects, which is what the verification review
+is for.
+
+## High findings
+
+| ID | Finding | Fix | Where |
+| --- | --- | --- | --- |
+| S1 | Handover dropped when the session ends | An unanswered handover now outlives its session: it stays on the waiting list until staff answer, send the `handover_followup` template, or close it with a reason. Every handover ends with a stored outcome, and unanswered ones are counted. | Glossary "Handover"; US-C6 criteria 7 and 8; US-C14 criteria 7 to 10; US-C16 criterion 5; US-D4 |
+| S2 | Definition of business-initiated message | Every outbound message now belongs to one of five classes, and a table states for each whether consent, opt-out and quiet hours apply. The holding message is a service notice that needs no recorded consent. Staff cannot write to a contact whose only messages in the session are opt-out requests. | Glossary "Message classes"; US-D3 criteria 5 and 6 |
+| S3 | Quiet hours defined only for reminders | One rule per message kind, with the boundary stated. A reminder can no longer be scheduled before its booking existed; it moves to the end of quiet hours, or is withheld as too late. | Glossary "Quiet hours" and "Quiet hours rules"; US-B3 criteria 3 and 4; US-D12 criterion 3 |
+| S4 | Incomplete setup silences a tenant | "Answering" is now separate from being able to send a templated message. A missing or paused template withholds only the messages that need it. The state is re-evaluated on defined events, and a tenant that stops answering triggers an email to the owner and the operator. | Glossary "Answering"; US-C1 criteria 5 and 6; US-C16 criteria 3 and 4; US-D6 criteria 4 to 6 |
+| S5 | "Slot" never defined | Slot, capacity and free slot are defined, with the grid rule and the overlap rule, and a worked example that was checked by computing it. A tenant-wide limit on concurrent bookings is added for businesses whose services share rooms or staff. Risk R-T5's mitigation is corrected. | Glossary "Slot", "Capacity", "Free slot", settings "Slot interval" and "Total concurrent bookings"; US-B5 criteria 3 and 4; risk R-T5 |
+| S6 | Provider failure below the threshold never retried | The awaiting-retry mark now has its own life, independent of degraded mode: retried every 60 seconds and on the customer's next message, and handed over with reason `provider-failure` when the message is 15 minutes old. Sessions arriving in degraded mode are marked. "Affected tenant" is defined. | Glossary "Awaiting retry" and fixed values; US-C15 criteria 2 to 8 |
+| S7 | Retention escaped by returning customers | Retention applies to each message by its age. A contact's name and number are kept while they have a future booking or a recent one, and contacts with no messages are covered. | NFR-V4; glossary setting "Message retention"; risk R-C5 |
+| S8 | Output guardrail blocks correct replies and passes wrong ones | The check now works claim by claim: each asserted price or time names the service, slot or booking it is about and its source, and must match that source. Values quoted from the customer are allowed; computed totals are not. The case the run-time check cannot catch, confirming a wrong value the customer stated, is named and covered by eval cases, and NFR-A2's grader is made independent of the run-time check. | Glossary "Grounded fact"; US-C4 criteria 2 to 8; NFR-A2 |
+
+## Medium and Low findings
+
+Each is tracked as an issue labelled `review-finding`. Some may already be
+resolved by the fixes above; each issue says to check that first.
+
+| ID | Severity | Issue | Finding |
+| --- | --- | --- | --- |
+| S9 | Medium | [#73](https://github.com/zishon89us/polyglot-sales-agent/issues/73) | Rescheduling after the reminder was sent is undefined |
+| S10 | Medium | [#74](https://github.com/zishon89us/polyglot-sales-agent/issues/74) | Deletion with a future booking is incomplete |
+| S11 | Medium | [#75](https://github.com/zishon89us/polyglot-sales-agent/issues/75) | Metrics are undefined for sessions that have not ended |
+| S12 | Medium | [#76](https://github.com/zishon89us/polyglot-sales-agent/issues/76) | Stored facts that no criterion produces |
+| S13 | Medium | [#77](https://github.com/zishon89us/polyglot-sales-agent/issues/77) | Contradiction |
+| S14 | Medium | [#78](https://github.com/zishon89us/polyglot-sales-agent/issues/78) | The scope of consent is inconsistent |
+| S15 | Medium | [#79](https://github.com/zishon89us/polyglot-sales-agent/issues/79) | Inputs handled by code are not defined in the three states where "the assistant does not reply" |
+| S16 | Medium | [#80](https://github.com/zishon89us/polyglot-sales-agent/issues/80) | Handover reason staff inherits rules written for customer-triggered handovers |
+| S17 | Medium | [#81](https://github.com/zishon89us/polyglot-sales-agent/issues/81) | Escalation gaps |
+| S18 | Medium | [#82](https://github.com/zishon89us/polyglot-sales-agent/issues/82) | A handover recorded inside the 5-minute throttle window: C14.2 does not say whether an email follows when t... |
+| S19 | Medium | [#83](https://github.com/zishon89us/polyglot-sales-agent/issues/83) | C9.1 says a free-form message "may be used" inside the reply window |
+| S20 | Medium | [#84](https://github.com/zishon89us/polyglot-sales-agent/issues/84) | Templates are under-specified |
+| S21 | Medium | [#85](https://github.com/zishon89us/polyglot-sales-agent/issues/85) | (a) A failed assistant or staff reply is shown only "when staff open the conversation" (C18.5); only busine... |
+| S22 | Medium | [#86](https://github.com/zishon89us/polyglot-sales-agent/issues/86) | "The pending reply is discarded" does not say what happens to tool effects already carried out for it |
+| S23 | Medium | [#87](https://github.com/zishon89us/polyglot-sales-agent/issues/87) | Rate-limit interactions |
+| S24 | Medium | [#88](https://github.com/zishon89us/polyglot-sales-agent/issues/88) | Staff have no way to reach a customer outside the reply window |
+| S25 | Medium | [#89](https://github.com/zishon89us/polyglot-sales-agent/issues/89) | Limit semantics beyond the missing number |
+| S26 | Medium | [#90](https://github.com/zishon89us/polyglot-sales-agent/issues/90) | D3.3 says a second staff user "cannot send until it is released", but no criterion defines release, or what... |
+| S27 | Medium | [#91](https://github.com/zishon89us/polyglot-sales-agent/issues/91) | "It applies to events scheduled after the change" fits only schedule-like settings and conflicts with one o... |
+| S28 | Medium | [#92](https://github.com/zishon89us/polyglot-sales-agent/issues/92) | Terms used without a definition, where the missing definition changes behaviour or a metric: **assistant** ... |
+| S29 | Medium | [#93](https://github.com/zishon89us/polyglot-sales-agent/issues/93) | Criteria about model behaviour are written as absolutes ("then the reply is in that language") with no pass... |
+| S30 | Medium | [#94](https://github.com/zishon89us/polyglot-sales-agent/issues/94) | (a) "Supported language: a language in the eval dataset with a published score" sets no minimum score, so a... |
+| S31 | Medium | [#95](https://github.com/zishon89us/polyglot-sales-agent/issues/95) | The operator is an actor with almost no defined behaviour |
+| S32 | Medium | [#96](https://github.com/zishon89us/polyglot-sales-agent/issues/96) | Unroutable events (C1.5) contain a message and a phone number but belong to no tenant, so neither the per-t... |
+| S33 | Medium | [#97](https://github.com/zishon89us/polyglot-sales-agent/issues/97) | The booking record is inconsistent and its states are not listed |
+| S34 | Medium | [#98](https://github.com/zishon89us/polyglot-sales-agent/issues/98) | Simultaneous booking is covered only by implication |
+| S35 | Medium | [#99](https://github.com/zishon89us/polyglot-sales-agent/issues/99) | C1.6 promises "exactly one reply" after a worker stops mid-processing |
+| S36 | Medium | [#100](https://github.com/zishon89us/polyglot-sales-agent/issues/100) | The fixed opt-out and opt-in keyword lists are referred to but exist nowhere and are tied to no open question |
+| S37 | Medium | [#101](https://github.com/zishon89us/polyglot-sales-agent/issues/101) | D7.5 turns on "before a removal took effect", but D7.3 allows up to 60 seconds between saving and the sessi... |
+| S38 | Medium | [#102](https://github.com/zishon89us/polyglot-sales-agent/issues/102) | Overlap: a request for medical advice must be declined with an offer of a person (C8.5) and may also be a h... |
+| S39 | Medium | [#103](https://github.com/zishon89us/polyglot-sales-agent/issues/103) | Dependencies on later milestones that the table does not list: C1.5 (M2) on D6 (M4) and, through D6.4, on C... |
+| S40 | Medium | [#104](https://github.com/zishon89us/polyglot-sales-agent/issues/104) | The success criterion "the non-functional targets in nfr.md are met and tested" cannot be met inside v1.0 a... |
+| S41 | Medium | [#105](https://github.com/zishon89us/polyglot-sales-agent/issues/105) | Risk rows left from the two-pack scope or in conflict with the requirements |
+| S42 | Medium | [#106](https://github.com/zishon89us/polyglot-sales-agent/issues/106) | Many criteria bundle behaviours, against the project's own standard |
+| S43 | Medium | [#107](https://github.com/zishon89us/polyglot-sales-agent/issues/107) | For several fixed messages it is not stated whether code or the model produces them, or in which language: ... |
+| S44 | Low | [#108](https://github.com/zishon89us/polyglot-sales-agent/issues/108) | The table says each number has one home, but these fixed numbers live only in stories or NFRs: 60 seconds (... |
+| S45 | Low | [#109](https://github.com/zishon89us/polyglot-sales-agent/issues/109) | NFR-P1's target is relative to "the environment size recorded in the load-test report", so any result can p... |
+| S46 | Low | [#110](https://github.com/zishon89us/polyglot-sales-agent/issues/110) | Boundary wording |
+| S47 | Low | [#111](https://github.com/zishon89us/polyglot-sales-agent/issues/111) | NFRs other than the four in "Engineering work with no user story" have no traceability row (for example NFR... |
+| S48 | Low | [#112](https://github.com/zishon89us/polyglot-sales-agent/issues/112) | "Any inbound message that is not text, a button reply, or an image or video caption" also covers reactions,... |
+| S49 | Low | [#113](https://github.com/zishon89us/polyglot-sales-agent/issues/113) | Handover rate's numerator can include sessions with no inbound message (a staff takeover of a reminder-star... |
+| S50 | Low | [#114](https://github.com/zishon89us/polyglot-sales-agent/issues/114) | Small gaps in the booking conversation: which five slots are offered and how a customer gets more; a custom... |
+| S51 | Low | [#115](https://github.com/zishon89us/polyglot-sales-agent/issues/115) | The agent role's list does not classify metrics, viewing business data, blocking time, the withheld list or... |
+| S52 | Low | [#116](https://github.com/zishon89us/polyglot-sales-agent/issues/116) | Wording |
