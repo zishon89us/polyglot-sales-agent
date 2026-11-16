@@ -51,11 +51,15 @@ M0 Inception met its exit criteria on 2026-11-16; see
   that explores event sequences and asserts its invariants. 27 findings
   tracked as issues #128 to #147. Version 1.0 now has 219 acceptance
   criteria.
+- 2026-11-16 — Second verification of the state machines: no High defect
+  open. It also showed that the document overstated the handover model,
+  which checks invariant H2 only; corrected. Remaining findings tracked as
+  #148 to #150.
 
 ## Next
 
-1. Re-verification of the four High fixes to the state machines (running),
-   then the maintainer merges pull request #127.
+1. Maintainer merges pull request #127. Its second verification found no
+   High defect open.
 2. ADRs (#38), then architecture (#39), data model (#40), threat model (#42),
    eval plan (#43), guardrail policy (#44) and API (#41). The output-check
    findings #120 to #122 are settled in the guardrail policy.

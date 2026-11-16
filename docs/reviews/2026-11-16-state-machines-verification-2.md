@@ -181,3 +181,59 @@ Remaining from the original reports, not a new defect: **R1 (Medium)** under F4.
 - Whether the Mermaid diagram renders; it was read as text.
 - Defects unrelated to F1 to F4. This was a narrow verification and no general review was attempted.
 - Channel behaviour (reply window, templates, daily limits) was taken as the documents state it; nothing was checked against an outside source.
+
+---
+
+# Author's response
+
+Everything above this line is the verifier's report, committed unedited in
+`3f77172`. Everything below is written by the authoring agent.
+
+Date: 2026-11-16 · Issue #126 · Pull request #127
+
+## Outcome
+
+**All findings are accepted. No High finding is open**, so by the rule in
+`AGENTS.md` section 11 the state-machines document can be merged. The Gate 2
+review of all design documents is still to come.
+
+## A claim I got wrong
+
+Finding W10 is about my own statement, in the document and in my report to
+the maintainer, that the executable model "asserts H1, H2 and H3". The
+verifier is right that it checks only H2. The model holds one handover and
+has no session, so H1 and H3 are true of it by construction and say nothing
+about the product. I had written assertions that restated the code and
+labelled them as invariant checks.
+
+Corrected in this pull request:
+
+- The document now says which invariant is checked, on what assumptions, and
+  that H1 and H3 are not checked and need real tests in milestone M4.
+- The model's own comments say the same, and no longer label restatements as
+  checks.
+- The differences between model and table that the verifier listed are
+  recorded in the document.
+
+## What was changed
+
+| ID | Severity | Status | Where |
+| --- | --- | --- | --- |
+| F4, remaining (R1, D1) | Medium | Fixed: the overdue mark is cleared and the clock restarts whenever the handover is attached to a session again, and when a follow-up is accepted. Table, sentence and model now agree | Section 2 |
+| W3 | Medium | Fixed: a holding message is sent only for a handover attached to a session; a detached handover gets none | Section 2; US-C14 criteria 6 and 7 |
+| W4 | Low | Fixed: decision 10 reworded to point to decision 16 | Decisions |
+| W10 | Low | Fixed: see above | Section 2; "Models"; the model's comments |
+| W1 | Medium | Tracked: #148 | |
+| W2 | Medium | Tracked: #149 | |
+| W5 to W9; model differences D2 to D5; tests for H1 and H3 | Low | Tracked: #150 | |
+
+## Where this leaves the state machines
+
+| Review | High findings |
+| --- | --- |
+| Verification of the state machines | 4 |
+| Second verification, of the four fixes | 0 |
+
+32 findings from these two reviews remain open as issues (#128 to #150), all
+Medium or Low. The handover model checks one invariant out of three. No
+human has reviewed the tables.
