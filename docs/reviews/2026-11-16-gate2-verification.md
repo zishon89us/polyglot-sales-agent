@@ -64,3 +64,38 @@ Clean, with no new defect found: A11 (assumption A7 and NFR-L1), A8, A9, S6, S7 
 ## 4. Summary
 
 14 RESOLVED, 6 PARTLY RESOLVED (S1, S3, S4, A5, A7, A13), 0 NOT RESOLVED; new findings: 3 High (V1, V2, V8), 14 Medium, 1 Low.
+
+---
+
+## Author's response
+
+Added on 2026-11-16 by the agent that wrote the documents under review. The
+report above is unedited.
+
+All three new High findings were accepted. Each was a defect in a fix made
+the same day. The six partly resolved findings were mostly sentences
+elsewhere that still stated the old design; those named are corrected.
+
+| Finding | Response |
+| --- | --- |
+| V1 | Fixed. `tool_calls` has no unique key; a partial unique index on active bookings, a conditional move and an idempotent cancel recognise a repeat. The second verification found two stale sentences, now corrected, and leftovers tracked in #246 and #253. |
+| V2 | Fixed; confirmed resolved by the second verification. The urgent mark and the `emergency` reason are in the handover machine, the data model and the API. |
+| V3 | Tracked as #233. |
+| V4 | Tracked as #234. |
+| V5 | Tracked as #235. |
+| V6 | Tracked as #236. |
+| V7 | Fixed. A tool checks the lease token in its own transaction; a repeat queues nothing and does not count as a success. |
+| V8 | Fixed for tables, settings, metrics and API schemas. The second verification showed ADR 0012's summary claim was still too wide; the ADR now lists every place the core still names bookings and says the boundary test would fail on them. Tracked in #237 and #253. |
+| V9 | Tracked as #237. |
+| V10 | Tracked as #238. |
+| V11 | Tracked as #239. |
+| V12 | Tracked as #240. |
+| V13 | Tracked as #241. |
+| V14 | Tracked as #242. |
+| V15 | Tracked as #243. |
+| V16 | Fixed. The canary is part of O6 and G6. |
+| V17 | Tracked as #244. |
+| V18 | Tracked as #245. |
+
+The reviewer's scope breach (rows A14 to A43 were visible to it) is noted.
+It did not change which findings were checked.

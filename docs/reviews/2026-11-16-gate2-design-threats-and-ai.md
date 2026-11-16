@@ -103,3 +103,76 @@ Clean, or no finding beyond those above: ADR 0008's option analysis and its requ
 ## 4. Count
 
 High: 13 · Medium: 32 · Low: 5 (50 findings).
+
+---
+
+## Author's response
+
+Added on 2026-11-16 by the agent that wrote the documents under review. The
+report above is unedited.
+
+Every High finding was accepted. None was rejected. Each was either fixed in
+the design or, where the reviewer showed that a claim was false and no fix
+exists, answered by withdrawing the claim and saying plainly what is not
+enforced. Medium and Low findings are fixed where the same edit covered
+them, and otherwise tracked as `review-finding` issues (`AGENTS.md` section
+11). The changes are in the pull request for issue #176.
+
+| Finding | Severity | Response |
+| --- | --- | --- |
+| A1 | High | Fixed. Degraded mode begins only if a health check fails when the count is reached; invalid output is a failed check, not a provider failure; degraded-mode emails are limited per tenant. State machines section 8 and decision 22; US-C15 criteria 1, 6 and 10; threat T59. Whether input can force a timeout is still unknown and is stated. |
+| A2 | High | Fixed by withdrawing the claim. ADR 0007, the threat model and the guardrail policy now say that the truth of what is said does not hold under full manipulation, and list what does. Detection now covers any currency, so a foreign-currency amount fails. Bare numbers and values in words remain undetected, as stated. |
+| A3 | High | Answered by narrowing the claim, with two code limits added. A passing claim shows value equality only; the glossary and policy say so. A calendar claim may not be used where a slot or booking claim applies, and a percentage claim must name one item. Subject binding is the model's and is measured by E2 part 2. |
+| A4 | High | Answered by narrowing the claim and adding a gate. G13 is Both; threat T60 states that a false confirmation is not prevented by code; E16 is a fixed gate with human check. No code check was found that separates "let me check 5 pm" from "you are booked for 5 pm" without blocking ordinary replies. |
+| A5 | High | Fixed in design, with stated limits. A code phrase list is checked at step 4a in every state; own reason `emergency`, urgent, emailed outside the throttle; "person in immediate danger" is included; default language plus English for unsupported languages; E17 is a fixed gate with minimum counts. **Not done, and required before live use:** the lists and the text do not exist, and no person with clinical or crisis training has reviewed anything. |
+| A6 | High | Fixed. E2 is graded in two parts: a number allow-list by code, which needs no parser and no attribution, and a model grader with human check for attribution and values in words. The report states how many replies had no digits. |
+| A7 | High | Fixed. Gates are set on pooled held-out cases with a margin from the standard error; per-language scores are reported, not gated; the regression rule, which could never fire, is removed; the pull-request subset and the post-merge failure action are defined; "full run" is defined once. |
+| A8 | High | Fixed. One behaviour: advice requests are handed over (US-C8 criterion 5 now refers to US-C6 criterion 3). E9 grades in-scope look-alikes that must not flag, and the model's own reply on cases where it failed to flag. |
+| A9 | High | Fixed for US-C5 and G15; G16 is accepted as ungated and says so. "Are you a person?" is now a flag answered by fixed text, with E18 as a fixed gate. A red-team category "asks for sensitive data" is added. |
+| A10 | High | Fixed. The cross-tenant category is described as evidence about the code, not the model. Prompt disclosure is graded by a production canary and by a model grader with human check, in every language. |
+| A11 | High | Answered by the maintainer's choice on 2026-11-16 to record assumptions now and re-read before live use. Threat model assumption A7 lists each channel statement the design relies on; NFR-L1 is amended to match. Nothing was re-read. |
+| A12 | High | Fixed. An opt-out is lifted only by a keyword or the opt-in button; a free-text request gets a fixed question with the button. US-C7, state machines section 6 and decision 24, G11. Consent from a chat booking still begins with a model tool call; the fixed confirmation now tells the customer a reminder will come and how to stop it. |
+| A13 | High | Fixed. "Processing one turn", steps 3, 6 and 7: the confirmation is queued by the tool that succeeded and does not depend on the reply; no fallback follows a successful state-changing tool; a discarded turn keeps its tool effects. |
+| A14 | Medium | Tracked as #206. |
+| A15 | Medium | Tracked as #207. |
+| A16 | Medium | Tracked as #208. |
+| A17 | Medium | Tracked as #209. |
+| A18 | Medium | Fixed. O4 now says it is covered by O3 and what it cannot catch. |
+| A19 | Medium | Tracked as #210. |
+| A20 | Medium | Tracked as #211. |
+| A21 | Medium | Tracked as #212. |
+| A22 | Medium | Tracked as #213. |
+| A23 | Medium | Fixed. ADRs 0005 and 0007 are amended; the policy's seven flags are the authority. |
+| A24 | Medium | Fixed. Section 3 of the eval plan gives one gate per category. |
+| A25 | Medium | Fixed. The bound is restated for the real counts, and repeats are not counted as cases. |
+| A26 | Medium | Tracked as #214. |
+| A27 | Medium | Tracked as #215. |
+| A28 | Medium | Tracked as #216. |
+| A29 | Medium | Tracked as #217. |
+| A30 | Medium | Fixed. Candidates are compared on the development set; ADR 0010 and the eval plan say so. |
+| A31 | Medium | Fixed. The threat model lists every open, accepted or measured-only threat. |
+| A32 | Medium | Tracked as #218. |
+| A33 | Medium | Tracked as #219. |
+| A34 | Medium | Fixed with S6. |
+| A35 | Medium | Tracked as #220. |
+| A36 | Medium | Tracked as #221. |
+| A37 | Medium | Tracked as #222. |
+| A38 | Medium | Tracked as #223. |
+| A39 | Medium | Tracked as #224. |
+| A40 | Medium | Tracked as #225. |
+| A41 | Medium | Tracked as #226. |
+| A42 | Medium | Tracked as #227. |
+| A43 | Medium | Tracked as #228. |
+| A44 | Medium | Tracked as #229. |
+| A45 | Medium | Tracked as #230. |
+| A46 | Low | Fixed with S31. |
+| A47 | Low | Fixed. US-C8 criterion 4 now says a tool result, not a profile name. |
+| A48 | Low | Tracked in #232. |
+| A49 | Low | Tracked in #232. |
+| A50 | Low | Tracked in #232. |
+
+Two narrow verifications by separate agents followed
+(`2026-11-16-gate2-verification.md` and `-verification-2.md`). The first
+found 14 of the 20 High findings resolved, 6 partly resolved, and 3 new High
+findings in the fixes. The second found no High finding open. What remains
+is Medium or Low and is tracked.

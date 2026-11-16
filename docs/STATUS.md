@@ -99,20 +99,44 @@ M0 Inception met its exit criteria on 2026-11-16; see
   7 High. Threats and AI review: 50 findings, 13 High. Both reports are
   committed unedited in `docs/reviews/`. **Gate 2 is not passed.** No
   finding has been answered or fixed yet.
+- 2026-11-16 — Gate 2 findings answered. The maintainer chose to move
+  booking out of the core (ADR 0012) and to record channel statements as
+  assumptions. All 20 High findings were fixed or answered by withdrawing a
+  false claim. A first verification found 14 resolved, 6 partly, and 3 new
+  High findings in the fixes; a second found no High finding open. Version
+  1.0 has 224 acceptance criteria; the API has 44 paths and 57 operations.
+  The regenerated OpenAPI file passes the structural check and has not been
+  re-linted.
 
 ## Next
 
-1. Maintainer chooses the route for the 20 High findings, and decides S4
-   (whether the core may know about bookings).
-2. Answer every finding in both reports; fix the High findings; a narrow
-   review checks those fixes.
-3. Medium and Low findings become `review-finding` issues.
-4. M1 retro, and the evaluation of AWS AI-DLC rules for M2 (#59).
+1. Maintainer reviews and merges the Gate 2 pull request (#176). Merging
+   accepts ADR 0012.
+2. M1 retro, and the evaluation of AWS AI-DLC rules for M2 (#59).
+3. M2, the walking skeleton. Before the boundary test of ADR 0012 is
+   switched on, the places where the core still names bookings must be
+   removed (#237, #253).
+4. Before any live use: the emergency phrase lists and text, reviewed by a
+   fluent speaker and by a person with clinical or crisis training (#168);
+   each channel assumption re-read in full (threat model A7).
 
 ## Gate status
 
-**Gate 2 (design) is not passed.** Two independent reviews on 2026-11-16
-found 20 High findings (7 and 13) among 94. None is answered yet.
+**Gate 2 (design) passes on the rule of `AGENTS.md` section 11, once the
+maintainer merges #176:** no High finding is open. That is all it means.
+
+| Review | Scope | High findings |
+| --- | --- | --- |
+| Structure review | Architecture, data model, state machines, API, ADRs | 7 |
+| Threats and AI review | Threat model, guardrail policy, eval plan, compliance | 13 |
+| Verification | The 20 fixes | 3 new; 6 of 20 partly resolved |
+| Second verification | Those 9 | 0 |
+
+Three rounds each found defects in the round before, and the last still
+added eight Medium findings. 146 `review-finding` issues are open across
+both gates. The design is not finished; it is at the point where the
+remaining defects are better found by building and testing than by another
+round of reading. No person has reviewed any of it in detail.
 
 **Gate 1 (requirements) is passed, on the route agreed with the maintainer**
 (`AGENTS.md` section 11): no High finding is open; Medium and Low findings

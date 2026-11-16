@@ -83,3 +83,70 @@ Clean sections: SM §5 timing rule and worked examples are internally consistent
 ## 4. Totals
 
 High: 7 · Medium: 31 · Low: 6
+
+---
+
+## Author's response
+
+Added on 2026-11-16 by the agent that wrote the documents under review. The
+report above is unedited.
+
+Every High finding was accepted. None was rejected. Each was either fixed in
+the design or, where the reviewer showed that a claim was false and no fix
+exists, answered by withdrawing the claim and saying plainly what is not
+enforced. Medium and Low findings are fixed where the same edit covered
+them, and otherwise tracked as `review-finding` issues (`AGENTS.md` section
+11). The changes are in the pull request for issue #176.
+
+| Finding | Severity | Response |
+| --- | --- | --- |
+| S1 | High | Fixed. ADR 0004 now orders work with a lease and a token check on the conversation row; `architecture.md`, "Processing one turn", step 1 and step 8; data model `conversations.lease_token`. |
+| S2 | High | Fixed by stating the policy and narrowing the claim. `architecture.md`, "Sending a message once": a message passes through `sending`; a reply left there is sent once more, a template is not. US-C1 criterion 9 and NFR-R2 now say what is guaranteed and what the restart test must show. |
+| S3 | High | Fixed. "Processing one turn": completed tool calls are fed to the next turn (step 2), and the key of a state-changing call is made from what it does (step 4). One contact cannot hold two active bookings of one service at one start time in v1.0, which is stated. |
+| S4 | High | Fixed, by the maintainer's choice on 2026-11-16 to move booking out of the core. ADR 0012 gives the booking pack its machines, tables, routes and settings, extends the pack interface, and adds a boundary test. The architecture, data model, state machines and `AGENTS.md` are corrected. Not every sentence of the older documents has been rewritten; ADR 0012 is the authority where they differ. |
+| S5 | High | Fixed. `createBooking` takes `contact_phone` and `consent`; data model `bookings.consent_recorded`; `api.md` section 6 and decision 9. |
+| S6 | High | Fixed. Metadata only, in a new table `unparsed_events`, kept 30 days; the raw event is not stored. A signed request is never answered 400. `api.md` section 3, data model decision 8. |
+| S7 | High | Fixed by changing the criterion, since the reviewer is right that the original cannot be implemented. US-C2 criterion 3 now requires every not-found request by identifier to be logged, with the same answer whether or not the record exists elsewhere. |
+| S8 | Medium | Tracked as #177. |
+| S9 | Medium | Tracked as #178. |
+| S10 | Medium | Tracked as #179. |
+| S11 | Medium | Tracked as #180. |
+| S12 | Medium | Tracked as #181. |
+| S13 | Medium | Tracked as #182. |
+| S14 | Medium | Tracked as #183. |
+| S15 | Medium | Tracked as #184. |
+| S16 | Medium | Tracked as #185. |
+| S17 | Medium | Tracked as #186. |
+| S18 | Medium | Tracked as #187. |
+| S19 | Medium | Tracked as #188. |
+| S20 | Medium | Tracked as #189. |
+| S21 | Medium | Tracked as #190. |
+| S22 | Medium | Tracked as #191. |
+| S23 | Medium | Tracked as #192. |
+| S24 | Medium | Tracked as #193. |
+| S25 | Medium | Tracked as #194. |
+| S26 | Medium | Tracked as #195. |
+| S27 | Medium | Tracked as #196. |
+| S28 | Medium | Tracked as #197. |
+| S29 | Medium | Tracked as #198. |
+| S30 | Medium | Tracked as #199. |
+| S31 | Medium | Fixed. The ADR index states who accepted each record; `architecture.md` section 9 corrected. The front matter of the older records is not rewritten; the index says so. |
+| S32 | Medium | Tracked as #200. |
+| S33 | Medium | Tracked as #201. |
+| S34 | Medium | Tracked as #202. |
+| S35 | Medium | Tracked as #203. |
+| S36 | Medium | Fixed. The webhook's responses are 200, 401, 413, 429 (bad signature only) and 503 in both documents. |
+| S37 | Medium | Tracked as #204. |
+| S38 | Medium | Tracked as #205. |
+| S39 | Low | Tracked in #231. |
+| S40 | Low | Tracked in #231. |
+| S41 | Low | Tracked in #231. |
+| S42 | Low | Tracked in #231. |
+| S43 | Low | Tracked in #231. |
+| S44 | Low | Tracked in #231. |
+
+Two narrow verifications by separate agents followed
+(`2026-11-16-gate2-verification.md` and `-verification-2.md`). The first
+found 14 of the 20 High findings resolved, 6 partly resolved, and 3 new High
+findings in the fixes. The second found no High finding open. What remains
+is Medium or Low and is tracked.

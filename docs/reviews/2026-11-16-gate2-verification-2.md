@@ -44,3 +44,28 @@ I ran `check_openapi.py` (ok, 44 paths, 57 operations) and both models (both pas
 ## 4. Is any High finding open?
 
 No — none of the nine remains High; V1, S3, A5, V8, S4 and A13 are partly resolved with Medium leftovers, and W1–W8 are new Mediums (W3 deserves attention first, as it concerns a second emergency message).
+
+---
+
+## Author's response
+
+Added on 2026-11-16 by the agent that wrote the documents under review. The
+report above is unedited.
+
+No High finding is open, so Gate 2 can pass on the rule in `AGENTS.md`
+section 11. That is a statement about the rule, not about the design being
+finished: this report alone adds eight Medium findings, every one caused by
+a fix, and the design now carries well over a hundred tracked findings.
+W3, which concerns a second emergency message, was fixed at once.
+
+| Finding | Response |
+| --- | --- |
+| W3 | Fixed. Step 4a now applies while an urgent handover is open, a new one opens after staff close or hand back, and the emergency text is limited to once in 60 minutes per contact instead of once per session. |
+| W1 | Tracked as #246. |
+| W2 | Tracked as #247. |
+| W4 | Tracked as #248. |
+| W5 | Tracked as #249. |
+| W6 | Tracked as #250. |
+| W7 | Tracked as #251. |
+| W8 | Tracked as #252. |
+| Leftovers on V1, S3, A5, V8, S4, A13, S1 | The two stale sentences on the tool-call key and the `chat-booking` source are corrected. The rest is tracked in #253. |
