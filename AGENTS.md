@@ -159,49 +159,21 @@ it; the ADR is the authority, and this table is a summary.
 | Infrastructure | Infrastructure-as-code for one target | 0009, proposed | Target chosen by the human |
 | Model provider | Not chosen | 0010, proposed | Chosen by the human, by measurement |
 
-### Components
+### Where the design lives
 
-- `channel-whatsapp`: verifies webhook signatures, normalises inbound
-  messages, sends outbound messages, enforces the customer-service window and
-  template rules.
-- `core`: tenant resolution, conversation state, language detection,
-  orchestration, handover, audit log.
-- `ai`: prompt assembly, retrieval over tenant data, tool calling, guardrails,
-  tracing.
-- `packs/booking` and the trial `packs/faq-only`: intents, tools, templates,
-  evals.
-- `integrations`: reserved for v1.1 (signed inbound order webhooks).
-- `dashboard`: owner-facing web app.
-- `mock-whatsapp`: a local server that imitates the Cloud API for development,
-  tests and demos.
+- `docs/design/architecture.md`: context, containers, packages and their
+  responsibilities, runtime flows, and the dependency rule. `packages/core`
+  holds the rules as pure functions and imports nothing else from this
+  repository.
+- `docs/design/state-machines.md`: the order of checks for an inbound message
+  and the transition tables. For the behaviour they cover, they are the
+  authority.
+- `docs/design/data-model.md`, `docs/design/api.md`,
+  `docs/design/threat-model.md`: tables, interfaces and threats.
+- `docs/adr/`: the decision behind each choice.
 
-### Inbound message flow
-
-1. Meta calls the webhook. Verify the signature, store the raw event with its
-   message ID, enqueue a job, return 200 at once.
-2. The worker drops duplicates by message ID, resolves the tenant from the
-   receiving number and loads the conversation.
-3. If a human has taken over the conversation, notify the dashboard and stop.
-4. Run input guardrails: language detection, abuse and prompt-injection
-   screening, opt-out keywords.
-5. Retrieve the tenant data relevant to the message.
-6. Call the model with the versioned system prompt, conversation history,
-   retrieved data and the active pack's tools.
-7. Execute any tool calls (check availability, create or change a booking)
-   through validated, tenant-scoped functions.
-8. Run output guardrails: grounded in retrieved data, in the customer's
-   language, inside policy. On failure, send a safe fallback and flag for
-   handover.
-9. Send the reply through the channel, store it, and record the trace: prompt
-   version, model, tokens, cost, latency, guardrail results.
-
-### Core data model
-
-`tenants`, `users`, `channels`, `contacts` (with consent and opt-out state),
-`conversations`, `sessions`, `messages`, `knowledge_items`, `bookings`,
-`message_templates`, `handovers`, `ai_traces`, `audit_log`. Document it in
-`docs/design/data-model.md` with an entity-relationship diagram written in
-Mermaid.
+Where this file and those documents differ, they are right and this file has
+a defect to fix.
 
 ## 4. Repository and GitHub conventions
 
