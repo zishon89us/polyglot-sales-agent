@@ -44,7 +44,8 @@ given here, because none has been verified.
 | [0009](0009-hosting-target.md) | Hosting target and region | Proposed; needs the maintainer |
 | [0010](0010-model-provider.md) | Model provider | Proposed; needs the maintainer |
 | [0011](0011-operator-access.md) | Operator access through commands run on the server, with an insert-only log | Accepted: merged by the maintainer in #175 |
-| [0012](0012-core-and-pack-boundary.md) | The core holds nothing about bookings; the booking pack owns its rules, tables and routes | Proposed by the agent; accepted when the maintainer merges it |
+| [0012](0012-core-and-pack-boundary.md) | The core holds nothing about bookings; the booking pack owns its rules, tables and routes | Accepted: merged by the maintainer in #254 |
+| [0013](0013-ai-dlc-workflow.md) | Borrow four practices from AWS AI-DLC for the build milestones; do not install it | Proposed by the agent; accepted when the maintainer merges it |
 
 A record written by the agent is a proposal until the maintainer merges the
 pull request that adds it; merging is the acceptance. The front matter of
