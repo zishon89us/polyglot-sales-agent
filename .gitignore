@@ -21,3 +21,7 @@ coverage/
 .idea/
 .vscode/
 .DS_Store
+
+# Python caches (design models)
+__pycache__/
+*.pyc

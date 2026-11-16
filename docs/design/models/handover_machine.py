@@ -1,7 +1,15 @@
 """Executable model of the handover machine in docs/design/state-machines.md,
 section 2. Not product code. It explores every sequence of events up to a
-fixed depth and checks the invariants mechanically, so that they do not rest
-on reading the table.
+fixed depth.
+
+What it checks: invariant H2 (every handover ends, even if nobody acts),
+that every state is reachable, and that a handover gets at most one
+follow-up. What it does NOT check: H1 (one open handover per contact) and H3
+(a session is handed over exactly while a handover is attached). The model
+holds one handover and has no session, so those two are true of it by
+construction and prove nothing about the product. It also leaves out
+opt-out, the staff-message block, a follow-up that is held and accepted
+later, and the value of the escalation clock.
 
 Run:  python3 docs/design/models/handover_machine.py
 
@@ -172,22 +180,23 @@ def main():
     stuck = [s for s in seen if s[0] in OPEN and not ends_in_silence(s)]
     assert not stuck, stuck
 
-    # H1: no event creates a second handover. The model holds one handover per
-    # contact, and a new trigger is defined in every open state.
+    # Consistency only, NOT a check of H1: a new trigger is defined in every
+    # open state. The model holds one handover by construction.
     for s in seen:
         if s[0] in OPEN:
             assert step(s, "new_trigger") is not None, s
 
-    # H3 / S1: the session is handed over exactly in waiting and in-progress.
-    # A customer message in detached must not hand the session over.
+    # Consistency only, NOT a check of H3: these restate two rows of the
+    # table. The model has no session and no assistant.
     for s in seen:
         if s[0] == "detached":
             assert step(s, "customer_message")[0] == "detached"
         if s[0] == "followed-up":
             assert step(s, "customer_message")[0] == "waiting"
 
-    # A staff message always answers the handover when it can be sent, and it
-    # can be sent in every open state whose reply window is open.
+    # A staff message, when the model lets one be sent, answers the handover.
+    # The model allows it whenever the reply window is open; the document
+    # also blocks it for a contact whose only messages are opt-out requests.
     for s in seen:
         if s[0] in OPEN and s[1]:
             assert step(s, "staff_message")[0] == "in-progress", s

@@ -80,10 +80,25 @@ so even if no customer or staff member ever acts again.
 in it, exactly while a handover in `waiting` or `in-progress` is attached to
 it.
 
-These are checked mechanically by `docs/design/models/handover_machine.py`,
-an executable copy of the table below that explores every sequence of events
-to a depth of 8 and asserts each invariant. Its output lists the same 21
-transitions between states that the table and diagram show.
+`docs/design/models/handover_machine.py` is an executable copy of the table
+below. It explores every sequence of events to a depth of 8, and its output
+lists the same 21 transitions between states that the table and diagram
+show. What it establishes is narrower than the three invariants:
+
+- **H2 is checked**, for the model: from every reachable open state, with
+  only the session ending and the 7-day and 14-day timers firing, a terminal
+  state is reached. This assumes that a session always ends and that timers
+  fire.
+- **H1 is not checked.** The model holds one handover per contact by
+  construction. That no second handover is created depends on the code that
+  creates handovers, and must be a test in milestone M4.
+- **H3 is not checked.** The model has no session and no assistant. H3 is the
+  definition of "attached", and must also be a test in M4.
+
+The model also leaves out opt-out, the staff-message block of section 7, a
+follow-up that is held and accepted later, and the escalation clock's value.
+An independent verifier listed these differences
+(`docs/reviews/2026-11-16-state-machines-verification-2.md`).
 
 ### States
 
@@ -145,10 +160,13 @@ A dash means the event cannot occur in that state.
 | Contact deleted (US-D5) | → `closed-unanswered`, reason `contact-deleted` | → `answered` | → `closed-unanswered`, reason `contact-deleted` | → `closed-unanswered`, reason `contact-deleted` |
 | Removed staff user held it (US-D7) | Stay, unheld. | Stay, unheld. | — | — |
 
-A handover is marked overdue at most once each time it is `waiting` or
-`detached` without interruption; the mark is cleared when it leaves both.
+The overdue mark is cleared, and the clock restarts from zero, whenever the
+handover is attached to a session again (by a customer message after a
+follow-up, or by a new trigger), and when a follow-up is accepted. Otherwise
+a handover is marked overdue at most once.
 
-Checks against the invariants, each also asserted by the model:
+How each invariant is argued from the table (only H2 is also checked by the
+model):
 
 - **H2.** With nobody acting: `waiting` detaches when its session ends, and a
   `detached` handover closes after 14 days; `in-progress` ends as `answered`
@@ -422,7 +440,7 @@ match in the same pull request.
 | 7 | A withheld or failed follow-up is shown on the handover and may be tried again. | #125 (M6) | US-C14 |
 | 8 | The assistant answers a customer's next session unless the handover is `followed-up`. | #125 (M7, contradiction) | US-C6 |
 | 9 | Reminder timing is one function, run on create and on move; a start nearer than the lead time gives no reminder. | #123 (R4) | US-B3; glossary "Quiet hours rules" |
-| 10 | No reminder is sent less than 60 minutes before the appointment, however it came to be late. | #117 (N6) | US-B3; glossary |
+| 10 | A late reminder is withheld, however it came to be late; decision 16 gives the two bounds. | #117 (N6) | US-B3; glossary |
 | 11 | Consent and opt-out are checked when a reminder is due, not when it is scheduled. A reminder for an opted-out contact is scheduled and then withheld unless they opt back in. | New; replaces "no reminder is scheduled" | US-B3 |
 | 12 | A credential check that cannot complete changes nothing. | #117 (D4 note) | US-D6 |
 | 13 | Rate limiting is applied before handover, so a paused contact cannot create handovers. | New | US-C17 |
@@ -436,7 +454,7 @@ match in the same pull request.
 
 | File | What it checks |
 | --- | --- |
-| `docs/design/models/handover_machine.py` | Explores every event sequence of the handover machine to depth 8; asserts H1, H2, H3, reachability of every state, one follow-up per handover, and that a `detached` handover can become overdue |
+| `docs/design/models/handover_machine.py` | Explores every event sequence of the handover machine to depth 8; checks invariant H2, that every state is reachable, that there is at most one follow-up per handover, and that a `detached` handover can become overdue. It does not check H1 or H3 |
 | `docs/design/models/reminder_timing.py` | Computes the worked examples; asserts the 60-minute and 55-minute bounds for each |
 
 The models are Python because they are small and need nothing installed. They
