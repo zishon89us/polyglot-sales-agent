@@ -326,10 +326,12 @@ without an eval run attached to the pull request.
 - Prefer deterministic graders (exact tool call, price matches the data,
   language-ID check). Use a model-based grader only where needed, with a
   written rubric, and validate it against a small hand-labelled set.
-- `make eval` runs the suite and writes a report. CI runs a fast subset on
-  every pull request that touches `prompts/`, `packages/ai/` or a pack, and
-  fails if a score drops below its threshold or regresses beyond a set margin
-  against the stored baseline.
+- `make eval` runs the suite and writes a report. CI runs a subset on every
+  pull request that touches the paths listed in `docs/ai/eval-plan.md`,
+  section 8, and fails on any fixed-gate case or a pooled score well under
+  its threshold. The full run after a merge opens an issue and blocks
+  further AI changes if it fails. The eval plan is the authority for the
+  gates.
 - Every production failure or bug becomes a new eval case before the fix
   merges.
 

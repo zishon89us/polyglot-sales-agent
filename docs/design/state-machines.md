@@ -29,7 +29,7 @@ at step 12.
 | 2 | Message ID already stored? | Yes: HTTP 200. **Ends.** |
 | 3 | Receiving number maps to a tenant? | No: store as unroutable, HTTP 200. **Ends.** |
 | 4 | Store the message in its conversation; start or extend the session; open or extend the reply window; HTTP 200 | Always |
-| 4a | Does the text contain a phrase from the emergency list of the guardrail policy? Checked by code, in every tenant, contact, session and service state. | Yes: send the fixed emergency text once per session, if the tenant has verified channel credentials; hand over with reason `emergency`, marked urgent (machine 2: an open handover gains the reason and the mark); notify staff at once, outside the email throttle. **Continues** to step 5. |
+| 4a | Does the text contain a phrase from the emergency list of the guardrail policy? Checked by code after the message is stored, in every tenant, contact, session and service state, and before the rate pause. | Yes: apply the emergency event of machine 2 (reason `emergency`, urgent, the immediate email under its hourly ceiling). If the tenant has verified channel credentials and no emergency text was sent in this session, send it; it replaces the ordinary handover message. A later emergency message in the same session changes nothing more. **Continues** to step 5. |
 | 5 | Is it the stop or start button, or a message whose whole text, trimmed and case-folded, equals an opt-out or opt-in keyword? | Yes: apply it by code (machine 6). Send the confirmation only if the tenant is answering. **Ends.** |
 | 6 | Is it the Confirm button of a reminder? | Yes: apply it by code (machine 4), in every tenant, contact and session state. Send the result as a system reply only if the tenant is answering. **Ends.** |
 | 7 | Does the contact have an open handover in state `followed-up`? | Yes: attach it to this session (machine 2 → `waiting`). If the tenant is answering and the contact is not paused, tell the customer a person will reply and notify staff. **Ends.** |
@@ -140,6 +140,25 @@ stateDiagram-v2
     closed_unanswered --> [*]
 ```
 
+### The urgent mark
+
+A handover is **urgent** from the moment the reason `emergency` is added, and
+stays urgent until it ends. With no open handover, an emergency opens one in
+`waiting`, already urgent. Urgent changes three things and nothing else:
+
+- The waiting list shows urgent handovers first.
+- Staff are emailed at once, outside the five-minute throttle, **once per
+  handover**. To stop many numbers using this to flood a mailbox, a tenant
+  gets at most 5 such immediate emails an hour; beyond that an urgent
+  handover is still first on the list and is covered by the next throttled
+  email, whose subject says urgent.
+- The customer gets the fixed emergency text, once per session, in place of
+  the ordinary handover message.
+
+The escalation clock, the holding message, the follow-up and every staff
+action work as for any other handover. The executable model does not cover
+the urgent mark.
+
 ### Transitions
 
 A dash means the event cannot occur in that state.
@@ -160,6 +179,7 @@ A dash means the event cannot occur in that state.
 | Contact opts out | Stay. Staff may still reply in the session; `handover_followup` becomes unavailable. | Stay. | Stay; follow-up unavailable. | Stay. |
 | Contact deleted (US-D5) | → `closed-unanswered`, reason `contact-deleted` | → `answered` | → `closed-unanswered`, reason `contact-deleted` | → `closed-unanswered`, reason `contact-deleted` |
 | Removed staff user held it (US-D7) | Stay, unheld. | Stay, unheld. | — | — |
+| Emergency (step 4a of section 1, or the model's emergency flag) | Add reason `emergency`; set **urgent**. Stay. | Add the reason; set urgent. Stay. | Attach to the contact's current session → `waiting`; add the reason; set urgent. | Same as `detached`. |
 
 The overdue mark is cleared, and the clock restarts from zero, whenever the
 handover is attached to a session again (by a customer message after a
@@ -460,7 +480,7 @@ match in the same pull request.
 | 20 | An outbound message passes through `sending`; a reply left there is sent once more, a template is not. | Gate 2, S2 | Section 7 |
 | 21 | Sections 4 and 5 (booking, reminder) belong to the booking pack, not the core. | Gate 2, S4; ADR 0012 | Sections 4, 5 |
 | 22 | Degraded mode begins only if a health check fails at the moment the count is reached; invalid model output is not a provider failure. A customer who can make calls fail cannot degrade a healthy provider. | Gate 2, A1 | Section 8; US-C15 |
-| 23 | An emergency phrase is checked by code before every other step, in every state (step 4a), with its own handover reason. | Gate 2, A5 | Section 1; US-C6 |
+| 23 | An emergency phrase is checked by code as soon as the message is stored (step 4a), in every state and before the rate pause, with its own handover reason and an urgent mark. This is the one handover and notification that the rate pause of decision 13 does not stop; it is bounded per session and per tenant per hour instead. | Gate 2, A5; verification V2, V3 | Sections 1, 2; US-C6 |
 | 24 | A free-text request to receive messages again does not lift an opt-out; only a keyword or the opt-in button does. | Gate 2, A12 | Section 6; US-C7 |
 
 ## Models

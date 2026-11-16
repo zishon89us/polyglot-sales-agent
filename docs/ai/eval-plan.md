@@ -160,8 +160,10 @@ the language part of OQ-6):
 The first four are required by NFR-A4. Bengali and Tagalog are the agent's
 proposal, chosen as languages widely spoken by residents of the first target
 market; no source was read for that, so it is an assumption. A language is
-**supported** only once it has a published score that meets its thresholds
-(glossary). One that does not is listed as attempted, not supported.
+**supported** once it has a published score and the maintainer has accepted
+its baseline results (section 7, step 3); there are no per-language
+thresholds. One the maintainer does not accept is listed as attempted. If
+fewer than six are accepted, NFR-A4 is not met and v1.0 says so.
 
 ### Who checks the text
 

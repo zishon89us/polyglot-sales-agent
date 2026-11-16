@@ -37,8 +37,9 @@ Nothing here is built. The OpenAPI file was linted in pull request #172; see
 | Dashboard API | The dashboard, in a staff user's browser session | `/api/v1/...` |
 | Operations | The platform's health checks | `/healthz`, `/readyz` |
 
-The file has 43 paths and 55 operations: 8 public, 29 open to any signed-in
-user, and 18 for owners only.
+The file has 44 paths and 57 operations: 8 public, 30 open to any signed-in
+user, and 19 for owners only. Operations that belong to the booking pack
+carry `x-pack: booking` (ADR 0012).
 
 Not part of v1.0:
 
@@ -218,17 +219,35 @@ contact. `consent: true` records that the customer agreed to messages about
 this booking; without it no reminder is sent for it. A booking with no
 customer attached gets no messages at all.
 
-**Booking routes belong to the booking pack** (ADR 0012). For a tenant whose
-pack is not `booking` they answer 404, as if they did not exist.
+**Booking routes belong to the booking pack** (ADR 0012): every operation
+tagged Bookings, including `listSlots`, the blocked-period routes and the
+booking service settings. For a tenant whose pack is not `booking` they
+answer 404, as if they did not exist, and `pack_settings` and `pack_metrics`
+are empty objects.
+
+**Urgent handovers.** `Handover.urgent` is true once the reason `emergency`
+is present; `listHandovers` returns urgent handovers first.
 
 **Blocking time** (US-D9). A period that contains bookings is refused with
 `contains-bookings` and the list of them. The client sends it again with
 `keep_bookings: true` to block the period and keep them. Nothing is ever
 cancelled by blocking.
 
-**Opening hours** (US-D2). The change is saved even if future bookings fall
-outside the new hours; those bookings are kept and returned in
-`affected_bookings`.
+**Opening hours** (US-D2). Opening hours are core data, so their route knows
+nothing about bookings. The change is always saved. The booking pack then
+lists future bookings that fall outside the new hours through `listBookings`
+with `outside_opening_hours=true`, and the dashboard shows that list after a
+save.
+
+**A service's duration and capacity** are the booking pack's
+(`setBookingServiceSettings`), not fields of the core service. A service
+without them can be described and priced but not booked.
+
+**Pack settings and pack metrics.** `Settings.pack_settings` and
+`Metrics.pack_metrics` are objects whose keys the tenant's pack declares;
+the OpenAPI file lists the booking pack's. The server validates
+`pack_settings` against the pack's schema and answers `validation-failed`
+with the field and its range, as for a core setting.
 
 **Settings** (US-D6, US-D11). A PATCH with any subset. One value out of
 range saves nothing. Warnings are returned with a successful save. After a
@@ -275,7 +294,7 @@ dashboard shows "no data".
 | US-C1, US-C18 Receive messages and statuses | `verifyWebhook`, `receiveWebhook` |
 | US-C14 Waiting list and follow-up | `listHandovers`, `sendFollowUp`, `closeHandover` |
 | US-D1 Sign in | `signIn`, `signOut`, `getSession`, `changePassword` |
-| US-D2 Business information | `listServices`, `createService`, `updateService`, `deleteService`, `getOpeningHours`, `setOpeningHours`, `listPolicies`, `createPolicy`, `updatePolicy`, `deletePolicy` |
+| US-D2 Business information | `getBookingServiceSettings`, `setBookingServiceSettings`, `listServices`, `createService`, `updateService`, `deleteService`, `getOpeningHours`, `setOpeningHours`, `listPolicies`, `createPolicy`, `updatePolicy`, `deletePolicy` |
 | US-D3 Conversations and takeover | `listConversations`, `getConversation`, `listMessages`, `takeOver`, `sendStaffMessage`, `releaseHandover`, `handBack` |
 | US-D4 Metrics | `getMetrics` |
 | US-D5 Export or delete | `findContact`, `exportContact`, `deleteContact` |
@@ -301,10 +320,11 @@ Every operation in the file appears in this table; a script checked it.
 | 5 | `releaseHandover` exists | US-D3 criterion 3 says "until it is released" | The state machines name no release event; it changes the holder, not the state. For the Gate 2 review |
 | 6 | A manual booking may have no contact | A booking made by phone is not a WhatsApp contact; the data model has no free-text field for a name | Staff cannot see whose booking it is. May need a decision in M5 |
 | 7 | An unparseable but validly signed event is answered 200 and recorded as metadata only | Otherwise the channel redelivers it forever; and the raw event must not sit outside tenant scoping | Nothing in the requirements covers it; the operator alert is new. With no raw copy, the operator cannot see what the payload was |
-| 9 | Staff may attach a manual booking to a phone number and record consent | Without it a phone customer could never get a reminder (Gate 2 finding S5) | The number is typed by staff and is not verified |
 | 8 | A contact is found by POST | A phone number must not be in a URL | — |
+| 9 | Booking fields are not in core schemas: duration and capacity, booking settings and booking metrics are supplied by the pack | ADR 0012; the boundary test would otherwise fail on the API | Two calls to set up a bookable service instead of one |
+| 10 | Staff may attach a manual booking to a phone number and record consent | Without it a phone customer could never get a reminder (Gate 2 finding S5) | The number is typed by staff and is not verified |
 
-Decisions 5, 6 and 7 add behaviour that no story states. Decision 9
+Decisions 5, 6 and 7 add behaviour that no story states. Decision 10
 implements US-C13 criterion 3.
 
 ## 10. How the file was checked, and what is not done

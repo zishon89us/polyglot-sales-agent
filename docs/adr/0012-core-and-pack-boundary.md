@@ -115,6 +115,38 @@ to check and send.
   untested against a different use case. The `cod-confirm` pack in v1.1 is
   the first real test.
 
+### Where the values live
+
+- Pack settings: the core table `pack_settings`, one JSON object per tenant,
+  validated against the pack's schema. The core never names a key.
+- A service's duration and capacity: the pack table
+  `booking_service_settings`.
+- Consent records name what they are about by `subject_type` and
+  `subject_id`, which the pack sets and the core does not interpret.
+- A session's `pack_outcome` and a metrics response's `pack_metrics` are
+  supplied by the pack.
+- In the API, pack operations carry `x-pack`, and `Settings.pack_settings`
+  and `Metrics.pack_metrics` hold what the pack declares.
+
+### Known exceptions, not yet removed
+
+The verification of this decision found places where core rules still name
+booking things (finding V9). They are accepted for now and tracked as an
+issue, to be routed through pack hooks before the boundary test is switched
+on in M2:
+
+- The order of checks names the Reschedule and Cancel buttons (steps 10, 13
+  and 15).
+- The contact-permission machine lists "contact books in chat" as an event.
+- The handover reason `late-change`.
+- The glossary's containment metric and quiet-hours rules mention bookings
+  and reminders.
+- The package diagram in `architecture.md` lacks the edge from `api` to
+  `pack`.
+
+Until they are removed, the claim is: **the core's tables, API schemas and
+packages hold nothing about bookings; a few core rule texts still do.**
+
 ## Pros and Cons of the Options
 
 ### Move the booking rules, tables and routes into the pack

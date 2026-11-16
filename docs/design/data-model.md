@@ -65,7 +65,7 @@ Not drawn: `audit_log`, `jobs`, `channel_routes`, `unroutable_events`,
 | `time_zone`, `default_language`, `template_languages`, `currency` | Required settings |
 | `support_contact`, `notification_email` | Required settings. Business contact details, not customer data |
 | `business_hours`, `opening_hours` | Per weekday, zero or more periods |
-| `booking_horizon_days`, `slot_interval_minutes`, `total_concurrent_bookings` (nullable), `min_notice_minutes`, `change_cutoff_minutes`, `reminder_lead_minutes` | Booking settings |
+| *(none for bookings)* | The booking settings are **not** columns here. They are the booking pack's, held in `pack_settings` (below; ADR 0012) |
 | `quiet_start`, `quiet_end` (nullable pair) | Quiet hours |
 | `escalation_minutes`, `message_retention_months` | |
 | `answering` | Derived and stored: required settings present and credentials verified (state machines, section 9) |
@@ -122,8 +122,19 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 
 ### `consent_records` — tenant-owned
 
-`contact_id`, `source` (`chat-booking`, `staff`, `opt-in`), `recorded_at`,
-`staff_user_id` (nullable), `booking_id` (nullable). Rows are never updated.
+`contact_id`, `source` (`chat`, `staff`, `opt-in`), `recorded_at`,
+`staff_user_id` (nullable), `subject_type` and `subject_id` (nullable: what
+the consent was given about, named by the pack; the core does not interpret
+them). Rows are never updated.
+
+### `pack_settings` — tenant-owned
+
+`pack`, `values` (a JSON object), `updated_at`. One row per tenant. Holds
+the settings a pack declares in its settings schema (ADR 0012). The core
+validates a save against that schema, which carries the defaults and ranges,
+and never names a key. For the booking pack: booking horizon, slot interval,
+total concurrent bookings, minimum notice, change cut-off, reminder lead
+time. A tenant on `faq-only` has an empty object.
 
 ### `suppressed_numbers` — tenant-owned
 
@@ -173,7 +184,7 @@ null when no worker holds it).
 | `guardrail_fallbacks`, `unreadable_batches`, `assistant_replies` | The counters of state machines, section 3 |
 | `awaiting_retry_since`, `provider_fallback_sent_at` | State machines, section 8 |
 | `language`, `unsupported_language` | For US-C3 and metrics |
-| `is_inquiry`, `booking_outcome`, `had_handover`, `contained` | Written when the session ends (US-C19). `is_inquiry` is set by the model; the others by code |
+| `is_inquiry`, `pack_outcome`, `had_handover`, `contained` | Written when the session ends (US-C19). `is_inquiry` is set by the model; the others by code. `pack_outcome` is a short label the pack supplies (for the booking pack: created, changed, cancelled or none); the core stores it without interpreting it |
 
 ### `messages` — tenant-owned
 
@@ -185,7 +196,7 @@ null when no worker holds it).
 | `kind` | `text`, `button`, `template`, or an unsupported type name |
 | `channel_message_id` | Unique per tenant when not null. This constraint is the deduplication of US-C1 |
 | `body` ⚑ | The text. Null for unsupported types, whose content is never stored, and null after retention or deletion |
-| `button_payload` | For Confirm: the booking and the start time it was sent for |
+| `button_payload` | Opaque to the core: the pack that registered the button reads it (for the booking pack's Confirm: the booking and the start time it was sent for). **The handler must check that the booking belongs to the sending contact** |
 | `template_id`, `template_variables` ⚑ | Variables can hold a service name and a time; treated as personal with the message |
 | `status` | `pending`, `held`, `discarded`, `withheld`, `sending`, `sent`, `delivered`, `read`, `failed` |
 | `withheld_reason`, `error_code` | |
@@ -201,6 +212,7 @@ null when no worker holds it).
 | `contact_id`, `session_id` (nullable) | Attached to a session only in `waiting` and `in-progress` |
 | `state` | The seven states of state machines, section 2 |
 | `reasons` | An array; new triggers append |
+| `urgent`, `urgent_notified_at` | Set when the reason `emergency` is added; never cleared for that handover. The second records the one immediate email |
 | `held_by_user_id` | Nullable |
 | `answered_at` | Set when the first staff message is accepted by the channel |
 | `followup_message_id`, `followup_accepted_at` | At most one follow-up |
@@ -220,8 +232,15 @@ data side.
 
 `name`, `description`, `price_minor`, `active`, `updated_at` are the core's.
 `duration_minutes` and `capacity` belong to the booking pack and are held in
-its own table, `booking_service_settings`, keyed by service (ADR 0012). Check constraints hold the ranges of US-D2. A service
-with bookings is deactivated, not deleted.
+its own table, `booking_service_settings`, keyed by service (ADR 0012). A
+service with bookings is deactivated, not deleted.
+
+### `booking_service_settings` — tenant-owned, booking pack
+
+`service_id` (unique), `duration_minutes` (5 to 480), `capacity` (1 to 50),
+`updated_at`. Check constraints hold the ranges of US-D2. A service with no
+row here cannot be booked; the booking pack's dashboard section creates the
+row when the owner adds a service.
 
 ### `policies` — tenant-owned
 
@@ -245,7 +264,7 @@ in the pack's own migrations and in tables or columns the core never names.
 | `state` | `booked`, `confirmed`, `cancelled`, `attended`, `missed` |
 | `created_via` | `chat` or `staff` |
 | `consent_recorded` | For a booking made by staff: whether staff ticked that the customer agreed to messages about it (US-C13 criterion 3) |
-| `idempotency_key` | Made from contact, service and start time for a booking created in chat (`architecture.md`, "Processing one turn"); from the request's `Idempotency-Key` for one created by staff. Unique per tenant among active bookings; a repeat finds the first booking (NFR-R3) |
+| `request_key` | For a booking created by staff: the request's `Idempotency-Key`, unique per tenant, so a repeated request finds the first booking. Null for a booking made in chat, where the partial unique index over contact, service and start time does the same job (NFR-R3) |
 | `confirmed_at`, `cancelled_at`, `outcome_recorded_by_user_id` | |
 
 There is no free-text column (US-B2). Capacity (invariant B1) is not a
@@ -269,8 +288,13 @@ tenant, key and language.
 
 ### `tool_calls` — tenant-owned
 
-`session_id`, `call_key` (unique per tenant), `tool`, `arguments`, `result`,
-`result_at`. Makes tool calls idempotent and gives claims a result to name,
+`session_id`, `turn_id`, `tool`, `arguments`, `result`, `result_at`,
+`repeat_of` (nullable). A record of each call; **it has no unique key and
+does not make calls idempotent** (Gate 2 verification, V1). Idempotency is
+carried by the thing changed: a partial unique index on active bookings for
+create, a conditional update for move, and cancel is idempotent by nature
+(`architecture.md`, "Processing one turn", step 4). Read-only tools are never
+deduplicated. The row gives claims a result to name,
 with the time the 10-minute rule needs. `arguments` and `result` hold service
 and slot identifiers and times, not customer text.
 
@@ -328,11 +352,11 @@ reach it.
 | One open handover per contact (H1) | Partial unique index on `handovers` |
 | A handover is attached exactly in `waiting` and `in-progress` (H3, data side) | Check constraint on `handovers` |
 | One active session per conversation | Partial unique index on `sessions` |
-| One booking per repeated tool call (NFR-R3) | Unique `idempotency_key` |
+| One booking per repeated tool call (NFR-R3) | Partial unique index on `bookings` over contact, service and start time, for bookings in `booked` or `confirmed`. After a cancellation the same slot can be booked again |
 | One scheduled reminder per booking | Partial unique index on `reminders` |
 | A tenant keeps at least one owner (US-D7) | Trigger or deferred constraint on `users` |
-| Settings stay in range (US-D11) | Check constraints on `tenants` |
-| Service fields stay in range (US-D2) | Check constraints on `services` |
+| Settings stay in range (US-D11) | Check constraints on `tenants` for core settings; the pack's settings schema, applied by the core on save, for `pack_settings` |
+| Service fields stay in range (US-D2) | Check constraints on `services` and `booking_service_settings` |
 | The audit log is append-only | Privileges of the application role |
 | No row is visible across tenants (NFR-S1) | Row-level security on every tenant-owned table; a test fails on a table without a policy |
 | Capacity is never exceeded (B1) | Not a constraint: advisory lock plus check in one transaction; a concurrency test |

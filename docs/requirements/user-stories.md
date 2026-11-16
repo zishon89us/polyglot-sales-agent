@@ -108,7 +108,7 @@ As a business owner, I want the assistant to state grounded facts only from my d
 7. **Given** a correct reply that states the stored opening hours for a day, **when** the output guardrail runs, **then** it passes and is sent.
 8. **Given** a currency amount, percentage, clock time or calendar date in the reply text, **when** the output guardrail runs, **then** it passes only if it is covered by a claim that passed, or it is a clock time or calendar date that appears in the customer's latest batch of messages; a currency amount or a percentage always needs a claim; relative words such as "tomorrow" and durations are not checked by this rule.
 9. **Given** a reply that states a total or any other value computed from several prices, **when** the output guardrail runs, **then** it does not pass, because v1.0 states individual prices only.
-10. **Given** a reply in which any claim or value does not pass, **when** the output guardrail runs, **then** the reply is not sent and the fallback message is sent in its place.
+10. **Given** a reply in which any claim or value does not pass, **when** the output guardrail runs, **then** the reply is not sent and the fallback message is sent in its place, unless a booking was created, moved or cancelled in the same turn, in which case its fixed confirmation is the reply and no fallback is sent.
 11. **Given** the eval cases in which a customer states a wrong price or time and asks the assistant to confirm it, **when** they are run, **then** the assistant corrects the value in every case (NFR-A2); this case cannot be caught by the runtime check, because the wrong value is in the customer's own message.
 12. **Given** a grounded fact that does not exist in the tenant's data, **when** a customer asks for it, **then** the assistant says it does not have that information and offers a person.
 13. **Given** the eval dataset for grounding, **when** it is run, **then** statements about service details, opening hours and policies meet the grounding threshold set in the eval plan (not yet testable; see open question OQ-6).
@@ -132,7 +132,7 @@ Persona P4 · Milestone M4 · Issue [#15](https://github.com/zishon89us/polyglot
 As an end customer, I want to reach a person when I ask or when the assistant should not continue, so that I am not stuck in a loop.
 
 1. **Given** a customer asks for a person in a supported language, or taps the person button, **when** the message is processed, **then** the session is handed over with reason `requested`.
-2. **Given** two consecutive assistant turns in one session that ended in the fallback message because of a guardrail failure, **when** the second fallback is sent, **then** the session is handed over with reason `repeated-failure`; provider errors (US-C15) do not count.
+2. **Given** two consecutive assistant turns in one session that ended in the fallback message because of a guardrail failure, **when** the second fallback is sent, **then** the session is handed over with reason `repeated-failure`; provider errors (US-C15), and failed replies for which no fallback was sent, do not count.
 3. **Given** a message on a topic in the dated handover-topic list of the guardrail policy, or a request to access or delete personal data, **when** it is processed, **then** the session is handed over with reason `sensitive-topic` or `data-request`.
 4. **Given** a session that reaches the turn cap or the tenant's daily token budget, **when** the limit is reached, **then** the session is handed over with reason `limit`.
 5. **Given** any handover inside business hours, **when** it happens, **then** the customer receives one message saying a person will reply.
@@ -268,7 +268,7 @@ As an end customer, I want a clear message when the assistant cannot answer beca
 7. **Given** degraded mode, **when** a customer message arrives, **then** no model call is attempted, the session is marked `awaiting-retry`, and the fallback message is sent under the same 15-minute rule.
 8. **Given** degraded mode, **when** a provider health check, run every 30 seconds, succeeds, **then** degraded mode ends, every session still marked `awaiting-retry` is attempted at once, and one recovery email is sent to each tenant that was emailed when it began.
 9. **Given** degraded mode, **when** a template reminder is due, **then** it is sent as normal, because it does not need the model.
-10. **Given** a model response that arrives but does not match the output schema, **when** it is checked, **then** it is treated as a failed output check, not as a provider failure: the fallback message is sent, and it does not count towards degraded mode.
+10. **Given** a model response that arrives but does not match the output schema, **when** it is checked, **then** it is treated as a failed output check, not as a provider failure: the fallback message is sent as US-C4 criterion 10 says, and it does not count towards degraded mode.
 
 ### US-C16 — Have approved templates before messaging first
 
@@ -336,7 +336,7 @@ Persona P4 · Milestone M5 · Issue [#21](https://github.com/zishon89us/polyglot
 As an end customer, I want to pick a time and book it in the chat, so that I do not have to phone during working hours.
 
 1. **Given** free slots exist for the requested service within the booking horizon, **when** a customer asks to book it, **then** the assistant offers up to 5 free slots.
-2. **Given** a customer chooses an offered slot that still has capacity, **when** the booking tool runs, **then** one booking is created and the assistant confirms the service, date, weekday and time.
+2. **Given** a customer chooses an offered slot that still has capacity, **when** the booking tool runs, **then** one booking is created and a fixed confirmation, sent by code, states the service, date, weekday and time.
 3. **Given** a customer chooses a slot whose capacity was used in the meantime, **when** the booking tool runs, **then** no booking is created and other free slots are offered.
 4. **Given** no free slot exists for the service within the booking horizon, **when** a customer asks to book it, **then** the assistant says so and offers a person.
 5. **Given** a customer asks to book without naming a service that exists, **when** the request is processed, **then** the assistant asks which service is wanted.

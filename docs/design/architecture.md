@@ -200,7 +200,9 @@ flowchart TB
 
 **Dependency rule.** `core` imports nothing from this repository. No package
 imports from `apps`. The core never imports a pack; packs are registered with
-the worker at start-up. An import-boundary test in CI enforces all three.
+`worker` and with `api` at start-up, since a pack supplies both tools and
+routes (ADR 0012). The package diagram above predates ADR 0012 and lacks the
+edge from `api` to `pack`; it is corrected with finding V9. An import-boundary test in CI enforces all three.
 
 ### What a pack provides
 
@@ -287,16 +289,27 @@ findings S1, S2, S3 and A13.
    `tool_calls`. A restarted or retried turn therefore sees a booking that an
    earlier attempt made.
 3. **Tools.** A tool runs in its own short transaction in the tenant's scope.
-   A tool that changes state does three things in that one transaction: the
+   **That transaction first checks the lease token**, as the store step
+   does; a worker that has lost the lease cannot change anything. A tool
+   that changes state then does three things in the same transaction: the
    change, its `tool_calls` row, and the job that sends the **fixed
    confirmation text** for it. The confirmation is sent because the tool
    succeeded. It does not wait for, or depend on, the model's reply.
-4. **Recognising a repeat.** The key of a state-changing call is made from
-   what it does, never from the model's call identifier: create is contact,
-   service and start time; move is booking and new start time; cancel is the
-   booking. A second create with the same key while the first booking is
-   active returns the first booking. One contact cannot hold two active
-   bookings of one service at one start time in v1.0.
+4. **Recognising a repeat.** The model's call identifier is never used.
+   The thing being changed decides:
+   - *Create:* a partial unique index allows one active booking per contact,
+     service and start time. A second create that hits it returns the
+     existing booking. After a cancellation the slot can be booked again,
+     because the cancelled booking is no longer active.
+   - *Move:* the update applies only if the booking is still at the start
+     time the call was told it had. If it is already at the new time, the
+     call returns it unchanged. Moving back and forth is therefore possible.
+   - *Cancel:* cancelling a cancelled booking returns it unchanged.
+   - *Read-only tools* are never deduplicated.
+
+   **A repeat changes nothing, queues no confirmation, and does not count as
+   "a state-changing tool succeeded in this turn" for step 6.** Its
+   `tool_calls` row records which earlier call it repeated.
 5. **Reply.** After the last tool result the model returns its reply, claims
    and flags, and code runs the output checks.
 6. **If the reply fails a check after a state-changing tool succeeded in this
@@ -411,8 +424,9 @@ The hosting target is ADR 0009 and the model provider is ADR 0010; both are
 proposed and wait for the maintainer.
 
 Workers are identical and stateless; more can be added. Correctness under
-several workers rests on row locking for jobs and an advisory lock per
-conversation (ADR 0004), and is tested with two workers (NFR-R6).
+several workers rests on row locking for jobs and a lease per conversation
+with a token check (ADR 0004). The test with two workers (NFR-R6) is to be
+written in M2.
 
 Migrations run as a separate step before new code starts, and each has a
 tested reverse step (NFR-O4).

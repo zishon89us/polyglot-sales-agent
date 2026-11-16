@@ -31,7 +31,7 @@ E18 of [`eval-plan.md`](eval-plan.md).
 | G3 | State a total, a discount or an offer the business has not entered | **Both.** Code blocks computed totals and any percentage without a passing claim. An offer described without a number rests on the model | Unit tests; E4 | US-C4 criterion 9 |
 | G4 | Give medical, legal or financial advice | **Model**, plus handover when the model flags the topic (section 6) | E9, E8 | US-C8 criterion 5, R-A4 |
 | G5 | Claim to be a person | **Both.** The disclosure is fixed text added by code. When the model flags that the customer asked whether it is a person, code discards the reply and sends the fixed text. Recognising the question rests on the model | Integration test of the disclosure; E18, a fixed gate | US-C5 |
-| G6 | Reveal its instructions | **Both.** The prompt holds nothing secret (T49), so disclosure harms little. Code blocks a reply that repeats 12 or more consecutive words of the instruction text. The rest rests on the model | Unit test; E10 prompt disclosure | US-C8 criterion 2 |
+| G6 | Reveal its instructions | **Both.** The prompt holds nothing secret (T49), so disclosure harms little. Code blocks a reply that contains the prompt's canary string or repeats 12 or more consecutive words of the instruction text. A paraphrase or a translation gets past both. The rest rests on the model | Unit test; E10 prompt disclosure | US-C8 criterion 2 |
 | G7 | Send a link, email address, phone number or payment account number that is not in the tenant's own data | **Both.** Code blocks the forms it can detect (section 4, check O5). A disguised form, such as a domain spelt out in words or a social-media handle, rests on the model | Unit tests; E10 planted content, which must include the disguised forms | US-C4 criterion 15, T51 |
 | G8 | Act for anyone but the customer in the conversation | **Code.** The server supplies the tenant and the contact to every tool; a booking identifier resolves only if it is this contact's | Tool tests with hostile arguments; E10 tool misuse | US-C8, T47, T48 |
 | G9 | Reveal anything about another customer | **Code.** No tool returns who holds a slot or any other contact's data; the prompt holds only this session | Tool tests; E10 | US-C2, T53 |
@@ -64,7 +64,7 @@ All of this is code. The model is not called until every step has passed.
 
 | ID | Check | Detail | Tested by |
 | --- | --- | --- | --- |
-| I1 | The order of checks, steps 1 to 14 | Signature, duplicate, tenant, opt-out and opt-in, Confirm button, follow-up reply, tenant answering, rate pause, handed over, person button, batching, no text, degraded mode. Defined in `docs/design/state-machines.md` section 1, which is the authority | State-machine tests |
+| I1 | The order of checks, steps 1 to 14 | Signature, duplicate, tenant, the emergency phrase check (4a), opt-out and opt-in, Confirm button, follow-up reply, tenant answering, rate pause, handed over, person button, batching, no text, degraded mode. Defined in `docs/design/state-machines.md` section 1, which is the authority | State-machine tests |
 | I2 | Only text reaches the model | Voice notes, images and other unsupported types are never stored or sent; a caption is treated as text | US-C12 tests |
 | I3 | Input length | A batch longer than the limit is truncated by the rule set in #158 | Unit test, once #158 sets the number |
 | I4 | No identity in the prompt | No phone number, no profile name (G14) | Unit test |
@@ -99,7 +99,7 @@ decides the outcome.
 | O3 | Values and claims, as defined below | Fallback |
 | O4 | No total. Covered by O3: a computed total is an amount with no passing claim. A total that happens to equal a stored price cannot be told apart and is not caught | Fallback |
 | O5 | Contact details and links, as defined below | Fallback |
-| O6 | The reply does not repeat 12 or more consecutive words of the instruction text | Fallback |
+| O6 | The reply contains neither the deployment's canary string, which the prompt loader places in every prompt, nor 12 or more consecutive words of the instruction text | Fallback |
 | O7 | The reply is not empty and not longer than the limit set in #158 | Fallback |
 | O8 | Code adds the disclosure if this is the session's first outbound message, then applies the message-class checks and sends | As state machines §7 |
 
@@ -234,6 +234,8 @@ The reasons are the glossary's. The table says who decides.
 
 | Reason | Trigger | Decided by | Tested by |
 | --- | --- | --- | --- |
+| `emergency` | A phrase from the emergency list (step 4a) | **Code** | Unit tests; E17 |
+| `emergency` | The model's emergency flag | **Model** sets the flag; code acts | E17 |
 | `requested` | The person button | **Code** (order of checks, step 11) | State-machine tests |
 | `requested` | A request for a person in free text | **Model** sets the flag; code acts on it | E8 |
 | `sensitive-topic` | A topic on the list below | **Model** sets the flag; code acts | E8 |

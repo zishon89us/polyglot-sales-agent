@@ -74,12 +74,8 @@ schemas = {
         "support_contact": S,
         "notification_email": {"type": "string", "format": "email"},
         "business_hours": HOURS,
-        "booking_horizon_days": {"type": "integer", "minimum": 7, "maximum": 365},
-        "slot_interval_minutes": {"type": "integer", "minimum": 5, "maximum": 120},
-        "total_concurrent_bookings": nullable({"type": "integer", "minimum": 1, "maximum": 50}),
-        "minimum_notice_hours": {"type": "integer", "minimum": 0, "maximum": 72},
-        "change_cutoff_hours": {"type": "integer", "minimum": 0, "maximum": 72},
-        "reminder_lead_hours": {"type": "integer", "minimum": 1, "maximum": 72},
+        "pack_settings": {"type": "object", "additionalProperties": True,
+                          "description": "The settings the tenant's pack declares, validated by the server against the pack's schema. For the booking pack: booking_horizon_days (7 to 365), slot_interval_minutes (5 to 120), total_concurrent_bookings (1 to 50, or null), minimum_notice_minutes (0 to 4320), change_cutoff_minutes (0 to 4320), reminder_lead_minutes (60 to 4320). Empty for a pack with no settings."},
         "quiet_hours": nullable(obj({"start": S, "end": S}, ["start", "end"])),
         "handover_escalation_minutes": {"type": "integer", "minimum": 5, "maximum": 240},
         "message_retention_months": {"type": "integer", "minimum": 1, "maximum": 36},
@@ -96,18 +92,17 @@ schemas = {
     "Template": obj({"name": S, "language": S, "status": enum("not-submitted", "pending", "approved", "rejected", "paused", "disabled"),
                      "updated_at": TIME}, ["name", "language", "status"]),
     "Service": obj({"id": UUID, "name": S, "description": S, "price_minor": {"type": "integer", "minimum": 0},
-                    "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 480},
-                    "capacity": {"type": "integer", "minimum": 1, "maximum": 50},
                     "active": BOOL, "updated_at": TIME},
-                   ["id", "name", "price_minor", "duration_minutes", "capacity", "active", "updated_at"]),
+                   ["id", "name", "price_minor", "active", "updated_at"]),
+    "BookingServiceSettings": obj({"service_id": UUID,
+                                   "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 480},
+                                   "capacity": {"type": "integer", "minimum": 1, "maximum": 50}, "updated_at": TIME},
+                                  ["duration_minutes", "capacity"], "Booking pack. A service with no settings cannot be booked."),
     "ServiceInput": obj({"name": {"type": "string", "minLength": 1, "maxLength": 200}, "description": {"type": "string", "maxLength": 2000},
-                         "price_minor": {"type": "integer", "minimum": 0},
-                         "duration_minutes": {"type": "integer", "minimum": 5, "maximum": 480},
-                         "capacity": {"type": "integer", "minimum": 1, "maximum": 50}, "active": BOOL},
-                        ["name", "price_minor", "duration_minutes", "capacity"]),
+                         "price_minor": {"type": "integer", "minimum": 0}, "active": BOOL},
+                        ["name", "price_minor"]),
     "OpeningHours": obj({"periods": HOURS, "updated_at": TIME}, ["periods"]),
-    "OpeningHoursResult": obj({"periods": HOURS, "updated_at": TIME,
-                               "affected_bookings": arr(ref("Booking"))}, ["periods", "affected_bookings"]),
+    "OpeningHoursResult": obj({"periods": HOURS, "updated_at": TIME, "warnings": arr(S)}, ["periods", "warnings"]),
     "Policy": obj({"id": UUID, "title": S, "body": S, "updated_at": TIME}, ["id", "title", "body", "updated_at"]),
     "PolicyInput": obj({"title": {"type": "string", "minLength": 1, "maxLength": 200},
                         "body": {"type": "string", "minLength": 1, "maxLength": 4000}}, ["title", "body"]),
@@ -136,11 +131,12 @@ schemas = {
     "Handover": obj({
         "id": UUID, "conversation_id": UUID,
         "state": enum("waiting", "in-progress", "detached", "followed-up", "handed-back", "answered", "closed-unanswered"),
-        "reasons": arr(enum("requested", "repeated-failure", "sensitive-topic", "data-request", "limit",
+        "urgent": {"type": "boolean", "description": "True once the reason emergency is present. Urgent handovers are listed first."},
+        "reasons": arr(enum("requested", "repeated-failure", "sensitive-topic", "data-request", "emergency", "limit",
                             "unsupported-content", "late-change", "provider-failure", "staff")),
         "held_by_user_id": nullable(UUID), "overdue": BOOL,
         "followup_status": nullable(enum("available", "held", "sent", "withheld", "failed")),
-        "closed_reason": nullable(S), "opened_at": TIME}, ["id", "conversation_id", "state", "reasons", "overdue", "opened_at"]),
+        "closed_reason": nullable(S), "opened_at": TIME}, ["id", "conversation_id", "state", "reasons", "urgent", "overdue", "opened_at"]),
     "HandoverClose": obj({"reason": {"type": "string", "minLength": 1, "maxLength": 200}}, ["reason"]),
     "Booking": obj({
         "id": UUID, "service_id": UUID, "contact_id": nullable(UUID), "starts_at": TIME, "ends_at": TIME,
@@ -163,13 +159,13 @@ schemas = {
     "Metrics": obj({
         "from": TIME, "to": TIME,
         "first_reply_seconds_median": nullable({"type": "number"}),
-        "inquiry_to_booking_rate": ref("Metric"), "no_show_rate": ref("Metric"),
-        "appointments_without_outcome": INT,
+        "pack_metrics": {"type": "object", "additionalProperties": True,
+                         "description": "Metrics the tenant's pack supplies. For the booking pack: inquiry_to_booking_rate and no_show_rate, each with value, numerator and denominator, and appointments_without_outcome."},
         "handover_rate": ref("Metric"), "unanswered_handovers": INT,
         "containment_rate": ref("Metric"),
         "model_cost_per_session_minor": nullable({"type": "number"}),
         "channel_fees_per_session_minor": nullable({"type": "number"})},
-        ["from", "to", "inquiry_to_booking_rate", "no_show_rate", "handover_rate", "containment_rate"]),
+        ["from", "to", "handover_rate", "containment_rate", "pack_metrics"]),
     "DeletionRequest": obj({"confirm": {"type": "boolean", "const": True}}, ["confirm"]),
     "Accepted": obj({"status": enum("accepted")}, ["status"]),
     "Health": obj({"status": enum("ok", "unavailable")}, ["status"]),
@@ -208,6 +204,8 @@ def op(method, path, op_id, tag, summary, role, body=None, ok=None, ok_code=200,
     assert op_id not in op_ids, op_id
     op_ids.add(op_id)
     o = {"operationId": op_id, "tags": [tag], "summary": summary, "x-role": role}
+    if tag == "Bookings":
+        o["x-pack"] = "booking"
     if desc:
         o["description"] = desc
     ps = []
@@ -329,7 +327,7 @@ op("delete", A + "/services/{serviceId}", "deleteService", T, "Remove a service"
    ok_desc="Deleted, or deactivated if it has bookings.")
 op("get", A + "/opening-hours", "getOpeningHours", T, "Opening hours", "agent", ok=ref("OpeningHours"))
 op("put", A + "/opening-hours", "setOpeningHours", T, "Replace opening hours", "owner", body=ref("OpeningHours"),
-   ok=ref("OpeningHoursResult"), desc="Saved even if future bookings now fall outside the hours; those bookings are kept and returned.")
+   ok=ref("OpeningHoursResult"), desc="Saved even if future bookings now fall outside the hours. A warning says so; the bookings are kept, and the booking pack lists them through listBookings with outside_opening_hours.")
 op("get", A + "/policies", "listPolicies", T, "List policies", "agent", ok=arr(ref("Policy")))
 op("post", A + "/policies", "createPolicy", T, "Add a policy", "owner", body=ref("PolicyInput"), ok=ref("Policy"), ok_code=201)
 op("patch", A + "/policies/{policyId}", "updatePolicy", T, "Change a policy", "owner", body=ref("PolicyInput"), ok=ref("Policy"))
@@ -350,7 +348,7 @@ op("post", A + "/conversations/{conversationId}/messages", "sendStaffMessage", T
    ok_desc="Queued for sending. Its status changes as the channel reports.",
    desc="Only the user holding the handover may send. Free-form text is allowed only while the reply window is open.")
 T = "Handovers"
-op("get", A + "/handovers", "listHandovers", T, "The waiting list", "agent", ok=page("Handover"),
+op("get", A + "/handovers", "listHandovers", T, "The waiting list, urgent handovers first", "agent", ok=page("Handover"),
    params=[q("state", enum("open", "unanswered", "closed"))] + CUR)
 op("post", A + "/handovers/{handoverId}/release", "releaseHandover", T, "Give up the hold without ending the handover", "agent",
    ok=ref("Handover"), errors=[409])
@@ -366,7 +364,12 @@ op("post", A + "/handovers/{handoverId}/follow-up", "sendFollowUp", T, "Send the
 # Bookings
 T = "Bookings"
 op("get", A + "/bookings", "listBookings", T, "List bookings by start time", "agent", ok=page("Booking"),
-   params=[q("from", TIME), q("to", TIME), q("state", enum("booked", "confirmed", "cancelled", "attended", "missed"))] + CUR)
+   params=[q("from", TIME), q("to", TIME), q("state", enum("booked", "confirmed", "cancelled", "attended", "missed")),
+           q("outside_opening_hours", BOOL, "Only future bookings that fall outside the current opening hours (US-D2).")] + CUR)
+op("get", A + "/booking-service-settings/{serviceId}", "getBookingServiceSettings", T, "A service's duration and capacity", "agent",
+   ok=ref("BookingServiceSettings"))
+op("put", A + "/booking-service-settings/{serviceId}", "setBookingServiceSettings", T, "Set a service's duration and capacity", "owner",
+   body=ref("BookingServiceSettings"), ok=ref("BookingServiceSettings"))
 op("get", A + "/slots", "listSlots", T, "Free slots for a service", "agent", ok=arr(ref("Slot")),
    params=[q("service_id", UUID, required=True), q("from", TIME, required=True), q("to", TIME, required=True)])
 op("post", A + "/bookings", "createBooking", T, "Add a booking by hand", "agent", body=ref("BookingInput"), ok=ref("Booking"),
