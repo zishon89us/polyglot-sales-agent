@@ -71,11 +71,15 @@ M0 Inception met its exit criteria on 2026-11-16; see
   AI-specific ones mapped to the titles of the OWASP Top 10 for LLM
   Applications 2026. Thirteen gaps with no requirement behind them were
   opened as issues #154 to #166, labelled `security`.
+- 2026-11-16 — Threat model merged as #167. Eval plan written (#43): 15
+  dimensions, the red-team set, dataset rules with a held-out set, graders,
+  and how thresholds are set from a baseline the maintainer accepts. No eval
+  has been run and no score exists. Six languages proposed (#168).
 
 ## Next
 
-1. Maintainer reviews and merges the threat model (#42).
-2. Eval plan (#43), guardrail policy (#44) and API (#41). The output-check
+1. Maintainer reviews and merges the eval plan (#43).
+2. Guardrail policy (#44) and API (#41). The output-check
    findings #120 to #122 and the reply-content rule #159 are settled in the
    guardrail policy.
 3. Before Gate 2: the three open design gaps from the threat model, #160
@@ -116,6 +120,9 @@ v1.1.
   `requirements/open-questions.md`. None blocks v1.0 on the mock channel
   except OQ-9 (model provider) before M3 and OQ-11 (merge style) before M2.
 - #6 Project board and private vulnerability reporting.
+- #168 Confirm the supported languages and arrange a speaker's review of
+  each eval dataset. Needed in M3.
+- #161 How the operator creates tenants.
 - #7 Copyright holder name, commit identity, and the accounts needed only
   for live use.
 
