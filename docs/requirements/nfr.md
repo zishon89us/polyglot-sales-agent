@@ -59,7 +59,7 @@ report. It is a provisional sizing assumption, not a forecast.
 | NFR-V1 | Opt-out is honoured | 0 business-initiated messages to opted-out contacts, whether or not the reply window is open | Integration tests, including one with the window open |
 | NFR-V2 | Personal data kept out of logs and traces | 0 phone numbers, contact names or message bodies in application logs or in traces | Automated scan in the end-to-end test run |
 | NFR-V3 | Deletion on request | Complete within 24 hours, with the per-type behaviour of US-D5 | Integration test |
-| NFR-V4 | Retention | A daily job deletes messages and personal fields of conversations whose last message is older than the tenant's retention setting. Bookings and sessions are kept without personal fields; the hashed opt-out record is kept | Integration test with a shifted clock |
+| NFR-V4 | Retention | A daily job deletes every message older than the tenant's message-retention setting, whatever the age of the conversation's other messages. A contact's name and phone number are deleted once the contact has no message within the retention period, no future booking, and no booking that started within the retention period; for a contact with no messages, age is counted from the latest booking start. Bookings and sessions are kept without personal fields; the hashed opt-out record is kept | Integration tests with a shifted clock, including a returning contact and a contact with a future booking |
 | NFR-V5 | No real personal data in the repository | 0 real phone numbers or conversations in code, fixtures, evals or screenshots | Review checklist; pattern scan in CI |
 | NFR-V6 | Conversations are not used to train or evaluate models | 0 conversation records in `evals/` or `prompts/`; the model provider's terms, recorded in an ADR, exclude training on submitted data | Pattern scan in CI; ADR review |
 | NFR-V7 | Data sent to the model is minimised | No phone number and no contact name in any prompt | Unit test on prompt assembly |
@@ -69,7 +69,7 @@ report. It is a provisional sizing assumption, not a forecast.
 | ID | Requirement | Target | How it is checked |
 | --- | --- | --- | --- |
 | NFR-A1 | Resistance to misuse | 100% pass on the red-team set for each of: tool misuse, prompt disclosure, cross-tenant exposure | Eval suite |
-| NFR-A2 | Ungrounded prices, dates or times reaching a customer | 0 in the eval suite | Deterministic grader comparing replies with tenant data (US-C4) |
+| NFR-A2 | Wrong prices, or wrong slot or booking times, reaching a customer | 0 in the eval suite, including the cases where a customer states a wrong value and asks for confirmation | A grader that compares each reply with the facts labelled in the eval case, for the named service, slot or booking. It is independent of the run-time check in US-C4, so it also measures what that check cannot catch |
 | NFR-A3 | Same-language reply, grounding of other fact kinds, task completion, correct handover, inquiry classification | **Not yet testable.** Thresholds set from a baseline (OQ-6) | Eval suite |
 | NFR-A4 | Languages covered by evals | At least 6, including Arabic, English, Urdu and Hindi, plus mixed-language and transliterated input | Dataset inventory in the eval report |
 | NFR-A5 | Every model call is traceable | 100% of calls have a stored trace (US-C10) | Integration test |

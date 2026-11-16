@@ -612,6 +612,11 @@ anywhere in the repository; say "written against" or "reviewed against".
   fixed, with a link to the change, or rejected, with the reason.
 - **Passing a gate.** A gate is not passed while a High finding is open. Only
   the human may accept a rejected High finding.
+- **Medium and Low findings.** Each is fixed, rejected with a reason, or
+  opened as an issue labelled `review-finding` and fixed when design or build
+  reaches the story it concerns. A full review is not repeated until the
+  findings converge: after fixing High findings, a narrow review checks only
+  those fixes and what they touch.
 - **Checklists improve.** A defect found later that a checklist should have
   caught is added to that checklist in the pull request that fixes the
   defect.

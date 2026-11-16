@@ -51,3 +51,4 @@ Recorded in `docs/adr/0001-positioning-and-v1-scope.md`.
 | Translation and dashboard language | None, and English, in v1.0. |
 | Template languages at launch | Arabic and English. |
 | Quiet hours | 22:00 to 08:00 by default, configurable. |
+| Gate 1 after the second review | The eight High findings are fixed and verified by a narrow review; Medium and Low findings become tracked issues, fixed when design or build reaches the story. Agreed by the maintainer on 2026-11-16. |
