@@ -168,10 +168,22 @@ M0 Inception met its exit criteria on 2026-11-16; see
   then four Medium ones a verifier found in the fixes. 119 database tests
   now. What is not fixed is in #279.
 
+- 2026-11-17 — U4's fixes merged as #281. M2 unit U5 (#266): the job queue,
+  the conversation lease and the worker heartbeat, as functions in
+  `packages/db` with their rules in `packages/core`. Tests step a clock:
+  a job that keeps failing runs six times, after waits of 2, 4, 8, 16 and
+  32 seconds, and is then dead with an alert queued; four workers never
+  claim the same job; of two workers taking a lease at once exactly one
+  gets it, fifty times over; a worker that lost the lease has its result
+  discarded. The worker's probe is a command that reads its heartbeat, and
+  NFR-O1 now says so (#187). **Not built:** the worker process that would
+  call these functions, and anything that delivers an alert; both in #282,
+  with the query builder, deferred once more.
+
 ## Next
 
-1. Maintainer reviews and merges the U4 fixes (#281), which close #265.
-2. M2 unit U5: jobs, the conversation lease and worker health (#266).
+1. Maintainer reviews and merges U5 (#266), **after its code review is in**.
+2. M2 unit U6: the channel interface and the mock channel (#267).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);

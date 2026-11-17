@@ -142,7 +142,7 @@ flowchart TB
 | Container | Responsibility | Does not |
 | --- | --- | --- |
 | `api` | Verify and store webhooks and enqueue their jobs; serve the dashboard API; authenticate users | Call the model; send customer messages itself |
-| `worker` | Claim and run jobs: process a conversation, send a message, fire a timer, run maintenance | Accept inbound HTTP |
+| `worker` | Claim and run jobs: process a conversation, send a message, fire a timer, run maintenance. Record a heartbeat, which is its health probe | Accept inbound HTTP |
 | `dashboard` | Render screens; call `api` | Hold secrets; reach the database |
 | PostgreSQL | Hold all state, including jobs (ADR 0004) and login sessions (ADR 0008) | |
 | `mock-whatsapp` | Development and CI only: imitate the Cloud API, and offer a test page to send customer messages | Ship in a deployment |

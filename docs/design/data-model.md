@@ -10,10 +10,10 @@ The database is PostgreSQL with row-level security (ADR 0003). Jobs and login
 sessions are tables here too (ADRs 0004 and 0008). Column types are indicative;
 the migrations in milestone M2 are the definition.
 
-**Built so far** (M2 unit U4, `packages/db/migrations/`): `tenants`,
+**Built so far** (M2 units U4 and U5, `packages/db/migrations/`): `tenants`,
 `channel_accounts`, `channel_routes`, `contacts`, `conversations`,
-`messages` and `audit_log`, each with only the columns the walking skeleton
-uses. A column described below may not exist yet; the migrations are the
+`messages`, `audit_log`, `jobs` and `worker_heartbeats`, each with only the
+columns the walking skeleton uses. A column described below may not exist yet; the migrations are the
 record of what does.
 
 ## Conventions
@@ -327,9 +327,10 @@ known or belong to no tenant. Each is listed with what it can reveal.
 | Table | Columns | Why unscoped | What it reveals |
 | --- | --- | --- | --- |
 | `channel_routes` | `receiving_number_id`, `tenant_id` | The webhook must find the tenant from the receiving number | Which tenant owns a business number. No customer data |
-| `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
+| `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant. Unlike the other tables here it does have row-level security, of its own kind (decision 13). `dedupe_key` is not built yet | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
 | `unparsed_events` | `receiving_number_id` (if it could be read), `payload_hash`, `size_bytes`, `error_code`, `received_at` | A validly signed event that could not be parsed has no tenant yet | Metadata only. **The raw event, the sender's number and any text are not stored.** Rows are deleted after 30 days (Gate 2 finding S6) |
 | `unroutable_events` | `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
+| `worker_heartbeats` | `worker_id`, `started_at`, `last_seen_at` | One row per worker process, so that something outside the worker can tell whether one is alive (ADR 0004, amendment) | Nothing personal |
 | `service_state` | One row: `normal` or `degraded`, since when, and whether the operator is holding it in `degraded` | Service-wide | Nothing personal |
 | `operator_log` | `command`, `arguments`, `operator_name`, `phase` (`started` or `finished`), `outcome`, `at` | Operator actions belong to no tenant | Insert-only for every role. Arguments never hold an email address, a phone number or a name; a created row is recorded by its identifier (ADR 0011) |
 | Migration bookkeeping | | | Nothing personal |
@@ -437,6 +438,8 @@ question for a lawyer (open question OQ-4).
 | 10 | Foreign keys between tenant-owned tables include `tenant_id`, and uniqueness rules are per tenant where they can be | A foreign-key or uniqueness check is not subject to row-level security. Found while building M2 unit U4 |
 | 11 | `channel_routes` is written only by a trigger on `channel_accounts` | So the two cannot disagree (Gate 2 finding S22) |
 | 12 | The cross-tenant role sees all rows through a policy of its own, not by bypassing row-level security | No special role attribute is needed, and the tables it may reach are listed in the migrations (ADR 0003, amendment) |
+| 13 | `jobs` has row-level security after all: the application role may add a job for its transaction's tenant and may not read or change any | The webhook queues a job in the tenant's transaction; without a policy the application role could read every tenant's jobs. The cross-tenant role claims them. Found while building M2 unit U5 |
+| 14 | A finished job is deleted; job states are `queued`, `running` and `dead` | Nothing to archive (ADR 0004, amendment) |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
 noted for the Gate 2 review and are not yet reflected in the stories.
