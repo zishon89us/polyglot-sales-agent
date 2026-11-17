@@ -10,6 +10,12 @@ The database is PostgreSQL with row-level security (ADR 0003). Jobs and login
 sessions are tables here too (ADRs 0004 and 0008). Column types are indicative;
 the migrations in milestone M2 are the definition.
 
+**Built so far** (M2 unit U4, `packages/db/migrations/`): `tenants`,
+`channel_accounts`, `channel_routes`, `contacts`, `conversations`,
+`messages` and `audit_log`, each with only the columns the walking skeleton
+uses. A column described below may not exist yet; the migrations are the
+record of what does.
+
 ## Conventions
 
 - Every table has `id` (UUID) and `created_at` unless stated.
@@ -171,7 +177,8 @@ data in a disguised form; the inventory below treats it as such.
 
 ### `conversations` — tenant-owned
 
-`contact_id` (unique: one conversation per contact), `channel_account_id`,
+`contact_id` (unique per tenant: one conversation per contact),
+`channel_account_id`,
 `lease_token`, `lease_expires_at` (the processing lease of ADR 0004; both
 null when no worker holds it).
 
@@ -427,6 +434,9 @@ question for a lawyer (open question OQ-4).
 | 7 | The phone hash is HMAC-SHA-256 over tenant and number, with a key outside the database and a key version on each row | A plain hash of a phone number can be reversed by trying every number (T36, #160). The choice of HMAC-SHA-256 is the agent's and has not been reviewed by anyone with security training |
 | 8 | A signed event that cannot be parsed is recorded as metadata only, kept 30 days | The raw event would hold a stranger's number and text outside tenant scoping (Gate 2 finding S6). It replaces what `api.md` first said |
 | 9 | Booking tables and columns are owned by the booking pack | ADR 0012 |
+| 10 | Foreign keys between tenant-owned tables include `tenant_id`, and uniqueness rules are per tenant where they can be | A foreign-key or uniqueness check is not subject to row-level security. Found while building M2 unit U4 |
+| 11 | `channel_routes` is written only by a trigger on `channel_accounts` | So the two cannot disagree (Gate 2 finding S22) |
+| 12 | The cross-tenant role sees all rows through a policy of its own, not by bypassing row-level security | No special role attribute is needed, and the tables it may reach are listed in the migrations (ADR 0003, amendment) |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
 noted for the Gate 2 review and are not yet reflected in the stories.

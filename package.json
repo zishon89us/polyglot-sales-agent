@@ -13,6 +13,7 @@
     "lint": "biome ci --error-on-warnings .",
     "typecheck": "tsc --project tsconfig.json",
     "test": "vitest run",
+    "db": "node --env-file-if-exists=.env packages/db/src/cli.ts",
     "selftest": "sh tools/selftest/run.sh",
     "commitlint": "commitlint --from origin/main --to HEAD --verbose",
     "lint:openapi": "redocly lint docs/design/openapi.yaml",
