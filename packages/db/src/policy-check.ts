@@ -1,15 +1,28 @@
-// Reads the database's own catalogue and reports anything that would let a
-// row be seen across tenants: a table without the tenant policy, a policy
-// that admits too much, a privilege that goes around the policies, or a role
-// with more power than it should have. An empty result means none was found
-// by these checks; it does not prove isolation, which the tests attempt.
+// Reads the database's own catalogue and reports what it knows would let a
+// row be seen across tenants: a table without the tenant policy or a policy
+// that admits more; a view; the application role able to truncate, or to
+// reach an unscoped table; a role with a power, a membership or a setting
+// it should not have; an object not owned by the migration role; a function
+// that runs with its owner's rights or that PUBLIC may execute; default
+// privileges for the wrong roles.
+//
+// It does not judge which table privileges each role holds (a test compares
+// those with a fixed list), and an empty result does not prove isolation.
 
 import type pg from "pg";
-import { APP_ROLE, CROSS_ROLE, ROLES, UNSCOPED_TABLES } from "./roles.ts";
+import {
+  APP_ROLE,
+  CROSS_ROLE,
+  DEFINER_FUNCTIONS,
+  MIGRATE_ROLE,
+  ROLES,
+  UNSCOPED_TABLES,
+} from "./roles.ts";
 
 interface TableRow {
   schema: string;
   name: string;
+  kind: string;
   rls: boolean;
   forced: boolean;
   tenant_column_not_null: boolean | null;
@@ -43,13 +56,15 @@ export async function tenantOwnedTables(client: pg.ClientBase): Promise<string[]
 
 async function tableProblems(client: pg.ClientBase): Promise<string[]> {
   const tables = await client.query<TableRow>(
-    `SELECT n.nspname AS schema, c.relname AS name, c.relrowsecurity AS rls,
+    `SELECT n.nspname AS schema, c.relname AS name, c.relkind::text AS kind,
+            c.relrowsecurity AS rls,
             c.relforcerowsecurity AS forced,
             (SELECT a.attnotnull FROM pg_attribute a
               WHERE a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
             ) AS tenant_column_not_null,
             has_table_privilege($1, c.oid, 'TRUNCATE') AS app_truncate,
-            has_table_privilege($1, c.oid, 'SELECT, INSERT, UPDATE, DELETE') AS app_any
+            (has_table_privilege($1, c.oid, 'SELECT, INSERT, UPDATE, DELETE')
+              OR has_any_column_privilege($1, c.oid, 'SELECT, INSERT, UPDATE')) AS app_any
      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
        AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
@@ -60,6 +75,10 @@ async function tableProblems(client: pg.ClientBase): Promise<string[]> {
     `SELECT tablename, policyname, permissive, roles::text[] AS roles, cmd, qual, with_check
      FROM pg_policies WHERE schemaname = 'public' ORDER BY 1, 2`,
   );
+  // The catalogue writes the function with its schema when the reader's
+  // search path does not include it.
+  const plain = (text: string | null): string | null =>
+    text === null ? null : text.replaceAll("public.app_tenant_id()", "app_tenant_id()");
   const problems: string[] = [];
   const seen = new Set<string>();
   for (const table of tables.rows) {
@@ -69,6 +88,11 @@ async function tableProblems(client: pg.ClientBase): Promise<string[]> {
       continue;
     }
     seen.add(table.name);
+    if (table.kind !== "r" && table.kind !== "p") {
+      // A view reads with its owner's rights unless told otherwise; none is needed yet.
+      problems.push(`view ${table.name}: views and foreign tables are not covered by these checks`);
+      continue;
+    }
     if (table.app_truncate) {
       problems.push(`${where}: ${APP_ROLE} may TRUNCATE it, which ignores row-level security`);
     }
@@ -102,8 +126,8 @@ async function tableProblems(client: pg.ClientBase): Promise<string[]> {
       if (
         policy.permissive !== "PERMISSIVE" ||
         policy.cmd !== "ALL" ||
-        policy.qual !== expected ||
-        policy.with_check !== expected
+        plain(policy.qual) !== expected ||
+        plain(policy.with_check) !== expected
       ) {
         problems.push(
           `${where}: policy ${policy.policyname} is not FOR ALL USING ${expected} WITH CHECK ${expected}`,
@@ -153,20 +177,40 @@ async function roleProblems(client: pg.ClientBase): Promise<string[]> {
     `SELECT 'role ' || r.rolname || ': may create objects in schema public' AS problem
        FROM pg_roles r WHERE r.rolname = ANY($1) AND has_schema_privilege(r.oid, 'public', 'CREATE')
      UNION ALL
-     SELECT 'role ' || r.rolname || ': owns ' || c.relname
-       FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner
-       JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE r.rolname = ANY($1) AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
-         AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+     SELECT 'role ' || r.rolname || ': may create schemas or temporary tables in this database'
+       FROM pg_roles r WHERE r.rolname = ANY($1)
+         AND has_database_privilege(r.oid, current_database(), 'CREATE, TEMP')
      UNION ALL
-     SELECT 'role ' || r.rolname || ': owns function ' || p.proname
-       FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner WHERE r.rolname = ANY($1)
+     SELECT 'role ' || r.rolname || ': has a setting of its own (' || array_to_string(s.setconfig, ', ') || ')'
+       FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole WHERE r.rolname = ANY($2)
+     UNION ALL
+     SELECT 'table ' || c.relname || ': is owned by ' || pg_get_userbyid(c.relowner) || ', not ' || $3
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+         AND pg_get_userbyid(c.relowner) <> $3
+     UNION ALL
+     SELECT 'function ' || p.proname || ': is owned by ' || pg_get_userbyid(p.proowner) || ', not ' || $3
+       FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+         AND pg_get_userbyid(p.proowner) <> $3
+     UNION ALL
+     SELECT 'function ' || p.proname || ': runs with its owner''s rights and is not on the list of such functions'
+       FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
+         AND p.proname <> ALL($4)
+     UNION ALL
+     SELECT 'function ' || p.proname || ': PUBLIC may execute it'
+       FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+         AND has_function_privilege('public', p.oid, 'EXECUTE')
+     UNION ALL
+     SELECT DISTINCT 'default privileges: new objects would be granted to '
+              || CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END
+       FROM pg_default_acl d, aclexplode(d.defaclacl) a
+       WHERE a.grantee = 0 OR pg_get_userbyid(a.grantee) = ANY($1)
      UNION ALL
      SELECT DISTINCT 'table ' || table_name || ': PUBLIC has a privilege on it'
        FROM information_schema.role_table_grants
        WHERE table_schema = 'public' AND grantee = 'PUBLIC'
      ORDER BY 1`,
-    [[APP_ROLE, CROSS_ROLE]],
+    [[APP_ROLE, CROSS_ROLE], [...ROLES], MIGRATE_ROLE, Object.keys(DEFINER_FUNCTIONS)],
   );
   problems.push(...rest.rows.map((row) => row.problem));
   return problems;

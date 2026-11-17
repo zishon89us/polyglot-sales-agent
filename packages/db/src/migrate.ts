@@ -11,7 +11,11 @@ export interface Migration {
   readonly name: string;
   readonly up: string;
   readonly down: string;
-  /** Of the up step. A file changed after it was applied is refused. */
+  /**
+   * Of both steps. A file changed after it was applied is refused, for up
+   * and for down. To reverse a migration whose file was changed, restore the
+   * file as it was applied; the record holds no copy of it.
+   */
   readonly checksum: string;
 }
 
@@ -34,7 +38,12 @@ export function loadMigrations(directory: string): Migration[] {
         `migrations: version ${match[1]} has two names, "${entry.name}" and "${name}"`,
       );
     }
-    entry[step] = readFileSync(join(directory, file), "utf8");
+    const text = readFileSync(join(directory, file), "utf8");
+    // Each step runs in a transaction the runner opens and commits.
+    if (/^\s*(COMMIT|ROLLBACK|START\s+TRANSACTION)\b/im.test(text)) {
+      throw new Error(`migrations: "${file}" must not end or start a transaction itself`);
+    }
+    entry[step] = text;
     parts.set(version, entry);
   }
   const versions = [...parts.keys()].sort((a, b) => a - b);
@@ -51,7 +60,11 @@ export function loadMigrations(directory: string): Migration[] {
       name: entry.name,
       up: entry.up,
       down: entry.down,
-      checksum: createHash("sha256").update(entry.up).digest("hex"),
+      checksum: createHash("sha256")
+        .update(entry.up)
+        .update("\n-- down --\n")
+        .update(entry.down)
+        .digest("hex"),
     };
   });
 }
@@ -78,8 +91,18 @@ async function applied(client: pg.Client): Promise<AppliedRow[]> {
   return result.rows;
 }
 
-/** Fails if the database holds a migration the files do not, or one whose file has changed. */
+/**
+ * Fails if the record is not versions 1 to n with no gap, if it holds a
+ * migration the files do not, or one whose file has changed.
+ */
 function compare(rows: AppliedRow[], migrations: Migration[]): void {
+  rows.forEach((row, index) => {
+    if (row.version !== index + 1) {
+      throw new Error(
+        `migrations: the record has version ${row.version} where ${index + 1} was expected`,
+      );
+    }
+  });
   for (const row of rows) {
     const file = migrations.find((migration) => migration.version === row.version);
     if (file === undefined) {
@@ -93,8 +116,30 @@ function compare(rows: AppliedRow[], migrations: Migration[]): void {
   }
 }
 
-async function locked<T>(client: pg.Client, work: () => Promise<T>): Promise<T> {
-  await client.query("SELECT pg_advisory_lock($1)", [MIGRATE_LOCK]);
+export interface RunnerOptions {
+  /** How long to wait for another runner to finish. Default 30 seconds. */
+  readonly lockWaitMs?: number;
+}
+
+async function locked<T>(
+  client: pg.Client,
+  options: RunnerOptions,
+  work: () => Promise<T>,
+): Promise<T> {
+  // Any role that can connect can take this lock, so do not wait for ever.
+  const deadline = Date.now() + (options.lockWaitMs ?? 30_000);
+  for (;;) {
+    const got = await client.query<{ got: boolean }>("SELECT pg_try_advisory_lock($1) AS got", [
+      MIGRATE_LOCK,
+    ]);
+    if (got.rows[0]?.got === true) {
+      break;
+    }
+    if (Date.now() > deadline) {
+      throw new Error("migrations: another session holds the migration lock");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   try {
     return await work();
   } finally {
@@ -102,10 +147,22 @@ async function locked<T>(client: pg.Client, work: () => Promise<T>): Promise<T> 
   }
 }
 
+async function transactionId(client: pg.Client): Promise<string> {
+  const result = await client.query<{ id: string }>("SELECT pg_current_xact_id()::text AS id");
+  return result.rows[0]?.id as string;
+}
+
 async function inTransaction(client: pg.Client, work: () => Promise<void>): Promise<void> {
   await client.query("BEGIN");
   try {
+    const id = await transactionId(client);
     await work();
+    // SQL that ended the transaction would leave part of a step applied and unrecorded.
+    if ((await transactionId(client)) !== id) {
+      throw new Error(
+        "migrations: the step ended its own transaction; the database may hold part of it",
+      );
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -114,8 +171,12 @@ async function inTransaction(client: pg.Client, work: () => Promise<void>): Prom
 }
 
 /** Applies every migration not yet applied, each in its own transaction. Returns their names. */
-export function migrateUp(client: pg.Client, migrations: Migration[]): Promise<string[]> {
-  return locked(client, async () => {
+export function migrateUp(
+  client: pg.Client,
+  migrations: Migration[],
+  options: RunnerOptions = {},
+): Promise<string[]> {
+  return locked(client, options, async () => {
     const rows = await applied(client);
     compare(rows, migrations);
     const done: string[] = [];
@@ -137,8 +198,9 @@ export function migrateUp(client: pg.Client, migrations: Migration[]): Promise<s
 export function migrateDown(
   client: pg.Client,
   migrations: Migration[],
+  options: RunnerOptions = {},
 ): Promise<string | undefined> {
-  return locked(client, async () => {
+  return locked(client, options, async () => {
     const rows = await applied(client);
     compare(rows, migrations);
     const last = migrations[rows.length - 1];
@@ -157,8 +219,9 @@ export function migrateDown(
 export function migrationStatus(
   client: pg.Client,
   migrations: Migration[],
+  options: RunnerOptions = {},
 ): Promise<{ applied: string[]; pending: string[] }> {
-  return locked(client, async () => {
+  return locked(client, options, async () => {
     const rows = await applied(client);
     compare(rows, migrations);
     return {

@@ -16,3 +16,12 @@ export const UNSCOPED_TABLES: Readonly<Record<string, string>> = {
   channel_routes: "read to find the tenant of a webhook, before a tenant is known",
   schema_migrations: "the migration runner's own record",
 };
+
+/**
+ * Functions that run with their owner's rights, each with the reason. Such a
+ * function is not subject to the caller's privileges, so each one is a
+ * deliberate exception.
+ */
+export const DEFINER_FUNCTIONS: Readonly<Record<string, string>> = {
+  channel_routes_sync: "the trigger that keeps channel_routes equal to channel_accounts",
+};

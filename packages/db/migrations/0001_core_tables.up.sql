@@ -31,8 +31,9 @@ CREATE TABLE channel_accounts (
   UNIQUE (tenant_id, id)
 );
 
--- Read before a tenant is known, so it has no row-level security. It is
--- written only by the trigger below, never directly.
+-- Read before a tenant is known, so it has no row-level security. The
+-- application and cross-tenant roles cannot write it; the trigger below
+-- keeps it equal to channel_accounts.
 CREATE TABLE channel_routes (
   receiving_number_id text PRIMARY KEY
     REFERENCES channel_accounts (receiving_number_id) ON UPDATE CASCADE ON DELETE CASCADE,
@@ -55,6 +56,7 @@ BEGIN
   RETURN NULL;
 END;
 $$;
+-- No role needs to call it: a trigger runs its function without that right.
 REVOKE ALL ON FUNCTION channel_routes_sync() FROM PUBLIC;
 
 CREATE TRIGGER channel_accounts_route
@@ -103,8 +105,9 @@ CREATE TABLE messages (
   status text CHECK (status IN (
     'pending', 'held', 'discarded', 'withheld', 'sending', 'sent', 'delivered', 'read', 'failed'
   )),
-  -- Only an outbound message has a class.
+  -- Only an outbound message has a class and a status.
   CHECK ((direction = 'outbound') = (class IS NOT NULL)),
+  CHECK ((direction = 'outbound') = (status IS NOT NULL)),
   -- The deduplication of US-C1: one row per channel message per tenant.
   UNIQUE (tenant_id, channel_message_id),
   UNIQUE (tenant_id, id),
@@ -161,9 +164,10 @@ CREATE POLICY tenant_isolation ON audit_log FOR ALL TO psa_app
   USING (tenant_id = app_tenant_id()) WITH CHECK (tenant_id = app_tenant_id());
 CREATE POLICY cross_tenant ON audit_log FOR ALL TO psa_cross USING (true) WITH CHECK (true);
 
--- Privileges: only what the skeleton uses. Nothing is granted to PUBLIC.
+-- Privileges: only what the skeleton uses. Nothing is left to PUBLIC.
 -- The application role cannot create a tenant or a channel account, cannot
 -- delete anything yet, and can only add to the audit log.
+REVOKE ALL ON FUNCTION app_tenant_id() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_tenant_id() TO psa_app, psa_cross;
 GRANT SELECT ON tenants, channel_accounts TO psa_app;
 GRANT SELECT, INSERT, UPDATE ON contacts, conversations, messages TO psa_app;
