@@ -146,7 +146,8 @@ published 2026-11-10) and `graphile-worker` 0.18.0 (MIT, last published
 - A job is queued by the application role inside the tenant's own
   transaction, under row-level security. A library that owns its tables
   and its connection would need the same policies fitted around it.
-- Tests step a clock and never sleep; a library reads its own.
+- Most tests pass the time in and step it, with no sleeping; a library
+  reads its own clock.
 - It is fifteen SQL statements in three files.
 
 **One clock.** The database's clock decides when a job is due, when a
@@ -154,6 +155,8 @@ claim or a lease has run out, and whether a worker is alive. Workers on
 different machines cannot agree on those if each compares against its own
 clock, and the first version of this unit did exactly that. Every function
 takes an optional time, which running code leaves out; only tests pass it.
+The clock is read at each statement, not at the start of its transaction,
+so a lease taken late in a transaction still lasts its two minutes.
 
 **At least once.** A job is run at least once, not exactly once. A worker
 that is slow, not dead, can still be running a job when another worker
@@ -171,20 +174,26 @@ conversation that is what the lease is for; for a send it is U8's concern.
 | A run that takes too long | Failed after 4 minutes with the code `handler-timeout`, and the handler is told to stop through an abort signal |
 | A worker that dies | Its job stays `running`. After the claim time, 5 minutes, another worker takes it. A run that ends this way counts as one of the six |
 | A slow worker | Cannot finish, fail or put back a job that another worker has since taken |
-| Leaving a job for later | A handler that finds its conversation held by another worker puts the job back for a short wait. That does not count as a run |
+| Leaving a job for later | A handler that finds its conversation held by another worker puts the job back for a wait of up to an hour. That does not count as a run, and nothing limits how often. Any other thing a handler returns fails the run |
 | Dead job | Queues a job of type `operator-alert` in the same statement, naming the dead job and nothing else. A dead alert raises no alert; the count of them is printed by the worker's probe |
-| Type and payload | A type is a plain lower-case name. A payload holds identifiers only: each key ends in `Id`, each value is a UUID, at most 2000 bytes. The table itself refuses anything else, and the code refuses it first |
+| Type and payload | A type is lower-case letters and hyphens. A payload holds identifiers only: at most 20 keys, each of at most 40 letters ending in `Id`, each value a UUID. The table itself refuses anything else, and the code applies the same rule first. A UUID made to spell a number would pass both |
 | Timers | A job can name its subject (a conversation; later a booking or a handover). The queued jobs of one type about one subject can be cancelled or replaced in the transaction that changes the state they belong to |
 | Lease | `takeLease`, `renewLease`, `holdsLease`, `releaseLease`, inside the tenant's transaction. `holdsLease` locks the conversation row against another worker taking the lease, so a result is stored and the lease checked as one step. The lock does not hold up a new message for the conversation |
 | An expired lease nobody took | Still the worker's. Only another worker's token ends it, as "Specifics" says |
 
 **Who may do what on `jobs`.** The cross-tenant role claims and changes
 every job. The application role, inside one tenant's transaction, may add a
-job for that tenant (not of the alert type, and not choosing its state,
-attempts or identifier), see which of that tenant's jobs exist (identifier,
+job for that tenant (not of the alert type, not dated more than a minute
+into the past, and not choosing its state, attempts or identifier), see which of that tenant's jobs exist (identifier,
 type, subject and state; not the payload or the error), and delete one that
 is still queued. It can change nothing. The data model called `jobs` a
 table outside tenant scoping; it is not, and decision 13 there records why.
+
+**Accepted as they are.** The application role can lock the whole `jobs`
+table, as it can any table it may update or delete from, and that would
+stop the queue; it can queue any number of jobs, which sit ahead of other
+tenants' later ones; and it can see how large the table is. All three need
+code of ours to do it. They are recorded in #282.
 
 **Where this departs from the data model.** `dedupe_key` is replaced by
 `subject_id`, a UUID, so that the column cannot carry text. There is no
