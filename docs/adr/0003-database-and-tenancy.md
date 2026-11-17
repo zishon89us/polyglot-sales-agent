@@ -129,9 +129,10 @@ the decision was carried out. The decision itself is unchanged.
 - "Specifics" says the cross-tenant role is "used only by migrations and by
   clearly named operator jobs". That was wrong twice. Migrations have a role
   of their own. And the cross-tenant role is also used on ordinary request
-  paths, for the lookups that must happen before a tenant is known: routing
-  a webhook, authenticating a request, starting a sign-in, and claiming a
-  job (`docs/design/data-model.md`, "Access before the tenant is known").
+  paths: for the three lookups that must happen before a tenant is known
+  (routing a webhook, authenticating a request, starting a sign-in), and
+  for claiming a job (`docs/design/data-model.md`, "Access before the
+  tenant is known").
 - "Confirmation" says a test enumerates "every table with a `tenant_id`
   column". That rule fails on tables that carry the column without a policy
   on purpose, and misses `tenants`, which has no such column. The rule as
@@ -164,15 +165,37 @@ reach is visible in the migrations.
 - Foreign keys between tenant-owned tables include `tenant_id`. A
   foreign-key check is not subject to row-level security, so without this a
   row could point at another tenant's row.
-- `channel_routes` is written only by a trigger on `channel_accounts`, so
-  the two cannot disagree. No role may write it directly.
+- `channel_routes` is kept equal to `channel_accounts` by a trigger and a
+  cascading foreign key. Neither the application role nor the cross-tenant
+  role may write it. The migration role, as its owner, can.
 - `findIsolationProblems` (`packages/db/src/policy-check.ts`) reads the
-  database's catalogue and reports a table without the policy, a policy that
-  admits more, a privilege that goes around the policies, and a role with
-  more power than above. `make db-setup` runs it, and the tests run it.
+  database's catalogue. It reports: a table without the policy, or with a
+  policy that admits more; a view; the application role able to truncate a
+  table or to reach an unscoped one, by table or by column; one of the three
+  roles with a power, a membership or a setting of its own; an object the
+  migration role does not own; a function that runs with its owner's rights
+  and is not on a list, or that everyone may execute; default privileges
+  for the wrong roles. `make db-setup` runs it, and the tests run it.
+- It does not judge which table privileges each role holds. A test compares
+  those with a fixed list, so widening one is a visible change to that list.
+- The bootstrap step sends each role's password as a SCRAM verifier, so the
+  password is not in the statement text or the server's log.
+- `withTenant` refuses a pool that does not connect as `psa_app`, refuses a
+  query through a handle whose transaction has ended, rejects when the
+  transaction was rolled back although the work returned, and clears a
+  session-wide tenant setting before the connection goes back to the pool.
 
 **What this does not do.**
 
+- Uniqueness is checked across all rows whatever the policies say. Primary
+  keys are unique across tenants, so an insert that reuses another tenant's
+  row identifier fails differently from one that does not, which tells the
+  caller the identifier exists. The identifiers are random UUIDs. Other
+  uniqueness rules on tenant-owned tables include the tenant.
+- The application role can see whole-table row counts in the statistics
+  views, can take the advisory lock the migration runner uses (the runner
+  gives up after 30 seconds), and can connect to other databases on the
+  same server unless their owner forbids it (#279).
 - The policies stop a query that forgot its filter. They do not stop SQL
   text that sets the tenant itself: the application role may set the
   setting, because that is how `withTenant` works. Query text must never be

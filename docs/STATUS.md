@@ -151,15 +151,20 @@ M0 Inception met its exit criteria on 2026-11-16; see
   three database roles, a migration runner with up and down steps, the
   first migration (six tenant-owned tables and the routing table, with the
   skeleton's columns only), `withTenant`, and a check that reads the
-  database's catalogue for anything that weakens isolation. 81 tests run
-  against PostgreSQL 16.15: as one tenant, no table gives up or accepts a
-  change to another tenant's rows; the application role cannot go around
-  the policies; a table added without its policy fails the check. Building
+  database's catalogue for known ways of weakening isolation. 111 tests run
+  against PostgreSQL 16.15: as one tenant, reads return none of another
+  tenant's rows and writes change none, in every table; the application
+  role is refused eighteen ways of going around the policies; a table added
+  without its policy fails the check. One thing does leak: whether a row
+  identifier exists in another tenant, to a caller who already has it. Building
   it corrected ADR 0003 in two places (#191) and found that foreign keys
   and uniqueness rules ignore row-level security, so they now carry the
   tenant. Not done or not shown: `docker compose` was never started here,
   the query builder is not chosen, and key rotation (#162) waits for stored
-  credentials; all in #279.
+  credentials; all in #279. The code review found 17 defects, one High: a
+  query handle kept after its transaction ran in the next tenant's
+  transaction. That and most of the others are fixed; what is not is in
+  #279.
 
 ## Next
 
