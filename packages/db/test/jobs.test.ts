@@ -1,5 +1,6 @@
 // The job queue and the worker heartbeat (ADR 0004, NFR-R5, issue #187).
-// Time is passed in, so these tests step a clock and never sleep.
+// Most tests pass the time in and step it. A few use the database's own
+// clock, and one waits 50 ms for a handler to time out.
 
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -39,7 +40,8 @@ import {
   type TestDatabase,
 } from "./harness.ts";
 
-const T0 = new Date("2026-01-01T00:00:00.000Z");
+// A fixed time in the future: the application role may not date a job into the past.
+const T0 = new Date("2100-01-01T00:00:00.000Z");
 const after = (ms: number): Date => new Date(T0.getTime() + ms);
 const SECOND = 1_000;
 
@@ -186,17 +188,32 @@ describe("queueing a job", () => {
     expect(await insert("type", "'send to +15550100: hello'")).toBe("23514");
     // The queue's own type.
     expect(await insert("type", `'${OPERATOR_ALERT_JOB}'`)).toBe("42501");
-    const infinite = withTenant(app, a.tenantId, (tx) =>
-      tx.query("INSERT INTO jobs (tenant_id, type, run_at) VALUES ($1, 'x', '-infinity')", [
-        a.tenantId,
-      ]),
+    // An endless time is refused from anyone, the cross-tenant role included.
+    for (const endless of ["-infinity", "infinity"]) {
+      const insert = cross.query("INSERT INTO jobs (type, run_at) VALUES ('x', $1)", [endless]);
+      expect(await sqlState(insert), endless).toBe("23514");
+    }
+    for (const past of ["now() - interval '2 minutes'", "'1970-01-01'"]) {
+      const dated = withTenant(app, a.tenantId, (tx) =>
+        tx.query(`INSERT INTO jobs (tenant_id, type, run_at) VALUES ($1, 'x', ${past})`, [
+          a.tenantId,
+        ]),
+      );
+      expect(await sqlState(dated), `dated into the past: ${past}`).toBe("42501");
+    }
+    // More keys than a payload may have, put straight into the table by the role that may write anything.
+    const many = Object.fromEntries(
+      Array.from({ length: 21 }, (_, index) => [`k${"x".repeat(index)}Id`, a.tenantId]),
     );
-    expect(await sqlState(infinite), "a time that would jump every queue").toBe("23514");
-    const big = Object.fromEntries(
-      Array.from({ length: 60 }, (_, index) => [`k${"x".repeat(index)}Id`, a.tenantId]),
-    );
-    expect(await sqlState(enqueueJob(cross, { type: "x", tenantId: null, payload: big }))).toBe(
-      "23514",
+    expect(
+      await sqlState(
+        cross.query("INSERT INTO jobs (type, payload, run_at) VALUES ('x', $1, now())", [
+          JSON.stringify(many),
+        ]),
+      ),
+    ).toBe("23514");
+    await expect(enqueueJob(cross, { type: "x", tenantId: null, payload: many })).rejects.toThrow(
+      "enqueueJob: the payload has more than 20 keys",
     );
     expect((await rows()).map((row) => row.type)).toEqual(["fine"]);
   });
@@ -251,7 +268,7 @@ describe("claiming", () => {
   test("four workers claiming at once never get the same job", async () => {
     const total = 40;
     for (let index = 0; index < total; index += 1) {
-      await queue(`job-${index}`);
+      await queue("bulk");
     }
     const workers = await Promise.all([1, 2, 3, 4].map(() => database.client(CROSS_ROLE)));
     const claimed = await Promise.all(
@@ -634,6 +651,29 @@ describe("running a handler", () => {
     expect(aborted).toBe(true);
     expect(await rows()).toMatchObject([{ state: "queued", last_error: "handler-timeout" }]);
   });
+
+  test.each([
+    ["null", null],
+    ["an empty object", {}],
+    ["a list", []],
+    ["a wait that is not a number", { deferMs: Number.NaN }],
+    ["an endless wait", { deferMs: Number.POSITIVE_INFINITY }],
+    ["a negative wait", { deferMs: -1 }],
+    ["a wait of more than an hour", { deferMs: 60 * 60 * SECOND + 1 }],
+    ["a wait given as text", { deferMs: "500" }],
+  ])(
+    "a handler that returns %s fails the run; the job is not left claimed",
+    async (_what, result) => {
+      await queue("returns-nonsense");
+      const outcome = await runNextJob(
+        cross,
+        { "returns-nonsense": async () => result as never },
+        { clock: () => T0 },
+      );
+      expect(outcome).toMatchObject({ result: "retry" });
+      expect(await rows()).toMatchObject([{ state: "queued", last_error: "bad-handler-result" }]);
+    },
+  );
 
   test("the clock is read again after the handler: the wait starts when the run ended", async () => {
     await queue("slow-then-fails");

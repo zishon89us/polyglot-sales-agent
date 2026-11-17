@@ -27,8 +27,11 @@ export const JOB_CLAIM_MS = 5 * 60_000;
 /** How long one run of a handler may take before it is failed. Less than the claim, so the failure is recorded while the job is still this worker's. */
 export const JOB_HANDLER_TIMEOUT_MS = JOB_CLAIM_MS - 60_000;
 
-/** A job type is a plain lower-case name, so it can never carry data. */
-export const JOB_TYPE = /^[a-z][a-z0-9-]{0,39}$/;
+/** A job type is lower-case letters and hyphens, so it cannot carry a number. */
+export const JOB_TYPE = /^[a-z][a-z-]{0,39}$/;
+
+/** A handler may put its job back for at most this long at a time. */
+export const JOB_MAX_DEFER_MS = 60 * 60_000;
 
 /** How long a conversation lease lasts unless renewed (ADR 0004). */
 export const LEASE_MS = 2 * 60_000;
@@ -57,12 +60,14 @@ export function retryDelayMs(attempts: number): number | undefined {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const KEY = /^[a-z][A-Za-z]*Id$/;
+const KEY = /^[a-z][A-Za-z]{0,37}Id$/;
+const MAX_KEYS = 20;
 
 /**
  * A job payload holds identifiers only: the jobs table is outside tenant
  * scoping, so it must never hold message text, a phone number or a name
- * (data model, decision 2). Each key ends in `Id` and each value is a UUID.
+ * (data model, decision 2). At most 20 keys, each of at most 40 letters
+ * ending in `Id`, each value a UUID. The table applies the same rule.
  * Returns the problems found; none means the payload is acceptable.
  */
 export function payloadProblems(payload: unknown): string[] {
@@ -74,6 +79,9 @@ export function payloadProblems(payload: unknown): string[] {
     return ["the payload is not a plain object"];
   }
   const problems: string[] = [];
+  if (Object.keys(payload).length > MAX_KEYS) {
+    problems.push(`the payload has more than ${MAX_KEYS} keys`);
+  }
   for (const [key, value] of Object.entries(payload)) {
     if (!KEY.test(key)) {
       // The key is not shown either: data can be put in a key.

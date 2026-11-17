@@ -51,7 +51,7 @@ const SPECIAL: Readonly<
 > = {
   jobs: {
     policies: [
-      "INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text))",
+      "INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval)))",
       "SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null",
       "DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
     ],

@@ -5,13 +5,13 @@
 // first checks that the lease is still the worker's.
 //
 // Each function runs inside `withTenant`, as the application role. As in
-// the job queue, the database's clock decides when a lease has run out;
-// `now` is for tests.
+// the job queue, the database's clock decides when a lease has run out,
+// read at each statement; `now` is for tests.
 
 import { LEASE_MS } from "@polyglot-sales-agent/core";
 import type { Tx } from "./tenant.ts";
 
-const NOW = "coalesce($2::timestamptz, now())";
+const NOW = "coalesce($2::timestamptz, clock_timestamp())";
 const LEASE = "$3::double precision * interval '1 millisecond'";
 
 /**
@@ -68,9 +68,8 @@ export async function renewLease(
  * lease until that transaction ends. The lock is the kind an ordinary
  * update takes, so it does not hold up a new message for the conversation.
  *
- * Lock order: this first, then anything else in the transaction. A
- * transaction that writes a message and only then calls this can deadlock
- * with another that does the same.
+ * Call it first: a transaction that writes and only then calls this makes
+ * others wait behind it for longer than they need to.
  *
  * An expired lease that nobody else has taken still counts: the token is
  * what says whose the conversation is.

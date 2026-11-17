@@ -22,7 +22,8 @@ import {
   type TestDatabase,
 } from "./harness.ts";
 
-const T0 = new Date("2026-01-01T00:00:00.000Z");
+// A fixed time in the future: the application role may not date a job into the past.
+const T0 = new Date("2100-01-01T00:00:00.000Z");
 const after = (ms: number): Date => new Date(T0.getTime() + ms);
 
 let database: TestDatabase;
@@ -228,6 +229,19 @@ describe("storing a result", () => {
     expect(await store).toBe(true);
     await taking;
     expect(taken, "and then succeeds, the lease having expired").toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("the clock is read when the lease is taken, not when its transaction began", async () => {
+    const left = await withTenant(app, a.tenantId, async (tx) => {
+      await tx.query("SELECT pg_sleep(1)");
+      await takeLease(tx, a.conversationId);
+      return tx.query<{ seconds: number }>(
+        `SELECT extract(epoch FROM lease_expires_at - clock_timestamp())::float AS seconds
+         FROM conversations`,
+      );
+    });
+    // Counted from the transaction's start it would be under 119.
+    expect(left.rows[0]?.seconds).toBeGreaterThan(LEASE_MS / 1000 - 0.5);
   });
 
   test("with no time passed in, the database's clock decides: a fresh lease is live for two minutes", async () => {

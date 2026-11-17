@@ -8,7 +8,7 @@
 import { WORKER_READY_WITHIN_MS } from "@polyglot-sales-agent/core";
 import type { Queryable } from "./jobs.ts";
 
-const NOW = "coalesce($1::timestamptz, now())";
+const NOW = "coalesce($1::timestamptz, clock_timestamp())";
 
 /** Records that a worker is alive, and forgets workers not seen for a day. */
 export async function recordHeartbeat(db: Queryable, workerId: string, now?: Date): Promise<void> {

@@ -77,6 +77,15 @@ describe("payloadProblems", () => {
     expect(payloadProblems(payload)).toEqual(problems);
   });
 
+  test("at most 20 keys, each of at most 40 letters", () => {
+    const keys = (n: number) =>
+      Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${"x".repeat(i)}Id`, id]));
+    expect(payloadProblems(keys(20))).toEqual([]);
+    expect(payloadProblems(keys(21))).toEqual(["the payload has more than 20 keys"]);
+    expect(payloadProblems({ [`${"a".repeat(38)}Id`]: id })).toEqual([]);
+    expect(payloadProblems({ [`${"a".repeat(39)}Id`]: id })).toEqual([KEY]);
+  });
+
   test("never repeats a refused value or key", () => {
     const text = [
       ...payloadProblems({ contactId: "+15550100" }),
@@ -87,15 +96,21 @@ describe("payloadProblems", () => {
 });
 
 describe("JOB_TYPE", () => {
-  test.each(["process-conversation", "operator-alert", "a", "send2"])("accepts %s", (type) => {
+  test.each(["process-conversation", "operator-alert", "a"])("accepts %s", (type) => {
     expect(JOB_TYPE.test(type)).toBe(true);
   });
-  test.each(["", "Send", "send to +15550100", "send_message", "-x", "x".repeat(41), "toString"])(
-    "refuses %j",
-    (type) => {
-      expect(JOB_TYPE.test(type)).toBe(false);
-    },
-  );
+  test.each([
+    "",
+    "Send",
+    "send to +15550100",
+    "send_message",
+    "-x",
+    "p15550100",
+    "x".repeat(41),
+    "toString",
+  ])("refuses %j", (type) => {
+    expect(JOB_TYPE.test(type)).toBe(false);
+  });
 });
 
 describe("errorCode", () => {

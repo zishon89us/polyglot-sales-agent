@@ -242,49 +242,56 @@ describe("findIsolationProblems", () => {
       "the jobs table open to inserts for any tenant",
       "DROP POLICY tenant_insert ON jobs; CREATE POLICY tenant_insert ON jobs FOR INSERT TO psa_app WITH CHECK (true)",
       [
-        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text)); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "jobs dated into the past allowed to the application role",
+      "DROP POLICY tenant_insert ON jobs; CREATE POLICY tenant_insert ON jobs FOR INSERT TO psa_app WITH CHECK (tenant_id = app_tenant_id() AND type <> 'operator-alert')",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
       ],
     ],
     [
       "the alert type open to the application role",
       "DROP POLICY tenant_insert ON jobs; CREATE POLICY tenant_insert ON jobs FOR INSERT TO psa_app WITH CHECK (tenant_id = app_tenant_id())",
       [
-        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text)); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
       ],
     ],
     [
       "every tenant's jobs visible to the application role",
       "DROP POLICY tenant_select ON jobs; CREATE POLICY tenant_select ON jobs FOR SELECT TO psa_app USING (true)",
       [
-        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text)); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
       ],
     ],
     [
       "running jobs removable by the application role",
       "DROP POLICY tenant_cancel ON jobs; CREATE POLICY tenant_cancel ON jobs FOR DELETE TO psa_app USING (tenant_id = app_tenant_id())",
       [
-        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text)); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
       ],
     ],
     [
       "one more policy on the jobs table",
       "CREATE POLICY more ON jobs FOR UPDATE TO psa_app USING (true)",
       [
-        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text)); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
       ],
     ],
     [
       "a restrictive policy in place of a plain one on the jobs table",
       "DROP POLICY tenant_select ON jobs; CREATE POLICY tenant_select ON jobs AS RESTRICTIVE FOR SELECT TO psa_app USING (tenant_id = app_tenant_id())",
       [
-        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text)); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
       ],
     ],
     [
       "a policy for everyone on the jobs table",
       "CREATE POLICY wide ON jobs FOR SELECT USING (true)",
       [
-        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text)); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
       ],
     ],
     [

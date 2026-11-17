@@ -1,7 +1,8 @@
 // The job queue (ADR 0004): jobs are rows, claimed with row locks that skip
 // what another worker holds.
 //
-// Time: the database's clock is the only clock. Workers on different
+// Time: the database's clock is the only clock, read at each statement
+// (not at the start of its transaction, which may be seconds old). Workers on different
 // machines must agree on when a claim or a lease has run out, and they
 // cannot if each compares against its own clock. Every function takes an
 // optional `now`; leave it out in running code. Tests pass it, to step time
@@ -16,6 +17,7 @@ import {
   JOB_CLAIM_MS,
   JOB_HANDLER_TIMEOUT_MS,
   JOB_MAX_ATTEMPTS,
+  JOB_MAX_DEFER_MS,
   JOB_TYPE,
   OPERATOR_ALERT_JOB,
   payloadProblems,
@@ -53,7 +55,7 @@ export interface Job {
 }
 
 // `$n::timestamptz` is the caller's time in tests and null in running code.
-const NOW = (n: number): string => `coalesce($${n}::timestamptz, now())`;
+const NOW = (n: number): string => `coalesce($${n}::timestamptz, clock_timestamp())`;
 const MS = (n: number): string => `$${n}::double precision * interval '1 millisecond'`;
 
 /**
@@ -74,7 +76,7 @@ export async function enqueueJob(db: Queryable, job: NewJob): Promise<void> {
   }
   await db.query(
     `INSERT INTO jobs (type, tenant_id, subject_id, payload, run_at)
-     VALUES ($1, $2, $3, $4, coalesce($5::timestamptz, now()) + ${MS(6)})`,
+     VALUES ($1, $2, $3, $4, coalesce($5::timestamptz, clock_timestamp()) + ${MS(6)})`,
     [
       job.type,
       job.tenantId,
@@ -240,7 +242,9 @@ export async function failJob(
 
 /**
  * What a worker does with a job of one type. Throwing means the run failed.
- * Returning `{ deferMs }` puts the job back without counting the run. The
+ * Returning `{ deferMs }`, from 0 to an hour, puts the job back without
+ * counting the run; nothing limits how often, so a handler that defers for
+ * ever is never dead. Any other result fails the run. The
  * signal aborts when the run has taken too long; a handler should pass it
  * to whatever it waits on.
  */
@@ -283,10 +287,8 @@ export async function runNextJob(
   }
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  // biome-ignore lint/suspicious/noConfusingVoidType: as JobHandler
-  let wish: void | { deferMs: number };
   try {
-    // Not `handlers[type]`: that would find `toString` on an empty object.
+    // Not `handlers[type]`: that would find what the object inherits.
     const handler = Object.hasOwn(handlers, job.type) ? handlers[job.type] : undefined;
     if (handler === undefined) {
       throw Object.assign(new Error("no handler"), { code: "no-handler" });
@@ -297,17 +299,23 @@ export async function runNextJob(
         reject(Object.assign(new Error("timeout"), { code: "handler-timeout" }));
       }, options.timeoutMs ?? JOB_HANDLER_TIMEOUT_MS);
     });
-    wish = await Promise.race([handler(job, abort.signal), late]);
+    const wish: unknown = await Promise.race([handler(job, abort.signal), late]);
+    if (wish === undefined) {
+      return { ran: true, job, result: (await completeJob(db, job)) ? "done" : "not-held" };
+    }
+    // Anything else must be a wait the queue can keep: a whole run is not
+    // lost to a handler that returned the wrong thing.
+    const wait = (wish as { deferMs?: unknown } | null)?.deferMs;
+    if (typeof wait !== "number" || !(wait >= 0 && wait <= JOB_MAX_DEFER_MS)) {
+      throw Object.assign(new Error("bad result"), { code: "bad-handler-result" });
+    }
+    const deferred = await deferJob(db, job, wait, options.clock?.());
+    return { ran: true, job, result: deferred ? "deferred" : "not-held" };
   } catch (error) {
     return { ran: true, job, result: await failJob(db, job, error, options.clock?.()) };
   } finally {
     clearTimeout(timer);
   }
-  if (typeof wish === "object") {
-    const deferred = await deferJob(db, job, wish.deferMs, options.clock?.());
-    return { ran: true, job, result: deferred ? "deferred" : "not-held" };
-  }
-  return { ran: true, job, result: (await completeJob(db, job)) ? "done" : "not-held" };
 }
 
 /** How many jobs are dead, and how many of those are alerts nobody received. */
