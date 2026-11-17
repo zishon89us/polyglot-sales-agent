@@ -22,7 +22,7 @@ number in this file is the authority.
 | Reply window | The 24 hours after a contact's most recent inbound message or call, during which the channel allows free-form messages. It decides only whether a message may be free-form or must be a template (US-C9). Source: `docs/compliance.md`. |
 | Template | A message with fixed, pre-approved wording and variable slots, required by the channel outside the reply window. Each language version is approved separately. |
 | Handover | A request for staff attention about one contact. A contact has at most one open handover. While a handover is attached to a session and waiting or in progress, that session is handed over and the assistant does not reply in it. A handover is **answered** once a staff user sends a staff message from it. It ends with exactly one outcome: `handed-back`, `answered` or `closed-unanswered`, the last with a stored reason (one chosen by staff, or `handed-back-unanswered`, `no-response`, `expired`, `contact-deleted`). An unanswered handover does not end when its session ends. Its states and every transition are defined in `docs/design/state-machines.md` section 2, which is the authority. |
-| Handover reason | One of `requested`, `repeated-failure`, `sensitive-topic`, `data-request`, `emergency`, `limit`, `unsupported-content`, `late-change`, `provider-failure`, `staff`. A handover with reason `emergency` is marked urgent. |
+| Handover reason | One of `requested`, `repeated-failure`, `sensitive-topic`, `data-request`, `emergency`, `limit`, `unsupported-content`, `late-change`, `provider-failure`, `staff`. A handover with the emergency reason is marked urgent. |
 | Business hours | The weekly hours in which the tenant's staff answer handovers, set at setup. Distinct from opening hours, which are when appointments can be booked. |
 | Quiet hours | A daily period in tenant time during which no business-initiated message is sent, except as the rules under "Quiet hours rules" below allow. The start time is inside quiet hours and the end time is outside them: with 22:00 to 08:00, a message may be sent at 21:59 and at 08:00, not at 22:00. |
 | Answering | A tenant is answering when it has every required setting and verified channel credentials. Only an answering tenant receives replies (US-C1). Templates do not affect it: a missing or unavailable template withholds only the messages that need it. |
@@ -142,3 +142,11 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Password length | At least 12 characters | US-D10 |
 | Deletion deadline | 24 hours | US-D5, NFR-V3 |
 | Daily token budget per tenant | Not yet set; see open question OQ-7 | US-C6, NFR-C2 |
+
+## Names checked by code
+
+The handover reasons and the message classes in this glossary are also
+defined in `packages/core/src/names.ts`, which is the single source for
+them. `make check` fails if this file and that one disagree. To change one,
+change the code first, then this glossary and the other documents the check
+names.

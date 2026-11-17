@@ -136,11 +136,22 @@ M0 Inception met its exit criteria on 2026-11-16; see
   runs in this session and passes. First real tests: 16, for the document
   checks. CI passed on the pull request. The code review found 15 defects,
   none High; the six Medium ones are fixed or stated as limits.
+- 2026-11-17 — U2 merged as #275. M2 unit U3 (#264): the first package,
+  `packages/core`, holding the shared names (handover states and reasons,
+  message statuses, classes and directions) and a check, with tests, that
+  seventeen places that list them agree with it, including the script that
+  generates the OpenAPI file. **U3 did less than its plan said:** model
+  flags, settings with their units, and several other lists are not
+  defined, and the same names still appear unchecked in prose. That work
+  is #278; #183, #204 and #249 stay open. The code review found 14 defects,
+  two High: the generator restated the lists unchecked, and the shortfall
+  against the plan was not stated.
 
 ## Next
 
-1. Maintainer reviews and merges U2 (#263).
-2. M2 unit U3: one source for shared names (#264).
+1. Maintainer reviews and merges U3 (#264).
+2. M2 unit U4: database, roles and tenant isolation (#265). It needs a
+   PostgreSQL the agent's environment can run; that is checked first.
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
