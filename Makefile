@@ -8,7 +8,8 @@
 # The self-test plants wrong files in the workspace while it runs, so targets
 # must not run in parallel with it.
 .NOTPARALLEL:
-.PHONY: setup identity check format lint typecheck test selftest commitlint docs audit
+.PHONY: setup identity check format lint typecheck test selftest commitlint docs audit \
+	db-up db-setup db-down
 
 setup:
 	pnpm install --frozen-lockfile
@@ -18,7 +19,23 @@ setup:
 identity:
 	sh tools/git-identity.sh set
 
+# The tests need a PostgreSQL 16 server. `db-up` starts one in Docker;
+# any server works if PSA_TEST_ADMIN_URL in `.env` points at it. `db-setup`
+# prepares the development database: the three roles, the migrations, then
+# the isolation check. It reads `.env` (copy `.env.example`).
+db-up:
+	docker compose up --detach --wait db
+
+db-setup:
+	pnpm run db bootstrap
+	pnpm run db up
+	pnpm run db check
+
+db-down:
+	docker compose down
+
 # lint covers formatting, lint rules (warnings fail) and import order.
+# test needs the database server (see db-up).
 check: lint typecheck test docs selftest commitlint
 
 format:

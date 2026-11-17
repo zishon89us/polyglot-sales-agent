@@ -34,6 +34,21 @@ jobs:
         # 22 is the oldest line the code must run on; 26 is the newest
         # long-term-support line (ADR 0002, amendment of 2026-11-17).
         node: ["22", "26"]
+    # The database tests create and drop their own databases on this server.
+    # The address and password are the defaults of `.env.example`. The image
+    # is named by tag, not pinned to a digest (#279).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     steps:
       - name: Check out the branch, with history for the commit lint
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
