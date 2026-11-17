@@ -32,13 +32,16 @@ const PRIVILEGES = {
     channel_accounts: "SELECT",
     contacts: "INSERT,SELECT,UPDATE",
     conversations: "INSERT,SELECT,UPDATE",
+    jobs: "INSERT",
     messages: "INSERT,SELECT,UPDATE",
     tenants: "SELECT",
   },
   psa_cross: {
     channel_accounts: "INSERT,SELECT",
     channel_routes: "SELECT",
+    jobs: "DELETE,INSERT,SELECT,UPDATE",
     tenants: "INSERT,SELECT",
+    worker_heartbeats: "DELETE,INSERT,SELECT,UPDATE",
   },
 };
 

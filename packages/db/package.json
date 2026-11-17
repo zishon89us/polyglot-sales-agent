@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@polyglot-sales-agent/core": "workspace:*",
     "pg": "8.23.1"
   },
   "devDependencies": {

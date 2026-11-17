@@ -5,6 +5,7 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import {
+  APP_INSERT_ONLY_TABLES,
   DEFINER_FUNCTIONS,
   findIsolationProblems,
   MIGRATE_ROLE,
@@ -47,7 +48,12 @@ describe("findIsolationProblems", () => {
   });
 
   test("the two lists of exceptions hold exactly what this change needs", () => {
-    expect(Object.keys(UNSCOPED_TABLES)).toEqual(["channel_routes", "schema_migrations"]);
+    expect(Object.keys(UNSCOPED_TABLES)).toEqual([
+      "channel_routes",
+      "schema_migrations",
+      "worker_heartbeats",
+    ]);
+    expect(Object.keys(APP_INSERT_ONLY_TABLES)).toEqual(["jobs"]);
     expect(Object.keys(DEFINER_FUNCTIONS)).toEqual(["channel_routes_sync()"]);
   });
 
@@ -197,7 +203,42 @@ describe("findIsolationProblems", () => {
     [
       "an unscoped table that no longer exists",
       "DROP TABLE channel_routes",
-      ["table channel_routes: is on the list of unscoped tables but does not exist"],
+      ["table channel_routes: is on a list of exceptions but does not exist"],
+    ],
+    [
+      "the jobs table readable by the application role",
+      "GRANT SELECT ON jobs TO psa_app",
+      ["table jobs: psa_app may do more than add rows to it"],
+    ],
+    [
+      "one column of the jobs table readable by the application role",
+      "GRANT SELECT (payload) ON jobs TO psa_app",
+      ["table jobs: psa_app may do more than add rows to it"],
+    ],
+    [
+      "the jobs table open to inserts for any tenant",
+      `DROP POLICY tenant_insert ON jobs;
+       CREATE POLICY tenant_insert ON jobs FOR INSERT TO psa_app WITH CHECK (true)`,
+      [
+        "table jobs: must have exactly one policy besides psa_cross's: FOR INSERT TO psa_app WITH CHECK (tenant_id = app_tenant_id())",
+      ],
+    ],
+    [
+      "a second policy on the jobs table that lets the application role read",
+      "CREATE POLICY read ON jobs FOR SELECT TO psa_app USING (true)",
+      [
+        "table jobs: must have exactly one policy besides psa_cross's: FOR INSERT TO psa_app WITH CHECK (tenant_id = app_tenant_id())",
+      ],
+    ],
+    [
+      "row-level security not forced on the jobs table",
+      "ALTER TABLE jobs NO FORCE ROW LEVEL SECURITY",
+      ["table jobs: row-level security is not enabled and forced"],
+    ],
+    [
+      "the jobs table dropped",
+      "DROP TABLE jobs",
+      ["table jobs: is on a list of exceptions but does not exist"],
     ],
     [
       "the application role allowed to create tables",

@@ -37,6 +37,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@polyglot-sales-agent/core':
+        specifier: workspace:*
+        version: link:../core
       pg:
         specifier: 8.23.1
         version: 8.23.1

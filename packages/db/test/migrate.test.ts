@@ -190,8 +190,8 @@ describe("the migration runner, against PostgreSQL", () => {
   test("a record with a gap is refused, for status, up and down", async () => {
     await client.query("BEGIN");
     try {
-      await client.query("UPDATE schema_migrations SET version = version + 1");
-      const message = "the record has version 2 where 1 was expected";
+      await client.query("UPDATE schema_migrations SET version = version + 100");
+      const message = "the record has version 101 where 1 was expected";
       await expect(migrationStatus(client, project)).rejects.toThrow(message);
       await expect(migrateUp(client, project)).rejects.toThrow(message);
       await expect(migrateDown(client, project)).rejects.toThrow(message);
