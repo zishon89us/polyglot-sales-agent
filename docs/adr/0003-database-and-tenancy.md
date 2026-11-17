@@ -179,7 +179,9 @@ reach is visible in the migrations.
 - It does not judge which table privileges each role holds. A test compares
   those with a fixed list, so widening one is a visible change to that list.
 - The bootstrap step sends each role's password as a SCRAM verifier, so the
-  password is not in the statement text or the server's log.
+  password is not in the statement text or the server's log. A password
+  must be printable ASCII; others are refused, because the server prepares
+  them by rules the step does not implement.
 - `withTenant` refuses a pool that does not connect as `psa_app`, refuses a
   query through a handle whose transaction has ended, rejects when the
   transaction was rolled back although the work returned, and clears a

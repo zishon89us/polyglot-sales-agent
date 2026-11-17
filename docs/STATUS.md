@@ -151,7 +151,7 @@ M0 Inception met its exit criteria on 2026-11-16; see
   three database roles, a migration runner with up and down steps, the
   first migration (six tenant-owned tables and the routing table, with the
   skeleton's columns only), `withTenant`, and a check that reads the
-  database's catalogue for known ways of weakening isolation. 111 tests run
+  database's catalogue for known ways of weakening isolation. Tests run
   against PostgreSQL 16.15: as one tenant, reads return none of another
   tenant's rows and writes change none, in every table; the application
   role is refused eighteen ways of going around the policies; a table added
@@ -163,12 +163,14 @@ M0 Inception met its exit criteria on 2026-11-16; see
   the query builder is not chosen, and key rotation (#162) waits for stored
   credentials; all in #279. The code review found 17 defects, one High: a
   query handle kept after its transaction ran in the next tenant's
-  transaction. That and most of the others are fixed; what is not is in
-  #279.
+  transaction. **#280 was merged before that review was in**, so the fixes
+  are a second pull request, #281: that defect and most of the others,
+  then four Medium ones a verifier found in the fixes. 119 database tests
+  now. What is not fixed is in #279.
 
 ## Next
 
-1. Maintainer reviews and merges U4 (#265).
+1. Maintainer reviews and merges the U4 fixes (#281), which close #265.
 2. M2 unit U5: jobs, the conversation lease and worker health (#266).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a

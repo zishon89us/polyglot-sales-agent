@@ -5,7 +5,7 @@ Links each v1.0 user story to its issue, the pull requests that implement it, it
 | Story | Issue | Milestone | Pull requests | Tests | Eval cases |
 | --- | --- | --- | --- | --- | --- |
 | US-C1 Receive every inbound message exactly once | [#10](https://github.com/zishon89us/polyglot-sales-agent/issues/10) | M2 |  |  | not applicable |
-| US-C2 Keep each business's data separate | [#11](https://github.com/zishon89us/polyglot-sales-agent/issues/11) | M2 | #280 (in part) | `packages/db/test/isolation.test.ts`: criterion 2, at the database. Criteria 1 and 3 need the webhook and the API | not applicable |
+| US-C2 Keep each business's data separate | [#11](https://github.com/zishon89us/polyglot-sales-agent/issues/11) | M2 | #280, #281 (in part) | `packages/db/test/isolation.test.ts`: criterion 2, at the database. Criteria 1 and 3 need the webhook and the API | not applicable |
 | US-C3 Reply in the customer's language | [#12](https://github.com/zishon89us/polyglot-sales-agent/issues/12) | M3 |  |  |  |
 | US-C4 Answer only from the business's data | [#13](https://github.com/zishon89us/polyglot-sales-agent/issues/13) | M3 |  |  |  |
 | US-C5 Tell customers they are talking to an assistant | [#14](https://github.com/zishon89us/polyglot-sales-agent/issues/14) | M3 |  |  |  |

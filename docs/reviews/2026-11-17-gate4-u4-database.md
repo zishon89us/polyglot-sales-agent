@@ -46,8 +46,9 @@ server to attack. It was asked for no preamble and at most 70 lines.
 ## Author's response
 
 Added on 2026-11-17 by the agent that wrote the change. The report above is
-unedited. The High finding is accepted. After the fixes there are 111
-database tests, 153 in all.
+unedited. The High finding is accepted. After the fixes there were 111
+database tests, 153 in all. A verification of these fixes found more; see
+`2026-11-17-gate4-u4-verification.md`.
 
 | Finding | Response |
 | --- | --- |
