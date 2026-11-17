@@ -216,8 +216,9 @@ export async function sqlState(attempt: Promise<unknown>): Promise<string> {
 export async function schemaFingerprint(client: pg.Client): Promise<string> {
   const result = await client.query<{ fingerprint: string }>(`
     SELECT jsonb_build_object(
-      'columns', (SELECT jsonb_agg(to_jsonb(c) ORDER BY c.table_name, c.ordinal_position) FROM (
-          SELECT table_name, ordinal_position, column_name, data_type, is_nullable, column_default
+      -- Not the position of a column: one dropped and added again gets a new position.
+      'columns', (SELECT jsonb_agg(to_jsonb(c) ORDER BY c.table_name, c.column_name) FROM (
+          SELECT table_name, column_name, data_type, is_nullable, column_default
           FROM information_schema.columns
           WHERE table_schema = 'public' AND table_name <> 'schema_migrations') c),
       'constraints', (SELECT jsonb_agg(x ORDER BY x) FROM (
@@ -237,6 +238,10 @@ export async function schemaFingerprint(client: pg.Client): Promise<string> {
           SELECT table_name || ' ' || grantee || ' ' || privilege_type AS x
           FROM information_schema.role_table_grants
           WHERE table_schema = 'public' AND table_name <> 'schema_migrations') g),
+      'column grants', (SELECT jsonb_agg(x ORDER BY x) FROM (
+          SELECT attrelid::regclass::text || '.' || attname || ' ' || attacl::text AS x
+          FROM pg_attribute WHERE attacl IS NOT NULL AND attrelid IN
+            (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)) a),
       'functions', (SELECT jsonb_agg(x ORDER BY x) FROM (
           SELECT pg_get_functiondef(oid) || coalesce(proacl::text, '') AS x FROM pg_proc
           WHERE pronamespace = 'public'::regnamespace) f),

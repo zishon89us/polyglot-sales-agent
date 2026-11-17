@@ -19,11 +19,11 @@ export const UNSCOPED_TABLES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Tables the application role may add rows to, for its transaction's tenant
- * only, and may not read or change. Each with the reason.
+ * Tables with a policy set of their own, each with the reason. What the
+ * application role may do on each is spelled out in `policy-check.ts`.
  */
-export const APP_INSERT_ONLY_TABLES: Readonly<Record<string, string>> = {
-  jobs: "a job is queued in the transaction that stores its message; a worker claims it before the tenant is known",
+export const SPECIAL_TABLES: Readonly<Record<string, string>> = {
+  jobs: "a worker claims a job before the tenant is known; the application role may add a job for its tenant, see which exist and cancel a queued one, and may not read what they hold",
 };
 
 /**

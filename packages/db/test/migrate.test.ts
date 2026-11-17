@@ -127,6 +127,27 @@ describe("the migration runner, against PostgreSQL", () => {
     expect(await schemaFingerprint(client)).toBe(before);
   });
 
+  test("each down step reverses its own up step, one migration at a time", async () => {
+    // Going all the way down would hide a down step that leaves something
+    // behind which an earlier down step happens to remove.
+    const level: string[] = [];
+    level[project.length] = await schemaFingerprint(client);
+    for (let applied = project.length - 1; applied >= 0; applied -= 1) {
+      await migrateDown(client, project);
+      level[applied] = await schemaFingerprint(client);
+    }
+    for (let applied = 1; applied <= project.length; applied += 1) {
+      await migrateUp(client, project.slice(0, applied));
+      expect(await schemaFingerprint(client), `after applying ${applied}`).toBe(level[applied]);
+      if (applied < project.length) {
+        // Up one more and down again must come back to the same place.
+        await migrateUp(client, project.slice(0, applied + 1));
+        await migrateDown(client, project.slice(0, applied + 1));
+        expect(await schemaFingerprint(client), `down from ${applied + 1}`).toBe(level[applied]);
+      }
+    }
+  });
+
   test("a migration that fails part-way leaves nothing behind and is not recorded", async () => {
     const next = String(project.length + 1).padStart(4, "0");
     const files: Record<string, string> = {

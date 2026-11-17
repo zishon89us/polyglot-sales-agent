@@ -11,12 +11,12 @@
 
 import type pg from "pg";
 import {
-  APP_INSERT_ONLY_TABLES,
   APP_ROLE,
   CROSS_ROLE,
   DEFINER_FUNCTIONS,
   MIGRATE_ROLE,
   ROLES,
+  SPECIAL_TABLES,
   UNSCOPED_TABLES,
 } from "./roles.ts";
 
@@ -29,7 +29,6 @@ interface TableRow {
   tenant_column_not_null: boolean | null;
   app_truncate: boolean;
   app_any: boolean;
-  app_beyond_insert: boolean;
 }
 
 interface PolicyRow {
@@ -41,6 +40,25 @@ interface PolicyRow {
   qual: string | null;
   with_check: string | null;
 }
+
+/**
+ * What the application role may do on each special table: its policies, as
+ * the catalogue prints them, and the columns it may read and set. It may
+ * change none.
+ */
+const SPECIAL: Readonly<
+  Record<string, { policies: readonly string[]; read: string; insert: string }>
+> = {
+  jobs: {
+    policies: [
+      "INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text))",
+      "SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null",
+      "DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+    ],
+    read: "id, state, subject_id, tenant_id, type",
+    insert: "payload, run_at, subject_id, tenant_id, type",
+  },
+};
 
 /** The column that holds the tenant: its own `id` for `tenants`, `tenant_id` elsewhere. */
 export function tenantColumn(table: string): string {
@@ -55,7 +73,7 @@ export async function tenantOwnedTables(client: pg.ClientBase): Promise<string[]
   );
   return result.rows
     .map((row) => row.name)
-    .filter((name) => !(name in UNSCOPED_TABLES) && !(name in APP_INSERT_ONLY_TABLES));
+    .filter((name) => !(name in UNSCOPED_TABLES) && !(name in SPECIAL_TABLES));
 }
 
 async function tableProblems(client: pg.ClientBase): Promise<string[]> {
@@ -68,9 +86,7 @@ async function tableProblems(client: pg.ClientBase): Promise<string[]> {
             ) AS tenant_column_not_null,
             has_table_privilege($1, c.oid, 'TRUNCATE') AS app_truncate,
             (has_table_privilege($1, c.oid, 'SELECT, INSERT, UPDATE, DELETE')
-              OR has_any_column_privilege($1, c.oid, 'SELECT, INSERT, UPDATE')) AS app_any,
-            (has_table_privilege($1, c.oid, 'SELECT, UPDATE, DELETE')
-              OR has_any_column_privilege($1, c.oid, 'SELECT, UPDATE')) AS app_beyond_insert
+              OR has_any_column_privilege($1, c.oid, 'SELECT, INSERT, UPDATE')) AS app_any
      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
        AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
@@ -109,27 +125,53 @@ async function tableProblems(client: pg.ClientBase): Promise<string[]> {
       continue;
     }
     const policiesOf = policies.rows.filter((row) => row.tablename === table.name);
-    if (table.name in APP_INSERT_ONLY_TABLES) {
-      const check = "(tenant_id = app_tenant_id())";
-      const forApp = policiesOf.filter((row) => row.roles.join(",") !== CROSS_ROLE);
-      const only = forApp[0];
+    const special = SPECIAL[table.name];
+    if (table.name in SPECIAL_TABLES) {
+      if (special === undefined) {
+        problems.push(
+          `${where}: is on the list of special tables but the check has no rules for it`,
+        );
+        continue;
+      }
       if (!table.rls || !table.forced) {
         problems.push(`${where}: row-level security is not enabled and forced`);
       }
-      if (table.app_beyond_insert) {
-        problems.push(`${where}: ${APP_ROLE} may do more than add rows to it`);
-      }
-      if (
-        forApp.length !== 1 ||
-        only === undefined ||
-        only.roles.join(",") !== APP_ROLE ||
-        only.permissive !== "PERMISSIVE" ||
-        only.cmd !== "INSERT" ||
-        plain(only.with_check) !== check
-      ) {
+      const forApp = policiesOf.filter((row) => row.roles.join(",") !== CROSS_ROLE);
+      const found = forApp
+        .map((row) =>
+          row.roles.join(",") === APP_ROLE && row.permissive === "PERMISSIVE"
+            ? `${row.cmd} USING ${plain(row.qual)} WITH CHECK ${plain(row.with_check)}`
+            : `${row.policyname}, which is not a plain policy for ${APP_ROLE} alone`,
+        )
+        .sort();
+      if (JSON.stringify(found) !== JSON.stringify([...special.policies].sort())) {
         problems.push(
-          `${where}: must have exactly one policy besides ${CROSS_ROLE}'s: FOR INSERT TO ${APP_ROLE} WITH CHECK ${check}`,
+          `${where}: its policies besides ${CROSS_ROLE}'s must be exactly: ${special.policies.join("; ")}`,
         );
+      }
+      const columns = await client.query<{ name: string; r: boolean; i: boolean; u: boolean }>(
+        `SELECT a.attname AS name,
+                has_column_privilege($1, a.attrelid, a.attnum, 'SELECT') AS r,
+                has_column_privilege($1, a.attrelid, a.attnum, 'INSERT') AS i,
+                has_column_privilege($1, a.attrelid, a.attnum, 'UPDATE') AS u
+         FROM pg_attribute a
+         WHERE a.attrelid = format('public.%I', $2::text)::regclass AND a.attnum > 0
+           AND NOT a.attisdropped ORDER BY 1`,
+        [APP_ROLE, table.name],
+      );
+      const list = (key: "r" | "i" | "u"): string =>
+        columns.rows
+          .filter((row) => row[key])
+          .map((row) => row.name)
+          .join(", ");
+      if (list("r") !== special.read) {
+        problems.push(`${where}: ${APP_ROLE} may read (${list("r")}), expected (${special.read})`);
+      }
+      if (list("i") !== special.insert) {
+        problems.push(`${where}: ${APP_ROLE} may set (${list("i")}), expected (${special.insert})`);
+      }
+      if (list("u") !== "") {
+        problems.push(`${where}: ${APP_ROLE} may change (${list("u")}), expected nothing`);
       }
       continue;
     }
@@ -169,7 +211,7 @@ async function tableProblems(client: pg.ClientBase): Promise<string[]> {
       problems.push(`${where}: has ${appPolicies} policies for ${APP_ROLE}, expected exactly 1`);
     }
   }
-  for (const name of [...Object.keys(UNSCOPED_TABLES), ...Object.keys(APP_INSERT_ONLY_TABLES)]) {
+  for (const name of [...Object.keys(UNSCOPED_TABLES), ...Object.keys(SPECIAL_TABLES)]) {
     if (!seen.has(name)) {
       problems.push(`table ${name}: is on a list of exceptions but does not exist`);
     }

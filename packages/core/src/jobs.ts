@@ -24,6 +24,12 @@ export const JOB_FIRST_RETRY_MS = 2_000;
  */
 export const JOB_CLAIM_MS = 5 * 60_000;
 
+/** How long one run of a handler may take before it is failed. Less than the claim, so the failure is recorded while the job is still this worker's. */
+export const JOB_HANDLER_TIMEOUT_MS = JOB_CLAIM_MS - 60_000;
+
+/** A job type is a plain lower-case name, so it can never carry data. */
+export const JOB_TYPE = /^[a-z][a-z0-9-]{0,39}$/;
+
 /** How long a conversation lease lasts unless renewed (ADR 0004). */
 export const LEASE_MS = 2 * 60_000;
 
@@ -60,13 +66,18 @@ const KEY = /^[a-z][A-Za-z]*Id$/;
  * Returns the problems found; none means the payload is acceptable.
  */
 export function payloadProblems(payload: unknown): string[] {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    return ["the payload is not an object"];
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Object.getPrototypeOf(payload) !== Object.prototype
+  ) {
+    return ["the payload is not a plain object"];
   }
   const problems: string[] = [];
   for (const [key, value] of Object.entries(payload)) {
     if (!KEY.test(key)) {
-      problems.push(`key "${key}" does not name an identifier (it must end in Id)`);
+      // The key is not shown either: data can be put in a key.
+      problems.push("a key does not name an identifier (it must be letters ending in Id)");
     } else if (typeof value !== "string" || !UUID.test(value)) {
       // The value is not shown: it may be the very thing that must not be stored.
       problems.push(`the value of "${key}" is not a UUID`);
@@ -77,20 +88,25 @@ export function payloadProblems(payload: unknown): string[] {
 
 /**
  * What to record when a job fails: a short code, never the message, which
- * can carry customer text. The error's own `code` if it looks like one,
- * otherwise the name of its class.
+ * can carry customer text. The error's own `code` if it is a plain name or
+ * a five-character SQLSTATE, otherwise the name of its class if that is
+ * letters only, otherwise "unknown". Digits are allowed only in a SQLSTATE,
+ * so that a number cannot ride along. Never throws.
  */
 export function errorCode(error: unknown): string {
-  const safe = /^[A-Za-z0-9_.-]{1,64}$/;
-  if (typeof error === "object" && error !== null) {
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === "string" && safe.test(code)) {
-      return code;
+  try {
+    if (typeof error === "object" && error !== null) {
+      const code = (error as { code?: unknown }).code;
+      if (typeof code === "string" && /^([A-Za-z][A-Za-z_-]{0,39}|[0-9A-Z]{5})$/.test(code)) {
+        return code;
+      }
+      const name = (error as { constructor?: { name?: unknown } }).constructor?.name;
+      if (typeof name === "string" && /^[A-Za-z]{1,40}$/.test(name)) {
+        return name;
+      }
     }
-    const name = (error as { constructor?: { name?: unknown } }).constructor?.name;
-    if (typeof name === "string" && safe.test(name)) {
-      return name;
-    }
+  } catch {
+    // A getter or a proxy that throws: fall through.
   }
   return "unknown";
 }

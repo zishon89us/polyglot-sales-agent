@@ -103,9 +103,18 @@ describe("taking the lease", () => {
     expect(await take(T0, b, b.conversationId)).toBeDefined();
   });
 
+  test("a conversation that does not exist is a fault, not a busy conversation", async () => {
+    await expect(take(T0, a, "0b7e3c1a-5d2f-4e8a-9c41-6f0a2d9b8e77")).rejects.toMatchObject({
+      code: "conversation-not-found",
+    });
+  });
+
   test("another tenant cannot take, check or release a conversation's lease", async () => {
     const token = (await take(T0)) as string;
-    expect(await take(after(LEASE_MS), b, a.conversationId)).toBeUndefined();
+    // To tenant B the conversation does not exist, whether or not it is leased.
+    await expect(take(after(LEASE_MS), b, a.conversationId)).rejects.toMatchObject({
+      code: "conversation-not-found",
+    });
     const asB = await withTenant(app, b.tenantId, async (tx) => {
       const holds = await holdsLease(tx, a.conversationId, token);
       await releaseLease(tx, a.conversationId, token);
@@ -175,7 +184,7 @@ describe("storing a result", () => {
     expect(await storeResult(token, "slow but alone")).toBe("stored");
   });
 
-  test("while a result is being stored, no other worker can take the lease", async () => {
+  test("while a result is being stored, no other worker can take the lease, and a new message is not held up", async () => {
     const token = (await take(T0)) as string;
     let finish: () => void = () => undefined;
     const storing = new Promise<void>((resolve) => {
@@ -191,16 +200,49 @@ describe("storing a result", () => {
       await storing;
       return holds;
     });
-    await hasChecked;
     let taken: string | undefined | "pending" = "pending";
-    const taking = take(after(LEASE_MS)).then((result) => {
-      taken = result;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(taken, "the take must wait for the store to finish").toBe("pending");
-    finish();
+    let taking: Promise<void> = Promise.resolve();
+    try {
+      await hasChecked;
+      taking = take(after(LEASE_MS)).then((result) => {
+        taken = result;
+      });
+      // A webhook storing a new message for the same conversation goes straight through.
+      const started = Date.now();
+      await withTenant(app, a.tenantId, (tx) =>
+        tx.query(
+          `INSERT INTO messages (tenant_id, conversation_id, direction, kind)
+           VALUES ($1, $2, 'inbound', 'text')`,
+          [a.tenantId, a.conversationId],
+        ),
+      );
+      expect(Date.now() - started, "the message insert must not wait for the store").toBeLessThan(
+        250,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(taken, "the take must wait for the store to finish").toBe("pending");
+    } finally {
+      // Always let the store end, or its connection would keep the test database alive.
+      finish();
+    }
     expect(await store).toBe(true);
     await taking;
     expect(taken, "and then succeeds, the lease having expired").toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("with no time passed in, the database's clock decides: a fresh lease is live for two minutes", async () => {
+    const token = await withTenant(app, a.tenantId, (tx) => takeLease(tx, a.conversationId));
+    expect(token).toBeDefined();
+    expect(
+      await withTenant(app, a.tenantId, (tx) => takeLease(tx, a.conversationId)),
+      "a second take a moment later is refused",
+    ).toBeUndefined();
+    const left = await withTenant(app, a.tenantId, (tx) =>
+      tx.query<{ seconds: number }>(
+        "SELECT extract(epoch FROM lease_expires_at - now())::float AS seconds FROM conversations",
+      ),
+    );
+    expect(left.rows[0]?.seconds).toBeGreaterThan(LEASE_MS / 1000 - 5);
+    expect(left.rows[0]?.seconds).toBeLessThanOrEqual(LEASE_MS / 1000);
   });
 });
