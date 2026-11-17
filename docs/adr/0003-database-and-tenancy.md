@@ -117,3 +117,86 @@ fires parallel bookings at one slot and checks invariant B1.
 - Risk R-T5's mitigation refers to this record.
 - Reopen if a tenant needs data held in a different region from the others;
   see ADR 0009.
+
+## Amendment, 2026-11-17: as built in M2 unit U4
+
+Made while building the database (issue #265). It corrects two statements
+above that the Gate 2 review found wrong (finding S22, #191) and records how
+the decision was carried out. The decision itself is unchanged.
+
+**Corrections.**
+
+- "Specifics" says the cross-tenant role is "used only by migrations and by
+  clearly named operator jobs". That was wrong twice. Migrations have a role
+  of their own. And the cross-tenant role is also used on ordinary request
+  paths, for the lookups that must happen before a tenant is known: routing
+  a webhook, authenticating a request, starting a sign-in, and claiming a
+  job (`docs/design/data-model.md`, "Access before the tenant is known").
+- "Confirmation" says a test enumerates "every table with a `tenant_id`
+  column". That rule fails on tables that carry the column without a policy
+  on purpose, and misses `tenants`, which has no such column. The rule as
+  built: **every table in the `public` schema must be tenant-scoped unless
+  it is on an explicit list**, `UNSCOPED_TABLES` in
+  `packages/db/src/roles.ts`, where each entry gives its reason.
+
+**Three roles** (#162), created by a bootstrap step that needs the server's
+administrator; nothing after it does.
+
+| Role | Used for | What it can do |
+| --- | --- | --- |
+| `psa_migrate` | Migrations | Owns the schema. Row-level security is forced, and it has no policy, so it reads no rows of tenant-owned tables |
+| `psa_app` | The application | Reads and writes the rows of the transaction's tenant, within the privileges granted per table. Cannot create, alter or truncate anything, and cannot update or delete audit entries |
+| `psa_cross` | Lookups and jobs that cross tenants by design | Sees every tenant's rows, in the tables it has been granted. Today: `tenants`, `channel_accounts`, `channel_routes` |
+
+None of the three is a superuser or has the attribute that bypasses
+row-level security. The cross-tenant role sees all rows through a policy of
+its own on each table, so no special attribute is needed and what it may
+reach is visible in the migrations.
+
+**How isolation is carried.**
+
+- Each tenant-owned table has row-level security enabled and forced, and
+  one policy for `psa_app`: the row's tenant must equal
+  `app_tenant_id()`, for reads and for writes.
+- `app_tenant_id()` reads a setting that `withTenant`
+  (`packages/db/src/tenant.ts`) makes for one transaction. With no tenant
+  set it is null, so every policy fails and no row is visible.
+- Foreign keys between tenant-owned tables include `tenant_id`. A
+  foreign-key check is not subject to row-level security, so without this a
+  row could point at another tenant's row.
+- `channel_routes` is written only by a trigger on `channel_accounts`, so
+  the two cannot disagree. No role may write it directly.
+- `findIsolationProblems` (`packages/db/src/policy-check.ts`) reads the
+  database's catalogue and reports a table without the policy, a policy that
+  admits more, a privilege that goes around the policies, and a role with
+  more power than above. `make db-setup` runs it, and the tests run it.
+
+**What this does not do.**
+
+- The policies stop a query that forgot its filter. They do not stop SQL
+  text that sets the tenant itself: the application role may set the
+  setting, because that is how `withTenant` works. Query text must never be
+  built from outside input (threat T33); nothing enforces that yet (#279).
+- `withTenant` sets the tenant it is given. Whether the caller may act for
+  that tenant is decided before it, by the session or the webhook route.
+- The typed query builder named in "Specifics" is not chosen yet.
+  `withTenant` hands out a plain query function; the builder is chosen in
+  the first unit that writes real queries (#279).
+- Of "Confirmation", the three M2 tests exist. The concurrency test for
+  invariant B1 is M5's.
+
+**Dependencies added**, on 2026-11-17, versions pinned exactly. `pnpm audit`
+reported no known vulnerabilities after adding them.
+
+| Package | Version | Licence | Last published | Why this one | Considered instead |
+| --- | --- | --- | --- | --- | --- |
+| pg | 8.23.1 | MIT | 2026-09-30 | The long-established PostgreSQL driver for Node.js; supports the pooled, transaction-scoped use this record needs | `postgres` (porsager): a newer driver with a different pooling model, which sets per-transaction state less directly |
+| @types/pg | 8.23.1 | MIT | 2026-10-04 | Types for the driver | — |
+
+The driver brings thirteen packages of its own, all MIT or ISC:
+pg-cloudflare, pg-connection-string, pg-int8, pg-pool, pg-protocol,
+pg-types, pgpass, postgres-array, postgres-bytea, postgres-date,
+postgres-interval, split2 and xtend. Their maintenance was not looked at
+one by one.
+
+The tests ran against PostgreSQL 16.15. No other version was tried.

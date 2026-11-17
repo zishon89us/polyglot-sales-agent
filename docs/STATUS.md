@@ -147,11 +147,24 @@ M0 Inception met its exit criteria on 2026-11-16; see
   two High: the generator restated the lists unchecked, and the shortfall
   against the plan was not stated.
 
+- 2026-11-17 — U3 merged as #277. M2 unit U4 (#265): `packages/db`, with
+  three database roles, a migration runner with up and down steps, the
+  first migration (six tenant-owned tables and the routing table, with the
+  skeleton's columns only), `withTenant`, and a check that reads the
+  database's catalogue for anything that weakens isolation. 81 tests run
+  against PostgreSQL 16.15: as one tenant, no table gives up or accepts a
+  change to another tenant's rows; the application role cannot go around
+  the policies; a table added without its policy fails the check. Building
+  it corrected ADR 0003 in two places (#191) and found that foreign keys
+  and uniqueness rules ignore row-level security, so they now carry the
+  tenant. Not done or not shown: `docker compose` was never started here,
+  the query builder is not chosen, and key rotation (#162) waits for stored
+  credentials; all in #279.
+
 ## Next
 
-1. Maintainer reviews and merges U3 (#264).
-2. M2 unit U4: database, roles and tenant isolation (#265). It needs a
-   PostgreSQL the agent's environment can run; that is checked first.
+1. Maintainer reviews and merges U4 (#265).
+2. M2 unit U5: jobs, the conversation lease and worker health (#266).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
@@ -216,8 +229,7 @@ v1.1.
 - GitHub project board (Backlog, Ready, In progress, In review, Done). The
   agent's session cannot create GitHub Projects; tracked in #6's follow-up
   comment for the maintainer.
-- `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `Makefile` — arrive with the tooling
-  in M2, when there is something for them to describe.
+- `CODE_OF_CONDUCT.md` and `CHANGELOG.md`.
 
 ## Open questions
 

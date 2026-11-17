@@ -78,5 +78,13 @@ merging it, so update a branch that is behind `main` before it is merged.
   the guardrail policy. It does not find every mention: the same names
   also appear in prose and in other tables, listed in #278. Model flags,
   settings and their units, and several other lists are not defined yet.
+- **Database tests** need a PostgreSQL 16 server. `make db-up` starts one in
+  Docker; any server works if `PSA_TEST_ADMIN_URL` in `.env` points at it.
+  Each test file creates a database, prepares it the way a real one is
+  prepared, and drops it. They check that the application role reads and
+  writes nothing of another tenant in any table, that it cannot go around
+  the policies, and that the isolation check fails when a table is added
+  without its policy. They show isolation holds for the attempts they make,
+  not that no other attempt exists; what is known to be open is in #279.
 - **Commit messages** on your branch are linted against `AGENTS.md` section
   4. The 72-character limit applies to the whole first line.
