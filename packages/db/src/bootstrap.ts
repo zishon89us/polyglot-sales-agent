@@ -15,8 +15,13 @@ export type RolePasswords = Readonly<Record<Role, string>>;
  * statement fails or statement logging is on.
  */
 export function scramVerifier(password: string, salt: Buffer = randomBytes(16)): string {
+  // The server and the driver prepare other characters by rules this does
+  // not implement, and a verifier made differently would lock the role out.
+  if (!/^[\x20-\x7e]+$/.test(password)) {
+    throw new Error("bootstrap: a role password must be printable ASCII and not empty");
+  }
   const iterations = 4096;
-  const salted = pbkdf2Sync(password.normalize("NFKC"), salt, iterations, 32, "sha256");
+  const salted = pbkdf2Sync(password, salt, iterations, 32, "sha256");
   const clientKey = createHmac("sha256", salted).update("Client Key").digest();
   const storedKey = createHash("sha256").update(clientKey).digest("base64");
   const serverKey = createHmac("sha256", salted).update("Server Key").digest("base64");
@@ -37,20 +42,21 @@ const BOOTSTRAP_LOCK = 4_815_162_342;
  * keeps two runs apart is per database.
  */
 export async function ensureRoles(admin: pg.Client, passwords: RolePasswords): Promise<void> {
+  const verifiers = new Map<Role, string>();
   for (const role of ROLES) {
     if (passwords[role] === "") {
       throw new Error(`bootstrap: the password for ${role} is empty`);
     }
+    verifiers.set(role, scramVerifier(passwords[role]));
   }
   await admin.query("SELECT pg_advisory_lock($1)", [BOOTSTRAP_LOCK]);
   try {
     for (const role of ROLES) {
-      const password = passwords[role];
       const exists = await admin.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [role]);
       const name = admin.escapeIdentifier(role);
       await admin.query(`${exists.rowCount === 0 ? "CREATE" : "ALTER"} ROLE ${name} LOGIN
         NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT
-        PASSWORD ${admin.escapeLiteral(scramVerifier(password))}`);
+        PASSWORD ${admin.escapeLiteral(verifiers.get(role) as string)}`);
     }
   } finally {
     await admin.query("SELECT pg_advisory_unlock($1)", [BOOTSTRAP_LOCK]);

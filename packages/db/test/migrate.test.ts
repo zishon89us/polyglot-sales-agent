@@ -64,6 +64,14 @@ describe("loadMigrations", () => {
       { "0001_a.up.sql": "", "0001_a.down.sql": "  rollback ;" },
       '"0001_a.down.sql" must not end or start a transaction itself',
     ],
+    [
+      { "0001_a.up.sql": "SELECT 1; COMMIT;", "0001_a.down.sql": "" },
+      '"0001_a.up.sql" must not end or start a transaction itself',
+    ],
+    [
+      { "0001_a.up.sql": "CREATE TABLE t ();\nABORT;", "0001_a.down.sql": "" },
+      '"0001_a.up.sql" must not end or start a transaction itself',
+    ],
   ])("refuses a directory it cannot order: %j", (files, message) => {
     expect(() => loadMigrations(directory(files))).toThrow(message);
   });
@@ -144,22 +152,38 @@ describe("the migration runner, against PostgreSQL", () => {
     await expect(migrateUp(client, [])).rejects.toThrow("version 1 is applied but has no file");
   });
 
-  test("a step that ends its own transaction is reported, not recorded", async () => {
-    // The loader refuses a line that starts with COMMIT. This is the runner's
-    // own guard, for one in the middle of a line.
+  // The loader refuses COMMIT, ROLLBACK and ABORT but cannot refuse END,
+  // which function bodies use. These are the runner's own guard.
+  test.each([
+    ["commits and goes on", "CREATE TABLE half_kept (id integer); END; SELECT 1;", ["half_kept"]],
+    [
+      "rolls back and goes on",
+      "CREATE TABLE lost (id integer); END; BEGIN; CREATE TABLE half_kept (id integer); END; BEGIN; SELECT 1;",
+      ["half_kept", "lost"],
+    ],
+  ])("a step that %s is reported and not recorded", async (_what, up, tables) => {
+    const sneaky = { version: project.length + 1, name: "sneaky", up, down: "", checksum: "1" };
+    await expect(migrateUp(client, [...project, sneaky])).rejects.toThrow(
+      "the step ended its own transaction, so the database may hold part of it and it is not recorded",
+    );
+    expect(await migrationStatus(client, project)).toEqual({
+      applied: project.map((migration) => migration.name),
+      pending: [],
+    });
+    await client.query(`DROP TABLE ${tables.join(", ")}`);
+  });
+
+  test("a step that ends its transaction and then fails says both", async () => {
     const sneaky = {
       version: project.length + 1,
       name: "sneaky",
-      up: "CREATE TABLE half_kept (id integer); COMMIT; BEGIN; SELECT 1;",
-      down: "DROP TABLE half_kept;",
-      checksum: "1".repeat(64),
+      up: "CREATE TABLE half_kept (id integer); END; SELECT 1 / 0;",
+      down: "",
+      checksum: "1",
     };
     await expect(migrateUp(client, [...project, sneaky])).rejects.toThrow(
-      "the step ended its own transaction",
+      /the step ended its own transaction.*It then failed: division by zero/,
     );
-    expect((await migrationStatus(client, project)).pending).toEqual([]);
-    const kept = await client.query("SELECT to_regclass('public.half_kept') AS oid");
-    expect(kept.rows[0]?.oid, "the part before COMMIT stays; the error says so").not.toBeNull();
     await client.query("DROP TABLE half_kept");
   });
 

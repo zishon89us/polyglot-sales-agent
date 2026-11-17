@@ -18,10 +18,10 @@ export const UNSCOPED_TABLES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Functions that run with their owner's rights, each with the reason. Such a
+ * Functions that run with their owner's rights, by signature, each with the reason. Such a
  * function is not subject to the caller's privileges, so each one is a
  * deliberate exception.
  */
 export const DEFINER_FUNCTIONS: Readonly<Record<string, string>> = {
-  channel_routes_sync: "the trigger that keeps channel_routes equal to channel_accounts",
+  "channel_routes_sync()": "the trigger that keeps channel_routes equal to channel_accounts",
 };

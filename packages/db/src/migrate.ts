@@ -40,7 +40,10 @@ export function loadMigrations(directory: string): Migration[] {
     }
     const text = readFileSync(join(directory, file), "utf8");
     // Each step runs in a transaction the runner opens and commits.
-    if (/^\s*(COMMIT|ROLLBACK|START\s+TRANSACTION)\b/im.test(text)) {
+    // END is not refused: function bodies use it. The runner's own guard catches it.
+    if (
+      /(^|;)\s*(COMMIT|ROLLBACK|ABORT|START\s+TRANSACTION|PREPARE\s+TRANSACTION)\b/im.test(text)
+    ) {
       throw new Error(`migrations: "${file}" must not end or start a transaction itself`);
     }
     entry[step] = text;
@@ -147,25 +150,51 @@ async function locked<T>(
   }
 }
 
-async function transactionId(client: pg.Client): Promise<string> {
-  const result = await client.query<{ id: string }>("SELECT pg_current_xact_id()::text AS id");
-  return result.rows[0]?.id as string;
+/** The current transaction, or undefined when it has failed and nothing more can run in it. */
+async function transactionId(client: pg.Client): Promise<string | undefined> {
+  try {
+    const result = await client.query<{ id: string }>("SELECT pg_current_xact_id()::text AS id");
+    return result.rows[0]?.id;
+  } catch {
+    return undefined;
+  }
 }
 
-async function inTransaction(client: pg.Client, work: () => Promise<void>): Promise<void> {
+const ESCAPED =
+  "the step ended its own transaction, so the database may hold part of it and it is not recorded";
+
+/**
+ * Runs one step and then its record in a single transaction. If the step's
+ * SQL ended that transaction, nothing is recorded and the error says so,
+ * whether or not the step also failed.
+ */
+async function inTransaction(
+  client: pg.Client,
+  step: string,
+  record: () => Promise<void>,
+): Promise<void> {
   await client.query("BEGIN");
+  const id = await transactionId(client);
   try {
-    const id = await transactionId(client);
-    await work();
-    // SQL that ended the transaction would leave part of a step applied and unrecorded.
+    await client.query(step);
     if ((await transactionId(client)) !== id) {
-      throw new Error(
-        "migrations: the step ended its own transaction; the database may hold part of it",
-      );
+      throw new Error(`migrations: ${ESCAPED}`);
     }
+    await record();
     await client.query("COMMIT");
   } catch (error) {
+    // A failed transaction answers nothing (undefined): it is still the one we opened.
+    const now = await transactionId(client);
     await client.query("ROLLBACK");
+    if (
+      now !== undefined &&
+      now !== id &&
+      !(error instanceof Error && error.message.includes(ESCAPED))
+    ) {
+      throw new Error(
+        `migrations: ${ESCAPED}. It then failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     throw error;
   }
 }
@@ -181,8 +210,7 @@ export function migrateUp(
     compare(rows, migrations);
     const done: string[] = [];
     for (const migration of migrations.slice(rows.length)) {
-      await inTransaction(client, async () => {
-        await client.query(migration.up);
+      await inTransaction(client, migration.up, async () => {
         await client.query(
           "INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)",
           [migration.version, migration.name, migration.checksum],
@@ -207,8 +235,7 @@ export function migrateDown(
     if (last === undefined) {
       return undefined;
     }
-    await inTransaction(client, async () => {
-      await client.query(last.down);
+    await inTransaction(client, last.down, async () => {
       await client.query("DELETE FROM schema_migrations WHERE version = $1", [last.version]);
     });
     return last.name;

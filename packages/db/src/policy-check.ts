@@ -184,6 +184,13 @@ async function roleProblems(client: pg.ClientBase): Promise<string[]> {
      SELECT 'role ' || r.rolname || ': has a setting of its own (' || array_to_string(s.setconfig, ', ') || ')'
        FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole WHERE r.rolname = ANY($2)
      UNION ALL
+     -- A default for every role, or for this database, that the policies or the roles rest on.
+     SELECT 'settings: a default for all roles or for the database sets ' || split_part(c, '=', 1)
+       FROM pg_db_role_setting s, unnest(s.setconfig) c
+       WHERE s.setrole = 0
+         AND s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
+         AND split_part(c, '=', 1) IN ('app.tenant_id', 'row_security', 'role', 'session_authorization')
+     UNION ALL
      SELECT 'table ' || c.relname || ': is owned by ' || pg_get_userbyid(c.relowner) || ', not ' || $3
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
@@ -193,9 +200,10 @@ async function roleProblems(client: pg.ClientBase): Promise<string[]> {
        FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
          AND pg_get_userbyid(p.proowner) <> $3
      UNION ALL
-     SELECT 'function ' || p.proname || ': runs with its owner''s rights and is not on the list of such functions'
-       FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prosecdef
-         AND p.proname <> ALL($4)
+     SELECT 'function ' || p.oid::regprocedure::text || ': runs with its owner''s rights and is not on the list of such functions'
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' AND p.prosecdef
+         AND NOT (n.nspname = 'public' AND p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' = ANY($4))
      UNION ALL
      SELECT 'function ' || p.proname || ': PUBLIC may execute it'
        FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace

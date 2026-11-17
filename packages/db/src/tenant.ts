@@ -47,10 +47,20 @@ export async function withTenant<T>(
   const client = await pool.connect();
   let broken: Error | undefined;
   let open = true;
+  // A connection lost while checked out emits an error event; with no
+  // listener that would end the process. The failing query still rejects.
+  const lost = (error: Error): void => {
+    broken = error;
+  };
+  client.on("error", lost);
   try {
     if (!checked.has(client)) {
-      const who = await client.query<{ name: string }>("SELECT current_user AS name");
-      if (who.rows[0]?.name !== APP_ROLE) {
+      // Both: a session that logged in as another role and switched to this
+      // one could switch back.
+      const who = await client.query<{ now: string; login: string }>(
+        "SELECT current_user AS now, session_user AS login",
+      );
+      if (who.rows[0]?.now !== APP_ROLE || who.rows[0]?.login !== APP_ROLE) {
         throw new Error(`withTenant: the pool must connect as ${APP_ROLE}`);
       }
       checked.add(client);
@@ -95,6 +105,7 @@ export async function withTenant<T>(
         broken = resetError instanceof Error ? resetError : new Error(String(resetError));
       }
     }
+    client.removeListener("error", lost);
     client.release(broken);
   }
 }

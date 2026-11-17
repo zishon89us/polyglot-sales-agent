@@ -48,7 +48,7 @@ describe("findIsolationProblems", () => {
 
   test("the two lists of exceptions hold exactly what this change needs", () => {
     expect(Object.keys(UNSCOPED_TABLES)).toEqual(["channel_routes", "schema_migrations"]);
-    expect(Object.keys(DEFINER_FUNCTIONS)).toEqual(["channel_routes_sync"]);
+    expect(Object.keys(DEFINER_FUNCTIONS)).toEqual(["channel_routes_sync()"]);
   });
 
   test("finds nothing when the reader's search path leaves out the schema", async () => {
@@ -173,7 +173,15 @@ describe("findIsolationProblems", () => {
       `CREATE FUNCTION all_routes() RETURNS SETOF channel_routes LANGUAGE sql SECURITY DEFINER
          AS 'SELECT * FROM channel_routes'`,
       [
-        "function all_routes: runs with its owner's rights and is not on the list of such functions",
+        "function all_routes(): runs with its owner's rights and is not on the list of such functions",
+      ],
+    ],
+    [
+      "a second function with a listed name, run with its owner's rights",
+      `CREATE FUNCTION channel_routes_sync(integer) RETURNS SETOF channel_routes LANGUAGE sql
+         SECURITY DEFINER AS 'SELECT * FROM channel_routes'`,
+      [
+        "function channel_routes_sync(integer): runs with its owner's rights and is not on the list of such functions",
       ],
     ],
     [
@@ -243,6 +251,17 @@ describe("findIsolationProblems, changes only the server's administrator can mak
       [
         "role psa_app: has a setting of its own (app.tenant_id=0b7e3c1a-5d2f-4e8a-9c41-6f0a2d9b8e77)",
       ],
+    ],
+    [
+      "a tenant set by default for the whole database",
+      `DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET app.tenant_id = %L', current_database(),
+         '0b7e3c1a-5d2f-4e8a-9c41-6f0a2d9b8e77'); END $$`,
+      ["settings: a default for all roles or for the database sets app.tenant_id"],
+    ],
+    [
+      "row security switched off by default for every role",
+      "ALTER ROLE ALL SET row_security = off",
+      ["settings: a default for all roles or for the database sets row_security"],
     ],
     [
       "the application role allowed to create databases",

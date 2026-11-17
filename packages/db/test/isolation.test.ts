@@ -311,6 +311,22 @@ describe("a pooled connection carries no tenant to its next user", () => {
     }
   });
 
+  test("a connection lost during the work rejects the call and the pool carries on", async () => {
+    const one = new pg.Pool({ connectionString: database.url(APP_ROLE), max: 1 });
+    one.on("error", () => undefined);
+    try {
+      await expect(
+        withTenant(one, a.tenantId, (tx) =>
+          tx.query("SELECT pg_terminate_backend(pg_backend_pid())"),
+        ),
+      ).rejects.toThrow();
+      const after = await withTenant(one, a.tenantId, (tx) => tx.query("SELECT id FROM contacts"));
+      expect(after.rowCount).toBeGreaterThan(0);
+    } finally {
+      await one.end();
+    }
+  });
+
   test("a pool that connects as another role is refused", async () => {
     for (const role of [CROSS_ROLE, MIGRATE_ROLE] as const) {
       const wrong = new pg.Pool({ connectionString: database.url(role), max: 1 });
@@ -442,6 +458,10 @@ describe("privileges", () => {
     );
     expect(fixed).not.toContain("pencil");
     expect(scramVerifier("pencil", Buffer.from("0123456789abcdef"))).toBe(fixed);
+    // Characters the server would prepare differently are refused, not guessed at.
+    for (const password of ["", "caf\u00e9", "soft\u00adhyphen", "tab\there"]) {
+      expect(() => scramVerifier(password)).toThrow("must be printable ASCII");
+    }
     const wrong = new URL(database.url(APP_ROLE));
     wrong.password = "not-the-password";
     const client = new pg.Client({ connectionString: wrong.href });
