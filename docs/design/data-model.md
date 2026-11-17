@@ -327,7 +327,7 @@ known or belong to no tenant. Each is listed with what it can reveal.
 | Table | Columns | Why unscoped | What it reveals |
 | --- | --- | --- | --- |
 | `channel_routes` | `receiving_number_id`, `tenant_id` | The webhook must find the tenant from the receiving number | Which tenant owns a business number. No customer data |
-| `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant. Unlike the other tables here it does have row-level security, of its own kind (decision 13). `dedupe_key` is not built yet | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
+| `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant. Unlike the other tables here it does have row-level security, of its own kind (decision 13). As built, `subject_id` stands in place of `dedupe_key` (decision 15) | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
 | `unparsed_events` | `receiving_number_id` (if it could be read), `payload_hash`, `size_bytes`, `error_code`, `received_at` | A validly signed event that could not be parsed has no tenant yet | Metadata only. **The raw event, the sender's number and any text are not stored.** Rows are deleted after 30 days (Gate 2 finding S6) |
 | `unroutable_events` | `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
 | `worker_heartbeats` | `worker_id`, `started_at`, `last_seen_at` | One row per worker process, so that something outside the worker can tell whether one is alive (ADR 0004, amendment) | Nothing personal |
@@ -348,7 +348,8 @@ with the cross-tenant role, and returns only what the next step needs.
 
 Work that crosses tenants by design: creating a tenant and the other
 operator commands of ADR 0011, the daily credential check, the retention
-job, and claiming jobs. Nothing else may use
+job, claiming and running jobs, and the worker's heartbeat with its
+readiness probe. Nothing else may use
 the cross-tenant role; the import-boundary test enforces which modules can
 reach it.
 
@@ -438,8 +439,9 @@ question for a lawyer (open question OQ-4).
 | 10 | Foreign keys between tenant-owned tables include `tenant_id`, and uniqueness rules are per tenant where they can be | A foreign-key or uniqueness check is not subject to row-level security. Found while building M2 unit U4 |
 | 11 | `channel_routes` is written only by a trigger on `channel_accounts` | So the two cannot disagree (Gate 2 finding S22) |
 | 12 | The cross-tenant role sees all rows through a policy of its own, not by bypassing row-level security | No special role attribute is needed, and the tables it may reach are listed in the migrations (ADR 0003, amendment) |
-| 13 | `jobs` has row-level security after all: the application role may add a job for its transaction's tenant and may not read or change any | The webhook queues a job in the tenant's transaction; without a policy the application role could read every tenant's jobs. The cross-tenant role claims them. Found while building M2 unit U5 |
+| 13 | `jobs` is not outside tenant scoping. The application role, in one tenant's transaction, may add a job for that tenant, see which of its jobs exist (not what they hold) and delete a queued one. The cross-tenant role claims them | The webhook queues a job in the tenant's transaction, and a timer is cancelled in the transaction that moves its state; with no policy the application role could read and change every tenant's jobs. Found while building M2 unit U5 |
 | 14 | A finished job is deleted; job states are `queued`, `running` and `dead` | Nothing to archive (ADR 0004, amendment) |
+| 15 | `jobs.subject_id`, a UUID, replaces `dedupe_key` | A timer has to be found again to be cancelled; an identifier cannot carry text. There is no uniqueness on it (ADR 0004, amendment) |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
 noted for the Gate 2 review and are not yet reflected in the stories.

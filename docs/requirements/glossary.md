@@ -137,7 +137,7 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Credential check that cannot complete | No state change; retried within the hour | US-D6 |
 | Job retries | 5, after waits of 2, 4, 8, 16 and 32 seconds; then the job is dead and an operator alert is queued | NFR-R5 |
 | Conversation lease | 2 minutes, renewed before each model attempt | ADR 0004 |
-| Claim on a job | 5 minutes; after that another worker may take it | ADR 0004, amendment |
+| Claim on a job | 5 minutes; after that another worker may take it. A single run is failed after 4 minutes | ADR 0004, amendment |
 | Job poll interval | 500 milliseconds | ADR 0004, amendment |
 | Worker heartbeat | Every 10 seconds; a worker is ready if one was seen within 30 seconds | NFR-O1 |
 | Notification email throttle | 1 email per tenant per 5 minutes; 3 send attempts | US-C14 |
