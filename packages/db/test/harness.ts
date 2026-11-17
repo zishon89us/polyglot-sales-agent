@@ -38,6 +38,16 @@ function setting(name: string): string {
 }
 
 const ADMIN_URL = setting("PSA_TEST_ADMIN_URL");
+// The tests reset the passwords of three server-wide roles and create and
+// drop databases. That is for a server on this machine only.
+if (
+  !["127.0.0.1", "localhost", "[::1]"].includes(new URL(ADMIN_URL).hostname) &&
+  process.env["PSA_TEST_ALLOW_REMOTE"] !== "1"
+) {
+  throw new Error(
+    "PSA_TEST_ADMIN_URL does not point at this machine. Set PSA_TEST_ALLOW_REMOTE=1 only for a server you can afford to lose.",
+  );
+}
 const PASSWORDS: RolePasswords = {
   [MIGRATE_ROLE]: setting("PSA_DB_MIGRATE_PASSWORD"),
   [APP_ROLE]: setting("PSA_DB_APP_PASSWORD"),
@@ -82,12 +92,6 @@ export async function createTestDatabase(options: { migrate: boolean }): Promise
   } finally {
     await server.end();
   }
-  const database = await admin(name);
-  try {
-    await prepareDatabase(database);
-  } finally {
-    await database.end();
-  }
   const url = (role: Role): string => {
     const target = new URL(ADMIN_URL);
     target.pathname = `/${name}`;
@@ -102,8 +106,29 @@ export async function createTestDatabase(options: { migrate: boolean }): Promise
     open.push(connection);
     return connection;
   };
-  if (options.migrate) {
-    await migrateUp(await client(MIGRATE_ROLE), loadMigrations(MIGRATIONS_DIRECTORY));
+  const drop = async (): Promise<void> => {
+    // A connection that will not close must not stop the database being dropped.
+    await Promise.allSettled(open.map((connection) => connection.end()));
+    const last = await admin();
+    try {
+      await last.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    } finally {
+      await last.end();
+    }
+  };
+  try {
+    const database = await admin(name);
+    try {
+      await prepareDatabase(database);
+    } finally {
+      await database.end();
+    }
+    if (options.migrate) {
+      await migrateUp(await client(MIGRATE_ROLE), loadMigrations(MIGRATIONS_DIRECTORY));
+    }
+  } catch (error) {
+    await drop();
+    throw error;
   }
   return {
     url,
@@ -113,15 +138,7 @@ export async function createTestDatabase(options: { migrate: boolean }): Promise
       open.push(connection);
       return connection;
     },
-    async drop() {
-      await Promise.all(open.map((connection) => connection.end()));
-      const last = await admin();
-      try {
-        await last.query(`DROP DATABASE ${name} WITH (FORCE)`);
-      } finally {
-        await last.end();
-      }
-    },
+    drop,
   };
 }
 

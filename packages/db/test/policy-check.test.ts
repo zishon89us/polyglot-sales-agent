@@ -4,7 +4,12 @@
 
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { findIsolationProblems, MIGRATE_ROLE, UNSCOPED_TABLES } from "../src/index.ts";
+import {
+  DEFINER_FUNCTIONS,
+  findIsolationProblems,
+  MIGRATE_ROLE,
+  UNSCOPED_TABLES,
+} from "../src/index.ts";
 import { createTestDatabase, type TestDatabase } from "./harness.ts";
 
 let database: TestDatabase;
@@ -41,8 +46,13 @@ describe("findIsolationProblems", () => {
     expect(await problemsAfter(SCOPED)).toEqual([]);
   });
 
-  test("the list of unscoped tables is exactly the two this change needs", () => {
+  test("the two lists of exceptions hold exactly what this change needs", () => {
     expect(Object.keys(UNSCOPED_TABLES)).toEqual(["channel_routes", "schema_migrations"]);
+    expect(Object.keys(DEFINER_FUNCTIONS)).toEqual(["channel_routes_sync()"]);
+  });
+
+  test("finds nothing when the reader's search path leaves out the schema", async () => {
+    expect(await problemsAfter("SET LOCAL search_path = pg_catalog")).toEqual([]);
   });
 
   test.each([
@@ -151,12 +161,38 @@ describe("findIsolationProblems", () => {
     [
       "a view, which reads with its owner's rights",
       "CREATE VIEW all_contacts AS SELECT * FROM contacts",
+      ["view all_contacts: views and foreign tables are not covered by these checks"],
+    ],
+    [
+      "single columns of the routing table opened to the application role",
+      "GRANT SELECT (receiving_number_id, tenant_id) ON channel_routes TO psa_app",
+      ["table channel_routes: has no tenant policy, yet psa_app has a privilege on it"],
+    ],
+    [
+      "a function that runs with its owner's rights",
+      `CREATE FUNCTION all_routes() RETURNS SETOF channel_routes LANGUAGE sql SECURITY DEFINER
+         AS 'SELECT * FROM channel_routes'`,
       [
-        "table all_contacts: has no tenant_id column that is NOT NULL",
-        "table all_contacts: row-level security is not enabled",
-        "table all_contacts: row-level security is not forced, so its owner bypasses it",
-        "table all_contacts: has 0 policies for psa_app, expected exactly 1",
+        "function all_routes(): runs with its owner's rights and is not on the list of such functions",
       ],
+    ],
+    [
+      "a second function with a listed name, run with its owner's rights",
+      `CREATE FUNCTION channel_routes_sync(integer) RETURNS SETOF channel_routes LANGUAGE sql
+         SECURITY DEFINER AS 'SELECT * FROM channel_routes'`,
+      [
+        "function channel_routes_sync(integer): runs with its owner's rights and is not on the list of such functions",
+      ],
+    ],
+    [
+      "a function everyone may execute",
+      "GRANT EXECUTE ON FUNCTION app_tenant_id() TO PUBLIC",
+      ["function app_tenant_id: PUBLIC may execute it"],
+    ],
+    [
+      "default privileges that would open new tables to the application role",
+      "ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO psa_app",
+      ["default privileges: new objects would be granted to psa_app"],
     ],
     [
       "an unscoped table that no longer exists",
@@ -193,8 +229,44 @@ describe("findIsolationProblems, changes only the server's administrator can mak
       `${SCOPED} ALTER TABLE notes OWNER TO psa_app`,
       [
         "table notes: psa_app may TRUNCATE it, which ignores row-level security",
-        "role psa_app: owns notes",
+        "table notes: is owned by psa_app, not psa_migrate",
       ],
+    ],
+    [
+      "a function owned by the administrator",
+      "CREATE FUNCTION public.side_door() RETURNS integer LANGUAGE sql RETURN 1",
+      [
+        "function side_door: PUBLIC may execute it",
+        "function side_door: is owned by postgres, not psa_migrate",
+      ],
+    ],
+    [
+      "the application role allowed temporary tables",
+      "DO $$ BEGIN EXECUTE format('GRANT TEMP ON DATABASE %I TO psa_app', current_database()); END $$",
+      ["role psa_app: may create schemas or temporary tables in this database"],
+    ],
+    [
+      "a tenant set for the application role by default",
+      "ALTER ROLE psa_app SET app.tenant_id = '0b7e3c1a-5d2f-4e8a-9c41-6f0a2d9b8e77'",
+      [
+        "role psa_app: has a setting of its own (app.tenant_id=0b7e3c1a-5d2f-4e8a-9c41-6f0a2d9b8e77)",
+      ],
+    ],
+    [
+      "a tenant set by default for the whole database",
+      `DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET app.tenant_id = %L', current_database(),
+         '0b7e3c1a-5d2f-4e8a-9c41-6f0a2d9b8e77'); END $$`,
+      ["settings: a default for all roles or for the database sets app.tenant_id"],
+    ],
+    [
+      "row security switched off by default for every role",
+      "ALTER ROLE ALL SET row_security = off",
+      ["settings: a default for all roles or for the database sets row_security"],
+    ],
+    [
+      "the application role allowed to create databases",
+      "ALTER ROLE psa_app CREATEDB",
+      ["role psa_app: has CREATEDB"],
     ],
     [
       "the application role allowed to bypass row-level security",

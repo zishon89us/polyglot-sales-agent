@@ -56,11 +56,41 @@ describe("loadMigrations", () => {
     [{ "0001_a.up.sql": "", "0001_b.down.sql": "" }, 'version 0001 has two names, "a" and "b"'],
     [{ "0001_a.up.sql": "", "0001_a.down.sql": "", "notes.txt": "" }, '"notes.txt" is not named'],
     [{ "1_a.up.sql": "", "1_a.down.sql": "" }, '"1_a.down.sql" is not named'],
+    [
+      { "0001_a.up.sql": "CREATE TABLE t ();\nCOMMIT;", "0001_a.down.sql": "" },
+      '"0001_a.up.sql" must not end or start a transaction itself',
+    ],
+    [
+      { "0001_a.up.sql": "", "0001_a.down.sql": "  rollback ;" },
+      '"0001_a.down.sql" must not end or start a transaction itself',
+    ],
+    [
+      { "0001_a.up.sql": "SELECT 1; COMMIT;", "0001_a.down.sql": "" },
+      '"0001_a.up.sql" must not end or start a transaction itself',
+    ],
+    [
+      { "0001_a.up.sql": "CREATE TABLE t ();\nABORT;", "0001_a.down.sql": "" },
+      '"0001_a.up.sql" must not end or start a transaction itself',
+    ],
   ])("refuses a directory it cannot order: %j", (files, message) => {
     expect(() => loadMigrations(directory(files))).toThrow(message);
   });
+  test("the checksum covers the down step as well as the up step", () => {
+    const one = loadMigrations(
+      directory({ "0001_a.up.sql": "SELECT 1", "0001_a.down.sql": "SELECT 2" }),
+    );
+    const two = loadMigrations(
+      directory({ "0001_a.up.sql": "SELECT 1", "0001_a.down.sql": "SELECT 3" }),
+    );
+    const three = loadMigrations(
+      directory({ "0001_a.up.sql": "SELECT 4", "0001_a.down.sql": "SELECT 2" }),
+    );
+    expect(new Set([one[0]?.checksum, two[0]?.checksum, three[0]?.checksum]).size).toBe(3);
+  });
 });
 
+// These tests share one database and run in order: the first applies the
+// project's migrations and the rest start from that state and return to it.
 describe("the migration runner, against PostgreSQL", () => {
   let database: TestDatabase;
   let client: pg.Client;
@@ -120,6 +150,80 @@ describe("the migration runner, against PostgreSQL", () => {
 
   test("an applied migration with no file is refused", async () => {
     await expect(migrateUp(client, [])).rejects.toThrow("version 1 is applied but has no file");
+  });
+
+  // The loader refuses COMMIT, ROLLBACK and ABORT but cannot refuse END,
+  // which function bodies use. These are the runner's own guard.
+  test.each([
+    ["commits and goes on", "CREATE TABLE half_kept (id integer); END; SELECT 1;", ["half_kept"]],
+    [
+      "rolls back and goes on",
+      "CREATE TABLE lost (id integer); END; BEGIN; CREATE TABLE half_kept (id integer); END; BEGIN; SELECT 1;",
+      ["half_kept", "lost"],
+    ],
+  ])("a step that %s is reported and not recorded", async (_what, up, tables) => {
+    const sneaky = { version: project.length + 1, name: "sneaky", up, down: "", checksum: "1" };
+    await expect(migrateUp(client, [...project, sneaky])).rejects.toThrow(
+      "the step ended its own transaction, so the database may hold part of it and it is not recorded",
+    );
+    expect(await migrationStatus(client, project)).toEqual({
+      applied: project.map((migration) => migration.name),
+      pending: [],
+    });
+    await client.query(`DROP TABLE ${tables.join(", ")}`);
+  });
+
+  test("a step that ends its transaction and then fails says both", async () => {
+    const sneaky = {
+      version: project.length + 1,
+      name: "sneaky",
+      up: "CREATE TABLE half_kept (id integer); END; SELECT 1 / 0;",
+      down: "",
+      checksum: "1",
+    };
+    await expect(migrateUp(client, [...project, sneaky])).rejects.toThrow(
+      /the step ended its own transaction.*It then failed: division by zero/,
+    );
+    await client.query("DROP TABLE half_kept");
+  });
+
+  test("a record with a gap is refused, for status, up and down", async () => {
+    await client.query("BEGIN");
+    try {
+      await client.query("UPDATE schema_migrations SET version = version + 1");
+      const message = "the record has version 2 where 1 was expected";
+      await expect(migrationStatus(client, project)).rejects.toThrow(message);
+      await expect(migrateUp(client, project)).rejects.toThrow(message);
+      await expect(migrateDown(client, project)).rejects.toThrow(message);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
+
+  test("two runners at once apply each migration once", async () => {
+    const second = await database.client(MIGRATE_ROLE);
+    for (const _ of project) {
+      await migrateDown(client, project);
+    }
+    const results = await Promise.all([migrateUp(client, project), migrateUp(second, project)]);
+    expect(results.flat().sort()).toEqual(project.map((migration) => migration.name).sort());
+    expect(results.some((names) => names.length === 0)).toBe(true);
+  });
+
+  test("a runner gives up when another session keeps the lock, and works once it is released", async () => {
+    const holder = await database.client(MIGRATE_ROLE);
+    await holder.query("SELECT pg_advisory_lock(1623420815)");
+    await expect(migrationStatus(client, project, { lockWaitMs: 300 })).rejects.toThrow(
+      "another session holds the migration lock",
+    );
+    await holder.query("SELECT pg_advisory_unlock(1623420815)");
+    expect((await migrationStatus(client, project)).pending).toEqual([]);
+  });
+
+  test("the lock is released when a run fails", async () => {
+    await expect(migrateUp(client, [])).rejects.toThrow("has no file");
+    const other = await database.client(MIGRATE_ROLE);
+    expect((await migrationStatus(other, project, { lockWaitMs: 300 })).pending).toEqual([]);
   });
 
   /** A copy of the project's migration files plus extra ones. */

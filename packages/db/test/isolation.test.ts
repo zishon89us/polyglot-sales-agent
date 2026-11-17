@@ -1,6 +1,7 @@
 // Tenant isolation (US-C2, NFR-S1, ADR 0003 "Confirmation", issue #162).
-// The tables are read from the database's catalogue, not listed here, so a
-// table added later is covered without anyone remembering to add it.
+// The attempts run against every table the database's catalogue lists. A
+// table added later fails two tests until it is added to the expected list
+// and given a seeded row, and from then on the attempts cover it.
 
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -8,7 +9,10 @@ import { MESSAGE_CLASSES, MESSAGE_DIRECTIONS, MESSAGE_STATUSES } from "../../cor
 import {
   APP_ROLE,
   CROSS_ROLE,
+  ensureRoles,
   MIGRATE_ROLE,
+  scramVerifier,
+  type Tx,
   tenantColumn,
   tenantOwnedTables,
   withTenant,
@@ -20,6 +24,23 @@ import {
   sqlState,
   type TestDatabase,
 } from "./harness.ts";
+
+/** Every table privilege the two working roles hold. A change here is a decision, not a detail. */
+const PRIVILEGES = {
+  psa_app: {
+    audit_log: "INSERT,SELECT",
+    channel_accounts: "SELECT",
+    contacts: "INSERT,SELECT,UPDATE",
+    conversations: "INSERT,SELECT,UPDATE",
+    messages: "INSERT,SELECT,UPDATE",
+    tenants: "SELECT",
+  },
+  psa_cross: {
+    channel_accounts: "INSERT,SELECT",
+    channel_routes: "SELECT",
+    tenants: "INSERT,SELECT",
+  },
+};
 
 const REFUSED = "42501"; // insufficient_privilege: no table privilege, or a row-level security check
 
@@ -247,6 +268,78 @@ describe("a pooled connection carries no tenant to its next user", () => {
     expect(kept.rowCount).toBe(0);
   });
 
+  test("a handle kept after its transaction cannot be used in the next tenant's", async () => {
+    const one = new pg.Pool({ connectionString: database.url(APP_ROLE), max: 1 });
+    try {
+      let kept: Tx | undefined;
+      await withTenant(one, a.tenantId, async (tx) => {
+        kept = tx;
+      });
+      const late = await withTenant(one, b.tenantId, async () =>
+        (kept as Tx).query("SELECT id FROM contacts").catch((error: Error) => error.message),
+      );
+      expect(late).toBe("withTenant: this transaction has ended");
+      // Also when the work failed, and when it is merely late.
+      await withTenant(one, a.tenantId, async (tx) => {
+        kept = tx;
+        throw new Error("stop");
+      }).catch(() => undefined);
+      await expect((kept as Tx).query("SELECT 1")).rejects.toThrow("this transaction has ended");
+    } finally {
+      await one.end();
+    }
+  });
+
+  test("work that swallows a failed statement is not reported as committed", async () => {
+    const result = withTenant(app, a.tenantId, async (tx) => {
+      await tx.query("INSERT INTO contacts (tenant_id, phone) VALUES ($1, '+15550105')", [
+        a.tenantId,
+      ]);
+      await tx.query("SELECT 1 / 0").catch(() => undefined);
+      return "done";
+    });
+    await expect(result).rejects.toThrow("rolled back, not committed");
+  });
+
+  test("a tenant set for the whole session inside the work does not outlive it", async () => {
+    const one = new pg.Pool({ connectionString: database.url(APP_ROLE), max: 1 });
+    try {
+      await withTenant(one, a.tenantId, (tx) => tx.query(`SET app.tenant_id = '${b.tenantId}'`));
+      expect((await one.query("SELECT id FROM contacts")).rows).toEqual([]);
+    } finally {
+      await one.end();
+    }
+  });
+
+  test("a connection lost during the work rejects the call and the pool carries on", async () => {
+    const one = new pg.Pool({ connectionString: database.url(APP_ROLE), max: 1 });
+    one.on("error", () => undefined);
+    try {
+      await expect(
+        withTenant(one, a.tenantId, (tx) =>
+          tx.query("SELECT pg_terminate_backend(pg_backend_pid())"),
+        ),
+      ).rejects.toThrow();
+      const after = await withTenant(one, a.tenantId, (tx) => tx.query("SELECT id FROM contacts"));
+      expect(after.rowCount).toBeGreaterThan(0);
+    } finally {
+      await one.end();
+    }
+  });
+
+  test("a pool that connects as another role is refused", async () => {
+    for (const role of [CROSS_ROLE, MIGRATE_ROLE] as const) {
+      const wrong = new pg.Pool({ connectionString: database.url(role), max: 1 });
+      try {
+        await expect(withTenant(wrong, a.tenantId, async () => 1)).rejects.toThrow(
+          "the pool must connect as psa_app",
+        );
+      } finally {
+        await wrong.end();
+      }
+    }
+  });
+
   test("a tenant identifier that is not a UUID is refused before any query", async () => {
     for (const bad of ["", "abc", `${a.tenantId}' OR '1'='1`, `${a.tenantId} `]) {
       await expect(withTenant(app, bad, async () => 1)).rejects.toThrow("is not a UUID");
@@ -309,6 +402,85 @@ describe("the application role cannot go around the policies", () => {
   });
 });
 
+describe("privileges", () => {
+  test("the two working roles hold exactly the table privileges listed, and none on single columns", async () => {
+    const grants = await migrate.query<{ grantee: string; table_name: string; privileges: string }>(
+      `SELECT grantee, table_name, string_agg(privilege_type, ',' ORDER BY privilege_type) AS privileges
+       FROM information_schema.role_table_grants
+       WHERE table_schema = 'public' AND grantee <> $1 GROUP BY 1, 2`,
+      [MIGRATE_ROLE],
+    );
+    const held: Record<string, Record<string, string>> = {};
+    for (const row of grants.rows) {
+      held[row.grantee] = { ...held[row.grantee], [row.table_name]: row.privileges };
+    }
+    expect(held).toEqual(PRIVILEGES);
+    const columns = await migrate.query(
+      `SELECT attrelid::regclass::text AS "table", attname FROM pg_attribute
+       WHERE attacl IS NOT NULL AND attrelid IN
+         (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)`,
+    );
+    expect(columns.rows).toEqual([]);
+  });
+
+  test("the functions are executable only by the roles that need them", async () => {
+    const result = await migrate.query(
+      `SELECT p.proname AS name, p.prosecdef AS definer, p.proconfig AS settings,
+              has_function_privilege('psa_app', p.oid, 'EXECUTE') AS app,
+              has_function_privilege('psa_cross', p.oid, 'EXECUTE') AS "cross",
+              has_function_privilege('public', p.oid, 'EXECUTE') AS everyone
+       FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace ORDER BY 1`,
+    );
+    expect(result.rows).toEqual([
+      {
+        name: "app_tenant_id",
+        definer: false,
+        settings: null,
+        app: true,
+        cross: true,
+        everyone: false,
+      },
+      {
+        name: "channel_routes_sync",
+        definer: true,
+        settings: ["search_path=pg_catalog, public"],
+        app: false,
+        cross: false,
+        everyone: false,
+      },
+    ]);
+  });
+
+  test("a password is stored and sent as a verifier, and the wrong one is refused", async () => {
+    const fixed = scramVerifier("pencil", Buffer.from("0123456789abcdef"));
+    expect(fixed).toMatch(
+      /^SCRAM-SHA-256\$4096:MDEyMzQ1Njc4OWFiY2RlZg==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$/,
+    );
+    expect(fixed).not.toContain("pencil");
+    expect(scramVerifier("pencil", Buffer.from("0123456789abcdef"))).toBe(fixed);
+    // Characters the server would prepare differently are refused, not guessed at.
+    for (const password of ["", "caf\u00e9", "soft\u00adhyphen", "tab\there"]) {
+      expect(() => scramVerifier(password)).toThrow("must be printable ASCII");
+    }
+    const wrong = new URL(database.url(APP_ROLE));
+    wrong.password = "not-the-password";
+    const client = new pg.Client({ connectionString: wrong.href });
+    expect(await sqlState(client.connect())).toBe("28P01");
+    await client.end().catch(() => undefined);
+  });
+
+  test("an empty password is refused before anything is changed", async () => {
+    const administrator = await database.administrator();
+    await expect(
+      ensureRoles(administrator, { psa_migrate: "x", psa_app: "", psa_cross: "x" }),
+    ).rejects.toThrow("the password for psa_app is empty");
+    // The roles still accept the passwords they had.
+    const still = new pg.Client({ connectionString: database.url(MIGRATE_ROLE) });
+    await still.connect();
+    await still.end();
+  });
+});
+
 describe("the other two roles", () => {
   test("the migration role owns the tables and still reads no rows", async () => {
     for (const table of tables) {
@@ -351,6 +523,44 @@ describe("the other two roles", () => {
       "one receiving number cannot belong to two tenants",
     ).toBe("23505");
   });
+
+  test("the routing table follows a changed number, a moved account and a removed one", async () => {
+    // No working role may change or remove a channel account yet, so the
+    // administrator does it, in a transaction that is rolled back.
+    const administrator = await database.administrator();
+    const route = async (number: string) =>
+      (
+        await administrator.query<{ tenant_id: string }>(
+          "SELECT tenant_id FROM channel_routes WHERE receiving_number_id = $1",
+          [number],
+        )
+      ).rows.map((row) => row.tenant_id);
+    await administrator.query("BEGIN");
+    try {
+      const account = await administrator.query<{ id: string }>(
+        `INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id)
+         VALUES ($1, 'mock', 'mock-number-spare') RETURNING id`,
+        [a.tenantId],
+      );
+      const id = account.rows[0]?.id;
+      expect(await route("mock-number-spare")).toEqual([a.tenantId]);
+      await administrator.query(
+        "UPDATE channel_accounts SET receiving_number_id = 'mock-number-renamed' WHERE id = $1",
+        [id],
+      );
+      expect(await route("mock-number-spare")).toEqual([]);
+      expect(await route("mock-number-renamed")).toEqual([a.tenantId]);
+      await administrator.query("UPDATE channel_accounts SET tenant_id = $1 WHERE id = $2", [
+        b.tenantId,
+        id,
+      ]);
+      expect(await route("mock-number-renamed")).toEqual([b.tenantId]);
+      await administrator.query("DELETE FROM channel_accounts WHERE id = $1", [id]);
+      expect(await route("mock-number-renamed")).toEqual([]);
+    } finally {
+      await administrator.query("ROLLBACK");
+    }
+  });
 });
 
 describe("constraints the skeleton relies on", () => {
@@ -388,6 +598,59 @@ describe("constraints the skeleton relies on", () => {
     expect(await insert(a)).toBe(1);
     expect(await insert(a)).toBe("23505");
     expect(await insert(b), "the same identifier in another tenant is a different message").toBe(1);
+  });
+
+  test("a phone number is unique within a tenant, and says nothing about another tenant", async () => {
+    const insert = (tenant: SeededTenant, phone: string) =>
+      withTenant(app, tenant.tenantId, (tx) =>
+        tx.query("INSERT INTO contacts (tenant_id, phone) VALUES ($1, $2)", [
+          tenant.tenantId,
+          phone,
+        ]),
+      ).then(
+        (result) => result.rowCount as number | string,
+        (error: { code?: string }) => error.code ?? String(error),
+      );
+    expect(await insert(a, "+15550110")).toBe(1);
+    expect(await insert(a, "+15550110")).toBe("23505");
+    expect(await insert(b, "+15550110"), "the same number as another tenant's contact").toBe(1);
+    expect(await insert(a, "0555 0111"), "not E.164").toBe("23514");
+  });
+
+  test("a conversation cannot use another tenant's channel account", async () => {
+    const result = await withTenant(app, a.tenantId, async (tx) => {
+      const contact = await tx.query<{ id: string }>(
+        "INSERT INTO contacts (tenant_id, phone) VALUES ($1, '+15550112') RETURNING id",
+        [a.tenantId],
+      );
+      return tx.query(
+        "INSERT INTO conversations (tenant_id, contact_id, channel_account_id) VALUES ($1, $2, $3)",
+        [a.tenantId, contact.rows[0]?.id, b.channelAccountId],
+      );
+    }).catch((error: { code?: string }) => error.code);
+    expect(result).toBe("23503");
+  });
+
+  test("only an outbound message has a status", async () => {
+    const insert = (direction: string, messageClass: string | null, status: string | null) =>
+      asA(
+        "INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, status) VALUES ($1, $2, $3, $4, 'text', $5)",
+        [a.tenantId, a.conversationId, direction, messageClass, status],
+      );
+    expect(await insert("inbound", null, "pending")).toBe("23514");
+    expect(await insert("outbound", "system-reply", null)).toBe("23514");
+    expect(await insert("outbound", "system-reply", "pending")).toBe(1);
+  });
+
+  test("a channel other than the two known ones is refused", async () => {
+    expect(
+      await sqlState(
+        cross.query(
+          "INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id) VALUES ($1, 'sms', 'x')",
+          [a.tenantId],
+        ),
+      ),
+    ).toBe("23514");
   });
 
   test("only an outbound message has a class", async () => {
