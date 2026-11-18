@@ -1,0 +1,11 @@
+{
+  "name": "@polyglot-sales-agent/channel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The interface a messaging channel implements, and the system's own event types. No knowledge of any one channel.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contract": "./src/contract.ts"
+  }
+}

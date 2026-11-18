@@ -1,0 +1,16 @@
+{
+  "name": "@polyglot-sales-agent/channel-mock",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A channel that exists only in memory, for tests of code that uses a channel. Not an imitation of WhatsApp: that is apps/mock-whatsapp.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyglot-sales-agent/channel": "workspace:*"
+  },
+  "devDependencies": {
+    "@polyglot-sales-agent/core": "workspace:*"
+  }
+}

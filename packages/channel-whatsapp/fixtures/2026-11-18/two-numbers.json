@@ -1,0 +1,65 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100000000000001",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550100",
+              "phone_number_id": "100000000000002"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Test Customer"
+                },
+                "wa_id": "15550142",
+                "user_id": "US.10000000000000000042"
+              }
+            ],
+            "messages": [
+              {
+                "from": "15550142",
+                "from_user_id": "US.10000000000000000042",
+                "id": "wamid.SYNTHETIC0005",
+                "timestamp": "1795000000",
+                "type": "text",
+                "text": {
+                  "body": "First number"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    },
+    {
+      "id": "100000000000003",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550101",
+              "phone_number_id": "100000000000004"
+            },
+            "statuses": [
+              {
+                "id": "wamid.SYNTHETIC0104",
+                "status": "delivered",
+                "timestamp": "1795000060",
+                "recipient_id": "15550142",
+                "recipient_user_id": "US.10000000000000000042"
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}
