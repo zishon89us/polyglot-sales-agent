@@ -180,8 +180,19 @@ the same time as one that stops. The sink must finish within 5 seconds, or
 the answer is 503 and the sink is told to stop. **A 503 does not mean that
 nothing was stored**: a sink that was slow may still have committed. The
 channel sends the webhook again either way, so storing must be safe to
-repeat. For events the unique message identifier makes it so; for the
-record of an unreadable body, unit U7 must make it so.
+repeat. It is: a message is unique by its channel identifier, and the
+records of unreadable and unroutable events are unique by what they
+describe.
+
+What each kind of event writes and queues is one table, in
+`architecture.md`, "What the webhook does with each kind of event".
+
+### Health — `GET /healthz`, `GET /readyz`
+
+`/healthz` answers 200 while the process runs, and checks nothing.
+`/readyz` answers 200 if both database roles the API uses can run a query,
+and 503 otherwise. Neither says anything of the worker, which is probed on
+its own (ADR 0004, amendment), and neither shows a cause.
 
 What is trusted from a signed event: that the channel sent it, the sender's
 number and the receiving number (threat-model assumption A1). What is never

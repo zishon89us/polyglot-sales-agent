@@ -204,11 +204,29 @@ M0 Inception met its exit criteria on 2026-11-16; see
   rewrote every route's client error to 400; a slow sink was never told to
   stop) is fixed in a second pull request, #287.
 
+- 2026-11-18 — U6's fixes merged as #287. M2 unit U7 (#268): the webhook
+  stores what it receives. One transaction per receiving number makes the
+  contact and the conversation if they are new, stores each message once,
+  and queues one job for the conversation. The same message delivered five
+  times, one after another or all at once, is one row and one job. A
+  refused request (bad signature, oversized body) leaves no row in any
+  table. An event for a number no tenant has, and a body that cannot be
+  read, are recorded by identifiers or by a hash only, never with a number
+  or text. With the database unreachable the answer is 503. The health
+  endpoints exist, and the API and the mock were run together by hand: a
+  message typed into the mock was stored with its job. What each kind of
+  event writes and queues is one table in the architecture (#177).
+  **Decided by the agent:** a contact is matched on the channel's own
+  identifier first, then on the number (#284); and no query builder for
+  now, with SQL kept in one package and a test that keeps it there (ADR
+  0003). NFR-P1 measured here, not gated: 300 webhooks, ten at a time,
+  median about 34 ms, 99th percentile about 105 ms.
+
 ## Next
 
-1. Maintainer reviews and merges the U6 fixes (#287), which close #267.
-2. M2 unit U7: the webhook stores and queues (#268). Before a contact is
-   stored, #284 must be decided.
+1. Maintainer reviews and merges U7 (#268), **after its code review and
+   the verification of its fixes are both in**.
+2. M2 unit U8: the worker, an echo reply and the send policy (#269).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
@@ -257,6 +275,10 @@ criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 
 ## Blocked on the maintainer
+
+- **How a customer is identified** (#284). The agent decided, so as not to
+  stop: a contact is matched on the channel's own identifier first, then on
+  the phone number. Confirm, or say otherwise before M3 builds on it.
 
 - **The dependency audit fails, on `main` too, since 2026-11-18.** An
   advisory was published for `picomatch` up to 4.0.7 (GHSA-fc5q-39xc-vjpf,

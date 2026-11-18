@@ -206,7 +206,8 @@ reach is visible in the migrations.
   that tenant is decided before it, by the session or the webhook route.
 - The typed query builder named in "Specifics" is not chosen yet.
   `withTenant` hands out a plain query function; the builder is chosen in
-  the first unit that writes real queries (#279).
+  the first unit that writes real queries (#279). Settled, for M2, by the
+  amendment of 2026-11-18 below.
 - Of "Confirmation", the three M2 tests exist. The concurrency test for
   invariant B1 is M5's.
 
@@ -225,3 +226,26 @@ postgres-interval, split2 and xtend. Their maintenance was not looked at
 one by one.
 
 The tests ran against PostgreSQL 16.15. No other version was tried.
+
+## Amendment, 2026-11-18: no query builder for now
+
+Made in M2 unit U7. "Specifics" says access goes through a typed SQL query
+builder, the choice to be verified in M2. Two units deferred it. This
+settles it for M2, and it is the agent's decision, open to the maintainer.
+
+**Decision.** No query builder is added now. SQL is written as fixed text
+with parameters, and only in `packages/db`. A test fails if a source file
+of an app holds a statement or runs a query of its own.
+
+**Why.** What the builder was for is two things. One is that query text is
+never built from outside input (threat T33): keeping every statement in one
+package, as fixed text, serves that directly, and can be checked. The other
+is type safety between the code and the schema: that is not served, and
+the tests against a real database are what catches a wrong column today.
+
+**What it costs.** A column renamed in a migration is found by a failing
+test, not by the compiler. Results are typed by hand where they are read.
+
+**When to look again.** At the start of M3, with the count of statements
+as evidence. On 2026-11-18 `packages/db` holds about forty.
+

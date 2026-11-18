@@ -10,9 +10,10 @@ The database is PostgreSQL with row-level security (ADR 0003). Jobs and login
 sessions are tables here too (ADRs 0004 and 0008). Column types are indicative;
 the migrations in milestone M2 are the definition.
 
-**Built so far** (M2 units U4 and U5, `packages/db/migrations/`): `tenants`,
-`channel_accounts`, `channel_routes`, `contacts`, `conversations`,
-`messages`, `audit_log`, `jobs` and `worker_heartbeats`, each with only the
+**Built so far** (M2 units U4, U5 and U7, `packages/db/migrations/`):
+`tenants`, `channel_accounts`, `channel_routes`, `contacts`,
+`conversations`, `messages`, `audit_log`, `jobs`, `worker_heartbeats`,
+`unparsed_events` and `unroutable_events`, each with only the
 columns the walking skeleton uses. A column described below may not exist yet; the migrations are the
 record of what does.
 
@@ -117,7 +118,8 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 
 | Column | Notes |
 | --- | --- |
-| `phone` ⚑ | E.164. Unique per tenant. Null after deletion or retention |
+| `phone` ⚑ | E.164. Unique per tenant. Null after deletion or retention, and for a customer the channel gave no number for |
+| `channel_user_id` ⚑ | The channel's own identifier for the person: for WhatsApp, the business-scoped user ID. Unique per tenant. A webhook is matched on it first, then on the number (decision 16) |
 | `phone_hash`, `phone_hash_key_version` | Keyed one-way hash of the number, made as described under `suppressed_numbers`. Kept after deletion only if opted out |
 | `profile_name` ⚑ | As sent by the channel. Never given to the model (NFR-V7) |
 | `last_language` | A language code. Not treated as personal on its own |
@@ -328,8 +330,8 @@ known or belong to no tenant. Each is listed with what it can reveal.
 | --- | --- | --- | --- |
 | `channel_routes` | `receiving_number_id`, `tenant_id` | The webhook must find the tenant from the receiving number | Which tenant owns a business number. No customer data |
 | `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant. Unlike the other tables here it does have row-level security, of its own kind (decision 13). As built, `subject_id` stands in place of `dedupe_key` (decision 15) | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
-| `unparsed_events` | `receiving_number_id` (if it could be read), `payload_hash`, `size_bytes`, `error_code`, `received_at` | A validly signed event that could not be parsed has no tenant yet | Metadata only. **The raw event, the sender's number and any text are not stored.** Rows are deleted after 30 days (Gate 2 finding S6) |
-| `unroutable_events` | `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
+| `unparsed_events` | `channel`, `payload_hash`, `size_bytes`, `error_code`, `items_left_out`, `received_at`. As built there is no `receiving_number_id`: a body that cannot be read has none to give | A validly signed event that could not be parsed has no tenant yet | Metadata only. **The raw event, the sender's number and any text are not stored.** Rows are to be deleted after 30 days (Gate 2 finding S6); the job that does it is not built |
+| `unroutable_events` | `channel`, `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
 | `worker_heartbeats` | `worker_id`, `started_at`, `last_seen_at` | One row per worker process, so that something outside the worker can tell whether one is alive (ADR 0004, amendment) | Nothing personal |
 | `service_state` | One row: `normal` or `degraded`, since when, and whether the operator is holding it in `degraded` | Service-wide | Nothing personal |
 | `operator_log` | `command`, `arguments`, `operator_name`, `phase` (`started` or `finished`), `outcome`, `at` | Operator actions belong to no tenant | Insert-only for every role. Arguments never hold an email address, a phone number or a name; a created row is recorded by its identifier (ADR 0011) |
@@ -442,6 +444,8 @@ question for a lawyer (open question OQ-4).
 | 13 | `jobs` is not outside tenant scoping. The application role, in one tenant's transaction, may add a job for that tenant, see which of its jobs exist (not what they hold) and delete a queued one. The cross-tenant role claims them | The webhook queues a job in the tenant's transaction, and a timer is cancelled in the transaction that moves its state; with no policy the application role could read and change every tenant's jobs. Found while building M2 unit U5 |
 | 14 | A finished job is deleted; job states are `queued`, `running` and `dead` | Nothing to archive (ADR 0004, amendment) |
 | 15 | `jobs.subject_id`, a UUID, replaces `dedupe_key` | A timer has to be found again to be cancelled; an identifier cannot carry text. There is no uniqueness on it (ADR 0004, amendment) |
+| 16 | A contact has the channel's own identifier as well as a number, either of which may be missing; it is matched on the identifier first | Since April 2026 a WhatsApp customer who uses a username arrives with no number (#284). **The agent's decision, awaiting the maintainer.** Two consequences are recorded in #288: nothing merges two contacts that turn out to be one person, and a number that passes to another person carries its conversation with it |
+| 17 | `unparsed_events` and `unroutable_events` each have the channel's name and a uniqueness rule | The channel sends an unanswered webhook again, and a slow request can commit after it was answered 503; the same event must be one row |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
 noted for the Gate 2 review and are not yet reflected in the stories.
