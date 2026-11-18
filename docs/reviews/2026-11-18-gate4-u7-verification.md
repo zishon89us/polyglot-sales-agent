@@ -52,3 +52,43 @@ received. It checked the branch `feat/268-webhook-store-queue` at `a72e153`.
 | X7 | **Stated, not fixed.** In #288 |
 | X8 | **Mostly fixed.** Tests added: the three limits as the connection reports them, and a statement stopped at its limit; the record of left-out items not written after the deadline; the `error_code` CHECK; a failed status's code from the webhook to the row. Not added: a test that would fail if the readiness check's own time limit were removed, since the connection limit still bounds it; and `main.ts` (#288). The W8 response's "a test for each item listed" was wrong about the second `stopIfAborted`, as the verifier says |
 | X9 | **Fixed** |
+
+## Second check, of the changed contact rule
+
+The rule of X2 was written after the verification above, so a third agent
+was asked to check it and the reworded decision record, briefly. Its
+report follows, as received. It checked `942849f`.
+
+| ID | Sev | Location | Finding (with the reproduction I ran) | Fix |
+| --- | --- | --- | --- | --- |
+| Y1 | Medium | `docs/design/data-model.md`, "Which contact a message belongs to", bullet 4; `packages/db/src/inbound.ts` second UPDATE (`NOT EXISTS`) | **Bullet 4 is untrue.** It says a contact's number is the one the channel last sent with its identifier, or none. Sequence (+15550101,U1), (+15550102,–), (+15550102,U1), (+15550101,–) ends `+15550101/U1` with 3 messages and `+15550102/–` with 1: U1 still holds 0101 after the channel last paired it with 0102, and a later number-only message from 0101 joins U1's conversation. Fuzz (40 rounds x 40 steps, 4 numbers, 4 identifiers): 425 contact observations broke the bullet. The code does match table row 1 ("if a contact with no identifier holds it, nothing changes"); only the bullet and its "anything sent later goes to a number the channel paired with that person" overstate (the pairing can be stale). | Reword bullet 4 to add the exception, or clear the contact's old number when it arrives with a number a number-only contact holds. |
+| Y2 | Low | same section; `inbound.ts` | **Unstated consequences.** (a) Swap interrupted by a number-only message: (0101,U1), (0102,U2), (0102,U1), (0101,–), (0101,U2), (0101,U2) ends `0102/U1`, `null/U2` (3 messages), `0101/–`: U2 never gets a number however often it writes with one. Bullet 1 covers only "first seen by number alone". (b) Transient errors on concurrent arrivals are stated nowhere in the design docs for these cases (STATUS.md line 254 mentions only the new-customers deadlock): two existing number-less identifiers arriving at once with one number gave 23505 in 40 of 40 rounds; two people swapping at once gave 40P01 in 36 of 40; four new identifiers with one number gave 74 `contact-conflict` over 40 rounds. All stored on retry. | State (a) under bullet 1 and (b) beside the STATUS note; optionally lock by number first to avoid the certain 23505. |
+| Y3 | Low | `packages/db/test/inbound.test.ts`; `inbound.ts` first UPDATE | Mutants of the clearing UPDATE: "remove it" is killed (6 tests fail); "drop both conditions" is killed (4 fail). "Drop only `channel_user_id IS NOT NULL`" and "drop only `<> $2`" each survive, 71 of 71. Both look equivalent in outcome: `NULL <> $2` is never true, and without `<> $2` the contact's own number is cleared and retaken in the same transaction. So `IS NOT NULL` is redundant text. | None needed; drop `IS NOT NULL` or note it is for the reader. |
+| Y4 | Low | `apps/api/src/app.test.ts` `sources()`; ADR 0003 amendment | By reading only: the ADR says "every source file"; the scan's extensions are ts, tsx, mts, cts, js, mjs, cjs, so `.jsx` is not scanned. No planted file tried. | Add `jsx` or name the extensions in the ADR. |
+
+**Confirmed:**
+
+- 1(a): `contactFor` does what the table's five rows and the leading rule say; the named sequences ended as the table predicts (plain swap ends `0102/U1`, `0101/U2`, two messages each).
+- 1(b): sequential fuzz with ground truth, 1,600 steps: 0 identifier-carrying messages in another identifier's contact, 0 identifiers changed, 0 contacts holding a number the channel last sent with a different identifier, 0 failures. Six races of 40 rounds each (two new identifiers with one number; two existing; swap at once; holder against newcomer; three identifiers against a number-only holder; four new identifiers): 0 messages in the wrong contact, 0 calls that never stored within 6 retries, exactly one holder of the number at the end of every round.
+- 1(c): bullets 1, 2 and 3 held in my sequences; bullet 4 did not (Y1).
+- 2: the boundary test passes on the clean copy (7 of 7), so no product file is wrongly failed. With the eight X1 bypasses planted in `apps/api/src` of the copy, all eight files were named as offenders (seven by "goes round it", the `node_modules_shim` one by the driver-name test). The ADR's four bullets match the test's patterns, and it says the testing entry holds the connection function and that this is a guard against accident only; apart from Y4 it claims nothing the test does not show.
+
+**Ran:** a scratch vitest file (sequences, fuzz, races) and four mutants in `/tmp/rv_copy`, using the repo's own harness (its `psa_test_…` database, dropped after); `pnpm exec vitest run packages/db/test/inbound.test.ts` (baseline 71 of 71, then per mutant); `apps/api/src/app.test.ts -t "only packages/db"` clean and planted. `/tmp/rv_copy` is removed; no `rv_` or `psa_test_` database remains; `git status --short` is empty at `942849f`. PostgreSQL was running and was not touched.
+
+**Could not check:**
+
+- Whether the planted files actually reach the database at run time (only that the scan catches them); `tsc` on them.
+- How the API answers the transient errors over HTTP (read `sink.ts` only for its 503 mention); races with more than four parties; any isolation level other than the default.
+- My first fuzz run used a faulty random generator and was discarded; the figures above are from the corrected run.
+
+### Author's response to the second check
+
+No behaviour was changed in answer to it; these four changes were not
+checked by another agent.
+
+| ID | Response |
+|---|---|
+| Y1 | **The bullet is corrected; the code is left.** It now says what holds (a contact with an identifier never holds a number the channel has since sent with a different identifier) and what does not (it can hold an old number of its own). Taking the number from a contact with no identifier would move it away from what may be the same person's earlier conversation, and nothing merges contacts yet (#288) |
+| Y2 | **Stated.** Both are bullets in the data model, with the error codes seen |
+| Y3 | **Noted in a comment.** The condition stays, for the reader |
+| Y4 | **Fixed.** `.jsx` is scanned, and the ADR names the extensions |

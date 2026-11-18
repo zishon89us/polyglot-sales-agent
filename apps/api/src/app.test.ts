@@ -652,7 +652,7 @@ describe("only packages/db can reach the database (ADR 0003, amendment of 2026-1
       for (const name of readdirSync(`${root}${top}`, { recursive: true, encoding: "utf8" })) {
         const path = `${top}/${name}`;
         if (
-          /\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(name) &&
+          /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(name) &&
           !/\.test\.[a-z]+$/.test(name) &&
           !/(^|\/)node_modules\//.test(path) &&
           !path.startsWith("packages/db/")

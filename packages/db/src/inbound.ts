@@ -81,6 +81,7 @@ async function contactFor(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (who.userId !== null && who.phone !== null) {
       // The channel says this number is this person's now: nobody else's.
+      // (`IS NOT NULL` changes nothing, since NULL <> $2 is never true; it is there for the reader.)
       await tx.query(
         `UPDATE contacts SET phone = NULL
          WHERE phone = $1 AND channel_user_id IS NOT NULL AND channel_user_id <> $2`,

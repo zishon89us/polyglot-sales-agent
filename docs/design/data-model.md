@@ -164,10 +164,21 @@ What follows from the table and is accepted:
   that sends none.
 - A number alone reaches whoever holds it now. After it has passed on with
   an identifier, that is the new person.
-- A contact's number is the one the channel last sent with its identifier,
-  unless another person has since arrived with that number, and then it
-  has none. Anything sent later to a contact goes to a number the channel
-  itself paired with that person, or is not sent by number at all.
+- A contact with an identifier never holds a number that the channel has
+  since sent with a different identifier. It can hold an old number of its
+  own: when its person writes from a new number that a contact with no
+  identifier already holds, it keeps the number it had (table, row 1).
+  A later message from that old number alone then joins its conversation.
+  So a contact's number is one the channel paired with that person at
+  some time, not always the latest.
+- For the same reason a person can go without a number however often they
+  write with one, while a contact with no identifier holds it.
+- Arrivals at the same moment can fail once and succeed when sent again:
+  two contacts taking one number (23505), two people swapping numbers or
+  two webhooks with the same new customers in opposite order (40P01), and
+  several new identifiers with one number (`contact-conflict`). Each is
+  answered 503, and the channel sends the webhook again. None was seen to
+  fail for good, or to store a message in the wrong contact.
 
 Each row of the table is a test in `packages/db/test/inbound.test.ts`, as
 are the sequences of the review's finding W1 and the verification's X2.

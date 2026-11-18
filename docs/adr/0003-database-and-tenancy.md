@@ -240,8 +240,9 @@ on it and nothing else; it cannot run a query. The function that turns a
 handle back into a connection is not in the package's main entry. It is in
 the testing entry, `@polyglot-sales-agent/db/testing`, which tests need.
 
-A test scans every source file of every app and package outside
-`packages/db` that is not a test, and fails if one:
+A test scans every source file (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+`.jsx`, `.mjs`, `.cjs`) of every app and package outside `packages/db`
+that is not a test, and fails if one:
 
 - names the driver in a string (`pg`, `pg-…`, `postgres`);
 - imports the package's testing entry or any file inside `packages/db`;
