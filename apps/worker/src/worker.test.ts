@@ -808,6 +808,9 @@ describe("a worker that stops part-way (the restart test, NFR-R2)", () => {
     await work(mock, SIX_MINUTES);
     await work(mock, 10 * SIX_MINUTES);
     expect(mock.sent).toHaveLength(1);
+    expect(failed, "reported once, by the worker that found it").toEqual([
+      "send-failed unconfirmed",
+    ]);
     expect(await outbound()).toMatchObject([
       {
         class: "business-initiated",

@@ -327,13 +327,90 @@ describe("a send", () => {
     ).toBe(1);
   });
 
+  test("a message put off to a later time is counted from that time, and a refused one that then waits too long is expired", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "the reply");
+    await administrator.query(
+      "UPDATE messages SET send_not_before = clock_timestamp() + interval '20 minutes' WHERE direction = 'outbound'",
+    );
+    const start = Date.now();
+    // Four minutes before it is due, sixteen after it was stored: it waits, and is not expired.
+    expect(
+      await claimNextSend(app, tenant.a, conversation, new Date(start + 16 * 60_000)),
+    ).toMatchObject({ kind: "wait" });
+    expect(
+      await claimNextSend(app, tenant.a, conversation, new Date(start + 21 * 60_000)),
+    ).toMatchObject({ kind: "send", message: { attempt: 1 } });
+    // Refused for now, and then nobody looks for sixteen minutes: expired, though it was called for once.
+    const waiting = await administrator.query<{ id: string }>(
+      "SELECT id FROM messages WHERE status = 'sending'",
+    );
+    await recordSend(
+      app,
+      tenant.a,
+      { id: waiting.rows[0]?.id as string, attempt: 1 },
+      { kind: "refused", retryable: true, code: "rate-limited" },
+      new Date(start + 21 * 60_000),
+    );
+    expect(await claimNextSend(app, tenant.a, conversation, new Date(start + 40 * 60_000))).toEqual(
+      { kind: "none", ended: ["expired"] },
+    );
+    expect(
+      await count(
+        "messages WHERE status = 'failed' AND error_code = 'expired' AND send_attempts = 1",
+      ),
+    ).toBe(1);
+  });
+
+  test("a reply left being sent by a worker that stopped long ago is not called for again", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "the reply");
+    const start = new Date();
+    await claimNextSend(app, tenant.a, conversation, start);
+    expect(
+      await claimNextSend(app, tenant.a, conversation, new Date(start.getTime() + 16 * 60_000)),
+    ).toEqual({ kind: "none", ended: ["unconfirmed"] });
+    expect(
+      await count(
+        "messages WHERE status = 'failed' AND error_code = 'unconfirmed' AND send_attempts = 1 AND unknown_outcomes = 1",
+      ),
+    ).toBe(1);
+  });
+
+  test("a call under way and not yet stale is left alone however old the message is", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "the reply");
+    await administrator.query(
+      "UPDATE messages SET created_at = created_at - interval '16 minutes' WHERE direction = 'outbound'",
+    );
+    await administrator.query(
+      "UPDATE messages SET status = 'sending', sending_at = clock_timestamp(), send_attempts = 1 WHERE direction = 'outbound'",
+    );
+    expect(await claimNextSend(app, tenant.a, conversation)).toMatchObject({ kind: "wait" });
+    expect(await count("messages WHERE status = 'sending'")).toBe(1);
+  });
+
+  test("a notice found stale is ended unconfirmed, and the look says so", async () => {
+    const conversation = await arrives("one");
+    await administrator.query(
+      `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status, sending_at, send_attempts)
+       SELECT tenant_id, id, 'outbound', 'service-notice', 'text', 'a notice', 'sending', clock_timestamp() - interval '3 minutes', 1
+       FROM conversations`,
+    );
+    expect(await claimNextSend(app, tenant.a, conversation)).toEqual({
+      kind: "none",
+      ended: ["unconfirmed"],
+    });
+  });
+
   test("an old message the channel may already have is unconfirmed, not expired, and is not called for again", async () => {
     const conversation = await arrives("one");
     await answered(conversation, "old");
     // Waiting to be called again after an unknown outcome.
     await administrator.query(
-      `UPDATE messages SET send_attempts = 1, unknown_outcomes = 1, send_not_before = clock_timestamp(),
-                           created_at = created_at - interval '16 minutes'
+      `UPDATE messages SET send_attempts = 1, unknown_outcomes = 1,
+                           send_not_before = clock_timestamp() - interval '16 minutes',
+                           created_at = created_at - interval '17 minutes'
        WHERE direction = 'outbound'`,
     );
     expect(await claimNextSend(app, tenant.a, conversation)).toEqual({

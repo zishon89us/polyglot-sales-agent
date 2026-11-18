@@ -183,7 +183,7 @@ interface Waiting {
   sending_for: number | null;
   /** Milliseconds until the next call may start; not positive when it may. */
   due_in: number | null;
-  /** Milliseconds since the message was stored. */
+  /** Milliseconds since the message could first have gone: since it was stored, or since the time it was put off to. */
   waiting_for: number;
   phone: string | null;
   channel_user_id: string | null;
@@ -195,7 +195,8 @@ const OLDEST_WAITING = (now: number) => `
   SELECT m.id, m.class, m.kind, m.body, m.status, m.send_attempts, m.unknown_outcomes,
          extract(epoch FROM ${NOW(now)} - m.sending_at) * 1000 AS sending_for,
          extract(epoch FROM m.send_not_before - ${NOW(now)}) * 1000 AS due_in,
-         extract(epoch FROM ${NOW(now)} - m.created_at) * 1000 AS waiting_for,
+         extract(epoch FROM ${NOW(now)} - greatest(m.created_at, m.send_not_before)) * 1000
+           AS waiting_for,
          p.phone, p.channel_user_id, a.channel, a.receiving_number_id
   FROM messages m
   JOIN conversations c ON c.id = m.conversation_id
@@ -254,9 +255,11 @@ async function apply(
  * send policy decides by its class: it is sent once more, or it becomes
  * `failed` with the code `unconfirmed` and the next message is looked at.
  *
- * A message that has waited longer than `SEND_EXPIRES_MS` is not sent: it
- * becomes `failed`, with the code `expired` if the channel was never left
- * holding it and `unconfirmed` otherwise.
+ * A message that could have gone more than `SEND_EXPIRES_MS` ago is not
+ * sent, whatever kept it: it becomes `failed`, with the code `expired` if
+ * no call for it ever ended unknown and `unconfirmed` otherwise. A call
+ * that is under way and not yet stale is left alone however old the
+ * message is.
  *
  * Throws if the tenant has no such conversation, which is a fault in the
  * job and must not look like "nothing to send".

@@ -32,14 +32,16 @@ export const SENDING_STALE_MS = 2 * 60_000;
 export const UNCONFIRMED = "unconfirmed";
 
 /**
- * A message that has waited this long to be sent is not sent: an answer
- * that arrives hours late, out of nowhere, is worse than none. It can only
- * wait so long when the job that sends its conversation's messages has
- * died. The agent's number.
+ * A message that could have been sent this long ago and was not is not
+ * sent: an answer that arrives hours late, out of nowhere, is worse than
+ * none. It waits so long when the job that sends its conversation's
+ * messages has died, and also when no worker ran or the queue was this far
+ * behind; the rule does not tell these apart. Counted from when the message
+ * was stored, or from the time it was last put off to. The agent's number.
  */
 export const SEND_EXPIRES_MS = 15 * 60_000;
 
-/** The code stored with a message that waited too long and was never called for. */
+/** The code stored with a message that waited too long, when no call for it ever ended unknown. It may have been called for and refused. */
 export const EXPIRED = "expired";
 
 /**
