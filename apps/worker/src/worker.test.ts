@@ -780,10 +780,11 @@ describe("the worker's loop", () => {
       expect(said(phone)).toEqual([0, 1, 2, 3, 4].map((n) => `${phone} says ${n}`));
     }
     expect((await outbound()).every((message) => message.status === "sent")).toBe(true);
-    // A job the workers had not reached when they were stopped, or had put back for a
-    // second because the other held the conversation, finds nothing left to do.
+    // A job the workers had not reached when they were stopped, or had put back because the
+    // other held the conversation (a second) or was sending its message (up to two minutes),
+    // finds nothing left to do.
     const sentBefore = mock.sent.length;
-    await work(mock, 5_000);
+    await work(mock, 10 * 60_000);
     expect(mock.sent).toHaveLength(sentBefore);
     expect(await jobs()).toEqual([]);
   }, 30_000);
