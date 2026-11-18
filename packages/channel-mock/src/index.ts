@@ -122,7 +122,7 @@ function parseWebhook(rawBody: Buffer): ParsedWebhook {
       }
       return { receivingNumberId: batch.receivingNumberId, events: batch.events.map(revive) };
     });
-    return { ok: true, batches, skipped: 0 };
+    return { ok: true, batches, skipped: 0, malformed: 0 };
   } catch {
     return { ok: false, code: "bad-shape" };
   }
@@ -133,6 +133,7 @@ export function createMockChannel(): MockChannel {
   let failure: SendResult | undefined;
   return {
     name: "mock",
+    maxWebhookBytes: 1024 * 1024,
     sent,
     failNextSend(code, retryable) {
       failure = { accepted: false, retryable, code };

@@ -57,6 +57,12 @@ describe("verifySignature", () => {
     expect(verifySignature(Buffer.from("x"), header, [SECRET])).toBe(false);
   });
 
+  test("a header sent twice, which arrives as a list, is refused even when called directly", () => {
+    const body = Buffer.from("x");
+    const twice = [sign(body, SECRET)] as unknown as string;
+    expect(verifySignature(body, twice, [SECRET])).toBe(false);
+  });
+
   test("while the secret is being replaced, the old and the new one are both accepted", () => {
     const body = Buffer.from("x");
     expect(verifySignature(body, sign(body, "old"), ["new", "old"])).toBe(true);
@@ -88,6 +94,8 @@ describe("registrationChallenge", () => {
   test.each([
     ["a wrong token", { ...query, "hub.verify_token": "tokem" }, "token"],
     ["a longer token", { ...query, "hub.verify_token": "token2" }, "token"],
+    ["the start of the token", { ...query, "hub.verify_token": "tok" }, "token"],
+    ["an empty token", { ...query, "hub.verify_token": "" }, "token"],
     ["no token", { "hub.mode": "subscribe", "hub.challenge": "1" }, "token"],
     ["another mode", { ...query, "hub.mode": "unsubscribe" }, "token"],
     ["no challenge", { "hub.mode": "subscribe", "hub.verify_token": "token" }, "token"],
@@ -121,6 +129,7 @@ describe("parseWebhook, on the fixtures of 2026-11-18", () => {
     expect(parseWebhook(fixture("inbound-text.json"))).toEqual({
       ok: true,
       skipped: 0,
+      malformed: 0,
       batches: [
         {
           receivingNumberId: "100000000000002",
@@ -167,6 +176,7 @@ describe("parseWebhook, on the fixtures of 2026-11-18", () => {
     expect(parseWebhook(fixture(`status-${status}.json`))).toEqual({
       ok: true,
       skipped: 0,
+      malformed: 0,
       batches: [
         {
           receivingNumberId: "100000000000002",
@@ -201,6 +211,7 @@ describe("parseWebhook, on the fixtures of 2026-11-18", () => {
     expect(parseWebhook(fixture("status-unknown.json"))).toEqual({
       ok: true,
       skipped: 1,
+      malformed: 0,
       batches: [{ receivingNumberId: "100000000000002", events: [] }],
     });
   });
@@ -209,6 +220,7 @@ describe("parseWebhook, on the fixtures of 2026-11-18", () => {
     expect(parseWebhook(fixture("other-field.json"))).toEqual({
       ok: true,
       skipped: 1,
+      malformed: 0,
       batches: [],
     });
   });
@@ -262,12 +274,88 @@ describe("parseWebhook, on payloads that are not what was documented", () => {
     ["a sender with a plus", set("from", "+15550142")],
     ["a user identifier of the wrong form", set("from_user_id", "<script>")],
     ["neither a number nor a user identifier", drop("from", "from_user_id")],
+    ["an identifier with a space in it", set("id", "wamid. X")],
+    ["an identifier that is only a control character", set("id", "\u0000")],
+    ["a time after the year 2100", set("timestamp", "999999999999")],
+    ["a text that is only the character U+0000", set("text", { body: "\u0000" })],
+    [
+      "a message that is not an object",
+      (_message: Part, value: Part) => {
+        value["messages"] = ["x"];
+      },
+    ],
+  ])("leaves out a message with %s, and says one was left out", (_what, change) => {
+    expect(parseWebhook(altered(change))).toEqual({
+      ok: true,
+      skipped: 0,
+      malformed: 1,
+      batches: [{ receivingNumberId: "100000000000002", events: [] }],
+    });
+  });
+
+  test.each([
     ["no metadata", inValue(drop("metadata"))],
+    [
+      "a receiving number that is not digits",
+      inValue(set("metadata", { phone_number_id: "../x" })),
+    ],
     ["messages that are not a list", inValue(set("messages", {}))],
-    ["a message that is not an object", inValue(set("messages", ["x"]))],
     ["statuses that are not a list", inValue(set("statuses", "x"))],
-  ])("refuses the whole payload with a code: %s", (_what, change) => {
-    expect(parseWebhook(altered(change))).toEqual({ ok: false, code: "bad-shape" });
+  ])("leaves out a whole group with %s, since nothing in it can be routed", (_what, change) => {
+    expect(parseWebhook(altered(change))).toEqual({
+      ok: true,
+      skipped: 0,
+      malformed: 1,
+      batches: [],
+    });
+  });
+
+  test("one message of the wrong form does not cost the messages beside it", () => {
+    const body = altered((message, value) => {
+      const good = { ...message, id: "wamid.SYNTHETIC0009" };
+      delete message["timestamp"];
+      value["messages"] = [message, good];
+      value["statuses"] = [
+        { id: "wamid.SYNTHETIC0101", status: "read", timestamp: "1795000060" },
+        { status: "read" },
+      ];
+    });
+    const parsed = parseWebhook(body);
+    expect(parsed.ok && parsed.malformed).toBe(2);
+    expect(parsed.ok && parsed.batches[0]?.events.map((event) => event.channelMessageId)).toEqual([
+      "wamid.SYNTHETIC0009",
+      "wamid.SYNTHETIC0101",
+    ]);
+  });
+
+  test.each([
+    [[], "unknown"],
+    ["not a list", "unknown"],
+    [[{ code: "131026" }], "unknown"],
+    [[{ code: 1e300 }], "unknown"],
+    [[{ code: -1 }], "unknown"],
+    [[7], "unknown"],
+    [[{ code: 131026 }], "131026"],
+  ])("a failed status whose errors are %j is kept, with the code %s", (errors, code) => {
+    const body = JSON.parse(fixture("status-failed.json").toString("utf8"));
+    body.entry[0].changes[0].value.statuses[0].errors = errors;
+    const parsed = parseWebhook(Buffer.from(JSON.stringify(body)));
+    expect(parsed.ok && parsed.malformed).toBe(0);
+    expect(parsed.ok && parsed.batches[0]?.events[0]).toMatchObject({
+      status: "failed",
+      errorCode: code,
+    });
+  });
+
+  test("the character U+0000 is removed from a text; everything else is kept as it came", () => {
+    const parsed = parseWebhook(
+      altered((message) => {
+        message["text"] = { body: "a\u0000b\n\t<b>\ud83d" };
+      }),
+    );
+    expect(parsed.ok && parsed.batches[0]?.events[0]).toMatchObject({
+      content: { type: "text", body: "ab\n\t<b>\ud83d" },
+    });
   });
 
   test.each([
@@ -281,9 +369,18 @@ describe("parseWebhook, on payloads that are not what was documented", () => {
     ['{"object":"whatsapp_business_account"}', "bad-shape"],
     ['{"object":"whatsapp_business_account","entry":{}}', "bad-shape"],
     ['{"object":"whatsapp_business_account","entry":[{}]}', "bad-shape"],
-    ['{"object":"whatsapp_business_account","entry":[{"changes":[7]}]}', "bad-shape"],
   ])("refuses %j as %s", (body, code) => {
     expect(parseWebhook(Buffer.from(body))).toEqual({ ok: false, code });
+  });
+
+  test("a change that is not an object is counted and the rest is read", () => {
+    const body = '{"object":"whatsapp_business_account","entry":[{"changes":[7]}]}';
+    expect(parseWebhook(Buffer.from(body))).toEqual({
+      ok: true,
+      batches: [],
+      skipped: 0,
+      malformed: 1,
+    });
   });
 
   test("fields it does not know are ignored", () => {
@@ -307,7 +404,12 @@ describe("parseWebhook, on payloads that are not what was documented", () => {
 
   test("an empty webhook is valid and holds nothing", () => {
     const body = '{"object":"whatsapp_business_account","entry":[]}';
-    expect(parseWebhook(Buffer.from(body))).toEqual({ ok: true, batches: [], skipped: 0 });
+    expect(parseWebhook(Buffer.from(body))).toEqual({
+      ok: true,
+      batches: [],
+      skipped: 0,
+      malformed: 0,
+    });
   });
 });
 
@@ -389,6 +491,88 @@ describe("sendText", () => {
     const { stub } = answering(status, body);
     const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
     expect(result).toEqual({ accepted: false, ...expected });
+  });
+
+  test("an answer of 408 may be retried", async () => {
+    const { stub } = answering(408, "");
+    const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
+    expect(result).toEqual({ accepted: false, retryable: true, code: "server-error" });
+  });
+
+  test.each([" ", "wamid with space", "w".repeat(129)])(
+    "an identifier of %j in a success is not taken for one",
+    async (id) => {
+      const { stub } = answering(200, { messages: [{ id }] });
+      const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
+      expect(result).toEqual({ accepted: false, retryable: false, code: "bad-response" });
+    },
+  );
+
+  test("an answer far larger than any real one is not read, and counts as no answer", async () => {
+    const huge = JSON.stringify({ messages: [{ id: "wamid.X" }], padding: "x".repeat(200_000) });
+    const { stub } = answering(200, huge);
+    const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
+    expect(result).toEqual({ accepted: false, retryable: false, code: "bad-response" });
+  });
+
+  test.each(["..", ".", "1/../2", "100000000000002?x=1", "", "mock-number"])(
+    "a sender of %j is refused, and the token is sent nowhere",
+    async (receivingNumberId) => {
+      const { calls, stub } = answering(200, accepted);
+      const result = await sendText(
+        { ...options, fetch: stub },
+        { ...from, receivingNumberId },
+        CUSTOMER,
+        "hi",
+      );
+      expect(result).toEqual({ accepted: false, retryable: false, code: "bad-sender" });
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  test.each(["", "two words", "line\nbreak", "tab\there"])(
+    "a token of %j is refused as a fault that retrying cannot mend",
+    async (accessToken) => {
+      const { calls, stub } = answering(200, accepted);
+      const result = await sendText(
+        { ...options, fetch: stub },
+        { ...from, accessToken },
+        CUSTOMER,
+        "hi",
+      );
+      expect(result).toEqual({ accepted: false, retryable: false, code: "bad-credentials" });
+      expect(calls).toHaveLength(0);
+    },
+  );
+
+  test("the request is made so that a redirect is not followed", async () => {
+    const { calls, stub } = answering(200, accepted);
+    await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
+    expect(calls[0]?.init.redirect).toBe("manual");
+  });
+
+  test("an answer that redirects is a failure that retrying cannot mend", async () => {
+    const stub = (async () =>
+      new Response(null, {
+        status: 307,
+        headers: { location: "https://elsewhere.invalid/" },
+      })) as unknown as typeof fetch;
+    const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
+    expect(result).toEqual({ accepted: false, retryable: false, code: "redirected" });
+  });
+
+  test.each([
+    [{ baseUrl: "not an address" }, "base address"],
+    [{ baseUrl: "ftp://channel.invalid" }, "base address"],
+    [{ baseUrl: "https://user:pass@channel.invalid" }, "base address"],
+    [{ apiVersion: "latest" }, "API version"],
+    [{ apiVersion: "v27.0/../x" }, "API version"],
+    [{ timeoutMs: Number.NaN }, "timeout"],
+    [{ timeoutMs: 0 }, "timeout"],
+  ])("a channel cannot be made with %j", (wrong, message) => {
+    expect(() => createWhatsAppChannel({ ...options, appSecrets: [SECRET], ...wrong })).toThrow(
+      message,
+    );
   });
 
   test("no answer in time is a failure that may be retried", async () => {

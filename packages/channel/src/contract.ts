@@ -42,8 +42,10 @@ function check(event: ChannelEvent): void {
 
 export function channelContract(name: string, subject: () => Promise<ContractSubject>): void {
   describe(`channel contract: ${name}`, () => {
-    test("has a short lower-case name", async () => {
-      expect((await subject()).channel.name).toMatch(/^[a-z]{1,20}$/);
+    test("has a short lower-case name and says how large its webhooks can be", async () => {
+      const { channel } = await subject();
+      expect(channel.name).toMatch(/^[a-z]{1,20}$/);
+      expect(Number.isInteger(channel.maxWebhookBytes) && channel.maxWebhookBytes > 0).toBe(true);
     });
 
     test("accepts a webhook it signed, and reads its events", async () => {
@@ -53,6 +55,7 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
       const parsed = channel.parseWebhook(rawBody);
       expect(parsed.ok).toBe(true);
       if (parsed.ok) {
+        expect([parsed.skipped, parsed.malformed]).toEqual([0, 0]);
         const events = parsed.batches.flatMap((batch) => batch.events);
         expect(events.map((event) => event.kind).sort()).toEqual(["message", "status"]);
         events.forEach(check);

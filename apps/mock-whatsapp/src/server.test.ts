@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { registerWebhook } from "@polyglot-sales-agent/api";
+import { createApiServer, registerWebhook } from "@polyglot-sales-agent/api";
 import type { EventBatch } from "@polyglot-sales-agent/channel";
 import { channelContract } from "@polyglot-sales-agent/channel/contract";
 import {
@@ -16,7 +16,7 @@ import {
 } from "@polyglot-sales-agent/channel-whatsapp";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, test } from "vitest";
-import { createMockWhatsApp, inboundTextPayload, type MockOptions } from "./server.ts";
+import { createMockWhatsApp, inboundTextPayload, MOCK_HOST, type MockOptions } from "./server.ts";
 
 const SECRET = "synthetic-app-secret";
 const TOKEN = "synthetic-access-token";
@@ -244,7 +244,7 @@ describe("the webhooks mock-whatsapp sends", () => {
   /** The product's webhook guard, listening, with a sink that records. */
   async function product(appSecret: string) {
     const received: (readonly EventBatch[])[] = [];
-    const app = Fastify({ logger: false });
+    const app = createApiServer({ trustedProxies: false });
     await registerWebhook(app, {
       channel: createWhatsAppChannel({
         appSecrets: [appSecret],
@@ -350,6 +350,45 @@ describe("the mock's own controls", () => {
       expect((await call("/mock/fail-next", body)).status).toBe(400);
     },
   );
+
+  test("what it shows of a send never includes the token", async () => {
+    const { baseUrl, channel } = await mock();
+    await channel.sendText(FROM, CUSTOMER, "hi");
+    expect(await (await fetch(`${baseUrl}/mock/sent`)).text()).not.toContain(TOKEN);
+  });
+
+  test("it listens on this machine only", () => {
+    expect(MOCK_HOST).toBe("127.0.0.1");
+    const main = readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
+    expect(main).toContain("host: MOCK_HOST");
+    expect(main).not.toMatch(/0\.0\.0\.0|::/);
+  });
+
+  test("a redirect from the channel's address is not followed: the token goes nowhere else", async () => {
+    const seen: string[] = [];
+    const elsewhere = Fastify({ logger: false });
+    elsewhere.all("/*", async (request) => {
+      seen.push(request.headers.authorization ?? "none");
+      return { messages: [{ id: "wamid.STOLEN" }] };
+    });
+    const target = await listening(elsewhere);
+    const redirecting = Fastify({ logger: false });
+    redirecting.post("/:version/:id/messages", async (_request, reply) =>
+      reply.redirect(`${target}/v27.0/1/messages`, 307),
+    );
+    const channel = createWhatsAppChannel({
+      appSecrets: [SECRET],
+      baseUrl: await listening(redirecting),
+      apiVersion: "v27.0",
+      timeoutMs: 2_000,
+    });
+    expect(await channel.sendText(FROM, CUSTOMER, "hi")).toEqual({
+      accepted: false,
+      retryable: false,
+      code: "redirected",
+    });
+    expect(seen).toEqual([]);
+  });
 
   test("the test page is served, says what it is, and puts messages on the page as text", async () => {
     const { baseUrl } = await mock();

@@ -12,6 +12,9 @@ import { SIGNATURE_HEADER, sign } from "@polyglot-sales-agent/channel-whatsapp";
 import Fastify, { type FastifyInstance } from "fastify";
 import { TEST_PAGE } from "./page.ts";
 
+/** The only address the mock listens on: this machine. */
+export const MOCK_HOST = "127.0.0.1";
+
 export interface MockOptions {
   /** Signs the webhooks it sends. */
   readonly appSecret: string;

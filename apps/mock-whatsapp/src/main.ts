@@ -1,7 +1,7 @@
 // Runs the mock for development: `node apps/mock-whatsapp/src/main.ts`.
 // It listens on this machine only.
 
-import { createMockWhatsApp } from "./server.ts";
+import { createMockWhatsApp, MOCK_HOST } from "./server.ts";
 
 function env(name: string): string {
   const value = process.env[name];
@@ -18,7 +18,7 @@ const app = createMockWhatsApp({
   ...(webhookUrl === undefined || webhookUrl === "" ? {} : { webhookUrl }),
 });
 const address = await app.listen({
-  host: "127.0.0.1",
+  host: MOCK_HOST,
   port: Number(process.env["PSA_MOCK_PORT"] ?? 4010),
 });
 console.log(`mock-whatsapp: listening on ${address}`);

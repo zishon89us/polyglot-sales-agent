@@ -18,7 +18,7 @@ passes on old fixtures shows the parser reads what was once sent.
 | `developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/overview/` | Fetched in full | The shape of an incoming text message; payloads of up to 3 MB; redelivery for up to 7 days when the answer is not 200, which can cause duplicates |
 | `developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids/` | First 100,000 of 186,760 characters | `user_id`, `from_user_id`, `recipient_user_id`, `profile.username`; that `from` and `wa_id` can be absent when the customer uses a username; the form of the identifier |
 | `developers.facebook.com/docs/graph-api/webhooks/getting-started/` | Search extract only | The header `X-Hub-Signature-256`, `sha256=` and a SHA-256 signature of the payload |
-| `developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages/` | Search extract only | The request and response of sending a text |
+| `developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages/` | Search extract only | The request and response of sending a text, by `to` (a phone number) and, in an example headed "Send to a BSUID", by `recipient` (a user ID). The user-ID page, read in part, says that if both are given the number takes precedence |
 | Several pages with a status example | Search extracts only | `statuses[]` with `id`, `status`, `timestamp`, `recipient_id` |
 
 ## What was not found or not read
@@ -26,6 +26,9 @@ passes on old fixtures shows the parser reads what was once sent.
 - **No page that specifies the status webhook was read in full.** The four
   status fixtures follow examples seen in extracts. The error object of a
   failed status (`errors[0].code`) is from an extract too.
+- Which HTTP status Meta gives for which error, and which error codes mean
+  "try again". The send code treats 429, 408 and 5xx as worth retrying and
+  any other refusal as final; that is an assumption.
 - The registration check (`hub.mode`, `hub.verify_token`,
   `hub.challenge`) was not re-read today; the code follows
   `docs/compliance.md`.

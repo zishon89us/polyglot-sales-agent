@@ -1,11 +1,15 @@
 // Sending a text through the Cloud API's messages endpoint, as documented
 // on 2026-11-18: POST {base}/{version}/{phone number id}/messages with a
-// bearer token; a success carries `messages[0].id`.
+// bearer token; a success carries `messages[0].id`. A customer is addressed
+// by `to` (a phone number) or by `recipient` (a business-scoped user ID).
 
 import type { ChannelUser, SendFrom, SendResult } from "@polyglot-sales-agent/channel";
 
 /** How long to wait for an answer to a send, unless told otherwise. The agent's proposal. */
 export const DEFAULT_SEND_TIMEOUT_MS = 10_000;
+
+/** No answer of the endpoint is larger than a few hundred bytes; more than this is not read. */
+const MAX_ANSWER_BYTES = 64 * 1024;
 
 export interface SendOptions {
   /** `https://graph.facebook.com` in a deployment; the mock's address in development and CI. */
@@ -22,6 +26,33 @@ function failure(code: string, retryable: boolean): SendResult {
   return { accepted: false, retryable, code };
 }
 
+/** The answer as JSON, or undefined if it is not JSON or is larger than any real answer. */
+async function answerOf(response: Response): Promise<unknown> {
+  try {
+    const reader = response.body?.getReader();
+    if (reader === undefined) {
+      return undefined;
+    }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      size += value.length;
+      if (size > MAX_ANSWER_BYTES) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 export async function sendText(
   options: SendOptions,
   from: SendFrom,
@@ -30,6 +61,14 @@ export async function sendText(
 ): Promise<SendResult> {
   if (to.phone === null && to.userId === null) {
     return failure("no-recipient", false);
+  }
+  // Digits only: anything else could change the path the token is sent to.
+  if (!/^[0-9]{1,32}$/.test(from.receivingNumberId)) {
+    return failure("bad-sender", false);
+  }
+  // A token with a space or a line break cannot be put in a header.
+  if (!/^[\x21-\x7e]+$/.test(from.accessToken)) {
+    return failure("bad-credentials", false);
   }
   const request = {
     messaging_product: "whatsapp",
@@ -42,7 +81,7 @@ export async function sendText(
   let response: Response;
   try {
     response = await (options.fetch ?? fetch)(
-      `${options.baseUrl}/${options.apiVersion}/${encodeURIComponent(from.receivingNumberId)}/messages`,
+      `${options.baseUrl}/${options.apiVersion}/${from.receivingNumberId}/messages`,
       {
         method: "POST",
         headers: {
@@ -51,7 +90,8 @@ export async function sendText(
         },
         body: JSON.stringify(request),
         signal: AbortSignal.timeout(options.timeoutMs),
-        redirect: "error",
+        // Never followed: the token must not travel to another address.
+        redirect: "manual",
       },
     );
   } catch (error) {
@@ -60,23 +100,21 @@ export async function sendText(
     const name = error instanceof Error ? error.name : "";
     return failure(name === "TimeoutError" || name === "AbortError" ? "timeout" : "network", true);
   }
-  let answer: unknown;
-  try {
-    answer = await response.json();
-  } catch {
-    answer = undefined;
+  if (response.status >= 300 && response.status < 400) {
+    return failure("redirected", false);
   }
+  const answer = await answerOf(response);
   if (response.ok) {
     const id = (answer as { messages?: { id?: unknown }[] } | undefined)?.messages?.[0]?.id;
     // Accepted by status but with no identifier: sending again could send twice.
-    return typeof id === "string" && id !== ""
+    return typeof id === "string" && /^\S{1,128}$/.test(id)
       ? { accepted: true, channelMessageId: id }
       : failure("bad-response", false);
   }
   if (response.status === 429) {
     return failure("rate-limited", true);
   }
-  if (response.status >= 500) {
+  if (response.status >= 500 || response.status === 408) {
     return failure("server-error", true);
   }
   if (response.status === 401 || response.status === 403) {
@@ -84,7 +122,9 @@ export async function sendText(
   }
   const code = (answer as { error?: { code?: unknown } } | undefined)?.error?.code;
   return failure(
-    typeof code === "number" && Number.isInteger(code) ? `meta-${code}` : "rejected",
+    typeof code === "number" && Number.isSafeInteger(code) && code >= 0
+      ? `meta-${code}`
+      : "rejected",
     false,
   );
 }

@@ -63,6 +63,12 @@ export type ParsedWebhook =
       readonly batches: readonly EventBatch[];
       /** Parts the channel sent that this version does not handle, and left out. */
       readonly skipped: number;
+      /**
+       * Messages, statuses or whole groups of them that did not have the
+       * form this version expects, and were left out. Not zero means
+       * something was lost and someone should look.
+       */
+      readonly malformed: number;
     }
   /** A short code only: the body may hold a stranger's number and text. */
   | { readonly ok: false; readonly code: string };
@@ -88,6 +94,8 @@ export type SendResult =
 export interface Channel {
   /** A short name, as stored in `channel_accounts.channel`. */
   readonly name: string;
+  /** The largest webhook body the channel sends. A larger one is refused unread. */
+  readonly maxWebhookBytes: number;
   /**
    * True only if the channel signed exactly these bytes. Must be called
    * with the body as received, before any parsing, and must not take longer

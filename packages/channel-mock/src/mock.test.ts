@@ -42,7 +42,7 @@ describe("the mock channel", () => {
   test("gives back exactly the events it was asked to carry", () => {
     const channel = createMockChannel();
     const parsed = channel.parseWebhook(channel.webhook(BATCHES).rawBody);
-    expect(parsed).toEqual({ ok: true, batches: BATCHES, skipped: 0 });
+    expect(parsed).toEqual({ ok: true, batches: BATCHES, skipped: 0, malformed: 0 });
   });
 
   test("records what was sent, in order", async () => {

@@ -26,7 +26,7 @@ export function verifySignature(
   header: string | undefined,
   appSecrets: readonly string[],
 ): boolean {
-  const match = header === undefined ? null : FORM.exec(header);
+  const match = typeof header === "string" ? FORM.exec(header) : null;
   if (match === null) {
     return false;
   }

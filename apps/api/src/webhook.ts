@@ -8,18 +8,23 @@
 
 import { createHash } from "node:crypto";
 import type { Channel, EventBatch } from "@polyglot-sales-agent/channel";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { BadSignatureLimiter } from "./bad-signature-limiter.ts";
 
-/**
- * The largest body read. Meta says a webhook payload can be up to 3 MB
- * (read 2026-11-18); this is 3 MiB, which is a little more.
- */
-export const WEBHOOK_BODY_LIMIT = 3 * 1024 * 1024;
+/** How long the sink may take before the request is answered 503. The agent's proposal. */
+export const SINK_DEADLINE_MS = 5_000;
 
 /** Where verified webhooks go. A method that throws makes the answer 503, so that the channel sends again. */
 export interface WebhookSink {
-  events(batches: readonly EventBatch[], skipped: number): Promise<void>;
+  /**
+   * `skipped` counts parts this version does not handle; `malformed` counts
+   * messages or statuses that were left out because they did not have the
+   * expected form.
+   */
+  events(
+    batches: readonly EventBatch[],
+    counts: { skipped: number; malformed: number },
+  ): Promise<void>;
   /**
    * A body with a valid signature that could not be read. It gets a hash,
    * its size and a code, and never the body itself, which may hold a
@@ -36,17 +41,40 @@ export interface WebhookOptions {
    * echo if the query is that check and its token is right.
    */
   readonly registration: (query: Readonly<Record<string, unknown>>) => string | undefined;
+  /**
+   * Who a request is from, for the limit on refused requests. The default
+   * is the address the server sees, which is the caller's only if the
+   * server is told about every proxy in front of it (`createApiServer`).
+   */
+  readonly sourceOf?: (request: FastifyRequest) => string;
   readonly limiter?: BadSignatureLimiter;
+  /** Defaults to the largest body the channel says it sends. */
   readonly bodyLimit?: number;
+  readonly sinkDeadlineMs?: number;
   /** For tests. Milliseconds. */
   readonly now?: () => number;
 }
 
-function problem(reply: FastifyReply, status: number, code: string, title: string): FastifyReply {
+export function problem(
+  reply: FastifyReply,
+  status: number,
+  code: string,
+  title: string,
+): FastifyReply {
   return reply
     .code(status)
     .type("application/problem+json")
     .send({ type: "about:blank", title, status, code });
+}
+
+class SinkTooSlow extends Error {}
+
+function within<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new SinkTooSlow()), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
 /** Registers `GET` and `POST /webhooks/<channel name>` on their own scope of the server. */
@@ -56,6 +84,8 @@ export async function registerWebhook(
 ): Promise<void> {
   const limiter = options.limiter ?? new BadSignatureLimiter();
   const now = options.now ?? Date.now;
+  const sourceOf = options.sourceOf ?? ((request: FastifyRequest) => request.ip);
+  const deadline = options.sinkDeadlineMs ?? SINK_DEADLINE_MS;
   const path = `/webhooks/${options.channel.name}`;
 
   await app.register(async (scope) => {
@@ -63,54 +93,68 @@ export async function registerWebhook(
     scope.removeAllContentTypeParsers();
     scope.addContentTypeParser(
       "*",
-      { parseAs: "buffer", bodyLimit: options.bodyLimit ?? WEBHOOK_BODY_LIMIT },
+      { parseAs: "buffer", bodyLimit: options.bodyLimit ?? options.channel.maxWebhookBytes },
       (_request, body, done) => done(null, body),
     );
 
-    scope.setErrorHandler((error: { statusCode?: number }, _request, reply) => {
-      if (error.statusCode === 413) {
+    scope.setErrorHandler((error: { code?: string; statusCode?: number }, request, reply) => {
+      // Decided by the framework's own error codes, never by a status an
+      // error from the sink might happen to carry.
+      if (error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+        limiter.recordBad(sourceOf(request), now());
         return problem(reply, 413, "too-large", "The body is larger than this endpoint reads");
+      }
+      if (typeof error.code === "string" && error.code.startsWith("FST_ERR_CTP_")) {
+        // The request itself is malformed; sending it again would not help.
+        return problem(reply, 400, "malformed", "The request could not be read");
       }
       // Nothing of the error is sent: it can describe the request.
       return problem(reply, 503, "unavailable", "The request could not be handled; send it again");
     });
 
-    // Before the body is read: a source that keeps failing the signature
-    // check is refused without costing any more work.
+    // Before the body is read: a source that keeps being refused is refused
+    // without costing any more work.
     scope.addHook("onRequest", async (request, reply) => {
-      if (request.method === "POST" && limiter.isBlocked(request.ip, now())) {
-        return problem(
-          reply,
-          429,
-          "too-many-bad-signatures",
-          "Too many requests failed the signature check",
-        );
+      if (limiter.isBlocked(sourceOf(request), now())) {
+        return problem(reply, 429, "too-many-refused", "Too many requests from here were refused");
       }
     });
 
     scope.get(path, async (request, reply) => {
       const challenge = options.registration(request.query as Record<string, unknown>);
-      return challenge === undefined
-        ? problem(reply, 403, "forbidden", "The verification token is wrong")
-        : reply.code(200).type("text/plain").send(challenge);
+      if (challenge === undefined) {
+        // Counted, so that the token cannot be guessed at without limit.
+        limiter.recordBad(sourceOf(request), now());
+        return problem(reply, 403, "forbidden", "The verification token is wrong");
+      }
+      return reply
+        .code(200)
+        .type("text/plain")
+        .header("x-content-type-options", "nosniff")
+        .send(challenge);
     });
 
     scope.post(path, async (request, reply) => {
       const rawBody = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+      // Nothing is read out of the body before this check.
       if (!options.channel.verifyWebhook(rawBody, request.headers)) {
-        limiter.recordBad(request.ip, now());
+        limiter.recordBad(sourceOf(request), now());
         return problem(reply, 401, "bad-signature", "The signature is missing or wrong");
       }
       const parsed = options.channel.parseWebhook(rawBody);
-      if (parsed.ok) {
-        await options.sink.events(parsed.batches, parsed.skipped);
-      } else {
-        await options.sink.unparsed({
-          code: parsed.code,
-          sha256: createHash("sha256").update(rawBody).digest("hex"),
-          size: rawBody.length,
-        });
-      }
+      await within(
+        parsed.ok
+          ? options.sink.events(parsed.batches, {
+              skipped: parsed.skipped,
+              malformed: parsed.malformed,
+            })
+          : options.sink.unparsed({
+              code: parsed.code,
+              sha256: createHash("sha256").update(rawBody).digest("hex"),
+              size: rawBody.length,
+            }),
+        deadline,
+      );
       return reply.code(200).type("text/plain").send("");
     });
   });
