@@ -41,6 +41,8 @@ const PRIVILEGES = {
     channel_routes: "SELECT",
     jobs: "DELETE,INSERT,SELECT,UPDATE",
     tenants: "INSERT,SELECT",
+    unparsed_events: "INSERT,SELECT",
+    unroutable_events: "INSERT,SELECT",
     worker_heartbeats: "DELETE,INSERT,SELECT,UPDATE",
   },
 };

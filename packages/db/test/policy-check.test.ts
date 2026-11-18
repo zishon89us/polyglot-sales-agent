@@ -51,6 +51,8 @@ describe("findIsolationProblems", () => {
     expect(Object.keys(UNSCOPED_TABLES)).toEqual([
       "channel_routes",
       "schema_migrations",
+      "unparsed_events",
+      "unroutable_events",
       "worker_heartbeats",
     ]);
     expect(Object.keys(SPECIAL_TABLES)).toEqual(["jobs"]);

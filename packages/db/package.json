@@ -5,7 +5,8 @@
   "description": "Database roles, migrations and the tenant-scoped transaction (ADR 0003).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./test/harness.ts"
   },
   "dependencies": {
     "@polyglot-sales-agent/core": "workspace:*",
