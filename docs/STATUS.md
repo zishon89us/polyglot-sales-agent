@@ -274,6 +274,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
   templates and pre-send checks, per-tenant credentials (one setting for
   every tenant until then), the delivery wait of NFR-R7 (#290).
 
+- 2026-11-19 — **#291 was merged before its code review had finished**, at
+  the commit before the fixes below. They follow in a second pull request.
 - 2026-11-19 — U8's code review: no High finding, four Medium, eight Low
   (`docs/reviews/2026-11-19-gate4-u8-worker.md`). In its own runs, with
   four workers and a channel that hung, threw and lied, no reply was
@@ -292,8 +294,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
 
 ## Next
 
-1. Maintainer reviews and merges U8 (#269), **after its code review and
-   the verification of its fixes are both in**.
+1. Maintainer merges the fixes to U8's review (second pull request for
+   #269), **after the verification of those fixes is in**.
 2. M2 unit U9: operator commands (#270).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
