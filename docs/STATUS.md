@@ -292,6 +292,15 @@ M0 Inception met its exit criteria on 2026-11-16; see
   of a reply only when a worker stopped; the build also resends after a
   timeout, and the story's text is left as it was.
 
+- 2026-11-19 — The fixes were checked by a second agent
+  (`docs/reviews/2026-11-19-gate4-u8-verification.md`): no High, four
+  findings, all about the new 15-minute limit. It confirmed every other
+  fix. Changed: the limit counts from when a message could first have
+  gone, so one put off to a later time is not expired early. Stated, not
+  changed: the limit applies whatever kept the message waiting, so after
+  15 minutes with no worker running the waiting replies are not sent and
+  those customers get no answer; each is reported in the worker's log.
+
 ## Next
 
 1. Maintainer merges the fixes to U8's review (second pull request for

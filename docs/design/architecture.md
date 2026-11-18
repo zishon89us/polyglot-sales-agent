@@ -385,7 +385,7 @@ message's class, and every class has a row (finding V6, #236):
 
 | Class | After a refusal the channel says can be retried | After an unknown outcome |
 | --- | --- | --- |
-| Assistant reply, system reply, staff message | Called again: three calls in all, after 2 and 8 seconds, then `failed` with the channel's code | **Called once more.** A customer waiting for an answer is worse off with none than with two. If that call is unknown too, `failed` with the code `unconfirmed`: never a third |
+| Assistant reply, system reply, staff message | Called again: three calls in all, after 2 and 8 seconds, then `failed` with the channel's code, or with `unconfirmed` if an earlier call for it ended unknown | **Called once more.** A customer waiting for an answer is worse off with none than with two. If that call is unknown too, `failed` with the code `unconfirmed`: never a third |
 | Service notice (the holding message, `handover_followup`), business-initiated (reminder, booking notice) | The same | **Not called again.** `failed` with the code `unconfirmed`. A second message the business started, which may be paid for, is worse than a missed one |
 
 A refusal the channel says cannot be retried is `failed` at once, for every
@@ -404,7 +404,7 @@ How a message moves:
 | Before the call | In one transaction the oldest waiting message of the conversation moves `pending` → `sending`, with the time and the count of calls |
 | After the call | In one transaction the result is recorded: `sent` with the channel's identifier, back to `pending` with the earliest time of the next call, or `failed` with a code. The record applies only if the message is still in the call that worker started |
 | Found in `sending` for more than 2 minutes | The outcome is unknown, and the table above decides. This is looked at when a send job for the conversation next runs: a later message's job, or the stopped worker's own job once its claim has run out, which is 5 minutes |
-| Found waiting more than 15 minutes after it was stored | Not sent. `failed` with the code `expired` if the channel was never left holding it, `unconfirmed` otherwise. An answer that arrives hours late is worse than none |
+| Found waiting more than 15 minutes after it could first have gone (after it was stored, or after the time it was last put off to) | Not sent. `failed` with the code `expired` if the channel was never left holding it, `unconfirmed` otherwise. An answer that arrives hours late is worse than none. **This holds whatever kept it waiting**: a dead job, no worker running, or a queue more than 15 minutes behind. The customer's message has by then been marked as dealt with, so nothing answers it; each such message is reported as `send-failed expired`. A call under way that is not yet 2 minutes old is left alone however old the message is |
 
 **Order within a conversation.** One job, `send-messages`, sends what waits
 in a conversation, oldest first, one message at a time. While the oldest is

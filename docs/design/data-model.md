@@ -259,7 +259,7 @@ null when no worker holds it).
 | `class` | For outbound: one of the five message classes |
 | `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on) |
 | `channel_sent_at` | For a message from a customer, the time the channel says it was sent. `created_at` is when the row was stored, taken per row, so the messages of one webhook keep their order |
-| `error_code` | For a `failed` message: the channel's code, or one of the worker's own: `unconfirmed` (after some call for it nobody knew whether the channel had it, so the customer may have it; decision 19), `expired` (it waited more than 15 minutes and was never called for), `no-channel`, `unsupported-kind`. Letters, digits, `_` and `-`, at most 40 |
+| `error_code` | For a `failed` message: the channel's code, or one of the worker's own: `unconfirmed` (after some call for it nobody knew whether the channel had it, so the customer may have it; decision 19), `expired` (it waited more than 15 minutes to be sent, and no call for it ended unknown; it may have been called for and refused), `no-channel`, `unsupported-kind`. Letters, digits, `_` and `-`, at most 40 |
 | `handled_at` | For a message from a customer: when a turn dealt with it. Null until then (decision 18) |
 | `send_attempts`, `unknown_outcomes` | For a message to send: how many times the channel was called for it, and how many of those calls ended with nobody knowing whether it was accepted. The second is the resend counter of US-C1 criterion 9 |
 | `sending_at`, `send_not_before` | When the call under way started, set exactly while the status is `sending`; and the earliest time of the next call after a refusal that can be retried |
