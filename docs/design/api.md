@@ -137,13 +137,16 @@ The request does four things and nothing else (NFR-P1):
 | A valid signature, but the receiving number belongs to no tenant | 200 | Metadata only is stored (data model, decision 1). An error would make the channel retry |
 | A valid signature, but a payload this version cannot parse, including a body that is not valid JSON | 200 | Metadata only is stored (`unparsed_events`: a hash, the size and an error code, kept 30 days), and the operator is alerted. The raw event is not kept, because it would hold a stranger's number and text outside tenant scoping |
 | A bad or missing signature | 401 | Unless the request was refused before its signature could be read: 413 for a body over the size limit, 429 from a blocked source, 400 for a request that is not well-formed HTTP. In every case nothing is stored |
-| A valid signature, and one message or status in the payload that does not have the expected form | 200 | That item is left out and counted; the others in the same payload are read. The count is handed on so that it can be recorded and looked at. The item itself is lost: the channel will not send it again after a 200 |
+| A valid signature, and one message or status in the payload that does not have the expected form | 200 | That item is left out and counted; the others in the same payload are read. A group of messages without its receiving number, or an entry that cannot be walked, counts as one however much it held. The count is handed on so that it can be recorded and looked at. What was left out is lost: the channel will not send it again after a 200 |
 | The database is unavailable | 503 | The channel redelivers later |
 
-The webhook never answers 400 or 429 to a validly signed request: the first
-would be pointless, since the channel cannot repair its own payload, and the
-second would throttle the channel's deliveries. There is one exception, and
-it follows from the limit on refused requests (#154):
+The webhook does not answer 400 or 429 to a validly signed request whose
+body it could read as bytes: the first would be pointless, since the channel
+cannot repair its own payload, and the second would throttle the channel's
+deliveries. (A request that is not well-formed HTTP, such as one with a
+content type that cannot be parsed, is answered 400 whatever its signature.)
+There is one exception, and it follows from the limit on refused requests
+(#154):
 
 - **What counts.** A request with a bad or missing signature, a body over
   the size limit, and a registration check with a wrong token. A validly
@@ -167,10 +170,18 @@ it follows from the limit on refused requests (#154):
   sixty connections that each send a 3 MiB body at the same moment are all
   read. Bounding that takes a limit on connections, which is the
   platform's. An IPv6 caller with a whole network can use a new address
-  each time. The count is kept in each API process's memory.
+  each time. The count is kept in each API process's memory, for at most
+  10,000 sources: with more than that active at once, a source that has
+  not yet reached ten is forgotten before it does.
 
-A request must arrive in full within 10 seconds or its connection is
-closed, and the sink must finish within 5 seconds or the answer is 503.
+A request must arrive in full, body included, within 10 seconds, or its
+connection is closed with no answer; a body that trickles in is cut off at
+the same time as one that stops. The sink must finish within 5 seconds, or
+the answer is 503 and the sink is told to stop. **A 503 does not mean that
+nothing was stored**: a sink that was slow may still have committed. The
+channel sends the webhook again either way, so storing must be safe to
+repeat. For events the unique message identifier makes it so; for the
+record of an unreadable body, unit U7 must make it so.
 
 What is trusted from a signed event: that the channel sent it, the sender's
 number and the receiving number (threat-model assumption A1). What is never

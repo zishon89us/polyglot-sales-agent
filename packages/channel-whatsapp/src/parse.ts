@@ -8,8 +8,9 @@
 // does not know) is counted as skipped and left out. A message or a status
 // that lacks a field this code relies on, or has it in another form, is
 // counted as malformed and left out, and the rest of the webhook is still
-// read: one odd item must not cost the messages beside it. Only an outer
-// structure that cannot be walked at all refuses the whole payload.
+// read: one odd item must not cost the messages beside it. An entry or a
+// group of messages that cannot be walked counts as one, however much it
+// held. Only a body that is not the channel's webhook at all is refused.
 
 import type {
   ChannelEvent,
@@ -171,14 +172,14 @@ export function parseWebhook(rawBody: Buffer): ParsedWebhook {
   }
   let entries: readonly unknown[];
   try {
-    entries = list((body as Json)["entry"]).map((entry) => list(object(entry)["changes"]));
+    entries = list((body as Json)["entry"]);
   } catch {
     return { ok: false, code: "bad-shape" };
   }
   const batches: EventBatch[] = [];
   let skipped = 0;
   let malformed = 0;
-  /** Runs one item's reading; an item of the wrong form is counted, not fatal. */
+  /** Runs one item's reading; an item of the wrong form is counted once, not fatal. */
   const attempt = <T>(read: () => T): T | undefined => {
     try {
       return read();
@@ -190,7 +191,9 @@ export function parseWebhook(rawBody: Buffer): ParsedWebhook {
       throw error;
     }
   };
-  for (const rawChange of entries.flat()) {
+  // An entry that cannot be walked is counted and the entries beside it are read.
+  const changes = entries.flatMap((entry) => attempt(() => list(object(entry)["changes"])) ?? []);
+  for (const rawChange of changes) {
     const change = attempt(() => object(rawChange));
     if (change === undefined) {
       continue;

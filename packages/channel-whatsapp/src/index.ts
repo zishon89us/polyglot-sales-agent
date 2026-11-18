@@ -30,14 +30,21 @@ export function createWhatsAppChannel(options: WhatsAppOptions): Channel {
   } catch {
     base = undefined;
   }
-  if (base === undefined || !/^https?:$/.test(base.protocol) || base.username !== "") {
-    throw new Error("channel-whatsapp: the base address must be an http or https address");
+  // Exactly a scheme and a host: no path, query, credentials or stray spaces.
+  if (base === undefined || !/^https?:$/.test(base.protocol) || options.baseUrl !== base.origin) {
+    throw new Error(
+      "channel-whatsapp: the base address must be an http or https origin, such as https://graph.facebook.com",
+    );
   }
   if (!/^v[0-9]{1,3}\.[0-9]{1,2}$/.test(options.apiVersion)) {
     throw new Error("channel-whatsapp: the API version must look like v27.0");
   }
-  if (!(Number.isFinite(options.timeoutMs) && options.timeoutMs > 0)) {
-    throw new Error("channel-whatsapp: the timeout must be a positive number of milliseconds");
+  if (
+    !(Number.isInteger(options.timeoutMs) && options.timeoutMs >= 1 && options.timeoutMs <= 120_000)
+  ) {
+    throw new Error(
+      "channel-whatsapp: the timeout must be a whole number of milliseconds, at most 120000",
+    );
   }
   return {
     name: "whatsapp",

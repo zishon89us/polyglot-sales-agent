@@ -197,11 +197,16 @@ M0 Inception met its exit criteria on 2026-11-16; see
   (#202). Reading the documentation turned up a fact the design did not
   assume: **a WhatsApp customer may arrive with no phone number** (#284).
   Not built: the sink that stores, which is U7's; templates and credential
-  checks; statuses from the mock. All in #285.
+  checks; statuses from the mock. All in #285. The code review found 15
+  defects, one High: a test that could not fail. **#286 was merged while the
+  verification of those fixes was still running**; what it found (a
+  trickled request body was cut off at 90 seconds, not 10; the server
+  rewrote every route's client error to 400; a slow sink was never told to
+  stop) is fixed in a second pull request, #287.
 
 ## Next
 
-1. Maintainer reviews and merges U6 (#267), **after its code review is in**.
+1. Maintainer reviews and merges the U6 fixes (#287), which close #267.
 2. M2 unit U7: the webhook stores and queues (#268). Before a contact is
    stored, #284 must be decided.
 3. Still open for the maintainer: squash or merge commits (OQ-11).
@@ -264,7 +269,8 @@ v1.1.
 - **NFR-S2 was reworded by the agent** in unit U6. It said every request
   with a missing or invalid signature is "answered 401"; with the size
   limit and the limit on refused requests of #154, some are refused with
-  413, 429 or 400 before the signature can be read. "Not stored" is
+  413, 429, another 4xx or a closed connection before the signature can be
+  read. "Not stored" is
   unchanged. Confirm, or say which answers are acceptable.
 - **NFR-O1 was reworded by the agent** in unit U5. It said health and
   readiness endpoints are "present on API and worker"; the worker accepts
