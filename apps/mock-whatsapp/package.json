@@ -1,0 +1,15 @@
+{
+  "name": "@polyglot-sales-agent/mock-whatsapp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Development and CI only: stands in for Meta's servers. Never part of a deployment.",
+  "type": "module",
+  "dependencies": {
+    "@polyglot-sales-agent/channel-whatsapp": "workspace:*",
+    "fastify": "5.12.8"
+  },
+  "devDependencies": {
+    "@polyglot-sales-agent/api": "workspace:*",
+    "@polyglot-sales-agent/channel": "workspace:*"
+  }
+}
