@@ -3,7 +3,12 @@ export {
   type LimiterOptions,
   WEBHOOK_LIMITS,
 } from "./bad-signature-limiter.ts";
-export { createApiServer, REQUEST_TIMEOUT_MS, type ServerOptions } from "./server.ts";
+export {
+  createApiServer,
+  ProblemError,
+  REQUEST_TIMEOUT_MS,
+  type ServerOptions,
+} from "./server.ts";
 export {
   registerWebhook,
   SINK_DEADLINE_MS,

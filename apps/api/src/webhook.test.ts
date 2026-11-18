@@ -18,7 +18,7 @@ import {
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, test } from "vitest";
 import { BadSignatureLimiter } from "./bad-signature-limiter.ts";
-import { createApiServer } from "./server.ts";
+import { createApiServer, ProblemError } from "./server.ts";
 import { registerWebhook, SINK_DEADLINE_MS, type WebhookSink } from "./webhook.ts";
 
 const SECRET = "synthetic-app-secret";
@@ -342,6 +342,65 @@ describe("the limit on bad signatures (issue #154)", () => {
     expect((await post(body, signature, "198.51.100.1")).statusCode).toBe(429);
   });
 
+  test("nothing a validly signed request leads to counts: unreadable, left-out parts, or a failing sink", async () => {
+    let fail = false;
+    const recorded: unknown[] = [];
+    const { post } = await server({
+      now: () => 0,
+      limiter: new BadSignatureLimiter(limits),
+      sink: {
+        events: async (batches) => {
+          if (fail) {
+            throw new Error("down");
+          }
+          recorded.push(batches);
+        },
+      },
+    });
+    const send = async (body: Buffer, expected: number) => {
+      for (let i = 0; i < 12; i += 1) {
+        expect((await post(body, sign(body, SECRET), "198.51.100.1")).statusCode).toBe(expected);
+      }
+    };
+    await send(fixture("inbound-text.json"), 200);
+    await send(fixture("other-field.json"), 200);
+    await send(Buffer.from("signed but not json"), 200);
+    const odd = JSON.parse(fixture("inbound-text.json").toString("utf8"));
+    delete odd.entry[0].changes[0].value.messages[0].timestamp;
+    await send(Buffer.from(JSON.stringify(odd)), 200);
+    fail = true;
+    await send(fixture("inbound-text.json"), 503);
+    fail = false;
+    expect(
+      (
+        await post(
+          fixture("inbound-text.json"),
+          sign(fixture("inbound-text.json"), SECRET),
+          "198.51.100.1",
+        )
+      ).statusCode,
+      "after sixty valid requests of every kind the source is still not blocked",
+    ).toBe(200);
+  });
+
+  test("behind a declared proxy, a caller that is not the proxy cannot name another address as its own", async () => {
+    const { post } = await server({
+      now: () => 0,
+      limiter: new BadSignatureLimiter(limits),
+      trustedProxies: ["192.0.2.10"],
+    });
+    const body = fixture("inbound-text.json");
+    for (let i = 0; i < 10; i += 1) {
+      await post(body, undefined, "198.51.100.66", { "x-forwarded-for": "198.51.100.1" });
+    }
+    const signature = sign(body, SECRET);
+    expect(
+      (await post(body, signature, "192.0.2.10", { "x-forwarded-for": "198.51.100.1" })).statusCode,
+      "the named address is not blocked",
+    ).toBe(200);
+    expect((await post(body, signature, "198.51.100.66")).statusCode, "the caller is").toBe(429);
+  });
+
   test("a source is the connection's address: a header naming another address changes nothing", async () => {
     const { post } = await server({ now: () => 0, limiter: new BadSignatureLimiter(limits) });
     const body = fixture("inbound-text.json");
@@ -461,19 +520,62 @@ describe("order, deadlines and what else is answered", () => {
     const { recorded, post } = await server();
     const other = fixture("other-field.json");
     await post(other, sign(other, SECRET));
-    expect(recorded.events).toEqual([{ batches: [], skipped: 1, malformed: 0 }]);
+    const odd = JSON.parse(fixture("inbound-text.json").toString("utf8"));
+    delete odd.entry[0].changes[0].value.messages[0].timestamp;
+    const oddBody = Buffer.from(JSON.stringify(odd));
+    await post(oddBody, sign(oddBody, SECRET));
+    expect(recorded.events).toEqual([
+      { batches: [], skipped: 1, malformed: 0 },
+      { batches: [{ receivingNumberId: "100000000000002", events: [] }], skipped: 0, malformed: 1 },
+    ]);
   });
 
-  test("a sink that does not finish in time is answered 503; the deadline in use is 5 seconds", async () => {
+  test("a sink that does not finish in time is answered 503 and told to stop; the deadline in use is 5 seconds", async () => {
     expect(SINK_DEADLINE_MS).toBe(5_000);
+    let signal: AbortSignal | undefined;
     const { post } = await server({
       sinkDeadlineMs: 50,
-      sink: { events: () => new Promise(() => undefined) },
+      sink: {
+        events: (_batches, _counts, given) => {
+          signal = given;
+          return new Promise(() => undefined);
+        },
+      },
     });
     const body = fixture("inbound-text.json");
     const response = await post(body, sign(body, SECRET));
     expect(response.statusCode).toBe(503);
     expect(response.json()).toMatchObject({ code: "unavailable" });
+    expect(signal?.aborted).toBe(true);
+  });
+
+  test("a sink that finishes in time is not told to stop, and one that fails late harms nothing", async () => {
+    let signal: AbortSignal | undefined;
+    const quick = await server({
+      sink: {
+        events: async (_batches, _counts, given) => {
+          signal = given;
+        },
+      },
+    });
+    const body = fixture("inbound-text.json");
+    await quick.post(body, sign(body, SECRET));
+    expect(signal?.aborted).toBe(false);
+
+    const unhandled: unknown[] = [];
+    const note = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", note);
+    const late = await server({
+      sinkDeadlineMs: 30,
+      sink: {
+        events: () =>
+          new Promise((_resolve, reject) => setTimeout(() => reject(new Error("late")), 80)),
+      },
+    });
+    expect((await late.post(body, sign(body, SECRET))).statusCode).toBe(503);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    process.off("unhandledRejection", note);
+    expect(unhandled).toEqual([]);
   });
 
   test("the 200 is sent only after the sink has finished", async () => {
@@ -510,31 +612,101 @@ describe("order, deadlines and what else is answered", () => {
     expect((await post(body, sign(body, SECRET))).statusCode).toBe(503);
   });
 
-  test("a body that arrives too slowly is cut off", async () => {
-    const { app } = await server({ requestTimeoutMs: 300 });
-    await app.listen({ host: "127.0.0.1", port: 0 });
-    const port = (app.server.address() as { port: number }).port;
-    const outcome = await new Promise<string>((resolve) => {
+  /** Opens a connection, sends what `feed` sends, and reports when and how it ended. */
+  function connection(
+    port: number,
+    feed: (socket: import("node:net").Socket) => void,
+  ): Promise<{ after: number; how: string }> {
+    return new Promise((resolve) => {
+      const started = Date.now();
       const socket = connect(port, "127.0.0.1");
       let answer = "";
-      socket.on("connect", () => {
-        socket.write(
-          "POST /webhooks/whatsapp HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\nx",
-        );
-      });
+      const end = (how: string) => {
+        socket.destroy();
+        resolve({ after: Date.now() - started, how });
+      };
+      socket.on("connect", () => feed(socket));
       socket.on("data", (chunk) => {
         answer += chunk.toString("latin1");
       });
-      socket.on("close", () =>
-        resolve(answer === "" ? "closed" : (answer.split("\r\n")[0] as string)),
-      );
-      socket.on("error", () => resolve("closed"));
-      socket.setTimeout(3_000, () => {
-        socket.destroy();
-        resolve("still open after 3 seconds");
-      });
+      socket.on("close", () => end(answer === "" ? "closed" : (answer.split("\r\n")[0] as string)));
+      socket.on("error", () => end("closed"));
+      socket.setTimeout(4_000, () => end("still open after 4 seconds"));
     });
-    expect(["closed", "HTTP/1.1 408 Request Timeout"]).toContain(outcome);
+  }
+  const HEAD = "POST /webhooks/whatsapp HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n";
+
+  test("a body that stops arriving is cut off", async () => {
+    const { app } = await server({ requestTimeoutMs: 300 });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const port = (app.server.address() as { port: number }).port;
+    const ended = await connection(port, (socket) =>
+      socket.write(`${HEAD}Content-Length: 1000\r\n\r\nx`),
+    );
+    expect(ended.how).not.toBe("still open after 4 seconds");
+    expect(ended.after).toBeLessThan(1_500);
+  });
+
+  test("a body that keeps trickling in is cut off at the same time, not kept alive by each byte", async () => {
+    const { app, recorded } = await server({ requestTimeoutMs: 300 });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const port = (app.server.address() as { port: number }).port;
+    let trickle: ReturnType<typeof setInterval> | undefined;
+    const ended = await connection(port, (socket) => {
+      socket.write(`${HEAD}Content-Length: 1000\r\n\r\n`);
+      trickle = setInterval(() => socket.writable && socket.write("x"), 50);
+    });
+    clearInterval(trickle);
+    expect(ended.how).not.toBe("still open after 4 seconds");
+    expect(ended.after).toBeGreaterThanOrEqual(250);
+    expect(ended.after).toBeLessThan(1_500);
+    expect(recorded).toEqual({ events: [], unparsed: [] });
+  });
+
+  test("a request that arrives in time is not cut off when its sink takes longer than the arrival limit", async () => {
+    const { app } = await server({
+      requestTimeoutMs: 100,
+      sink: { events: () => new Promise((resolve) => setTimeout(resolve, 400)) },
+    });
+    // Over a real connection: only there can a connection be cut.
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const body = fixture("inbound-text.json");
+    const response = await fetch(`${address}/webhooks/whatsapp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", [SIGNATURE_HEADER]: sign(body, SECRET) },
+      body,
+    });
+    expect(response.status).toBe(200);
+  });
+
+  test("an error a route throws on purpose is answered as it says; any other is 503, whatever status it carries", async () => {
+    const { app } = await server();
+    app.get("/on-purpose", async () => {
+      throw new ProblemError(409, "contact-opted-out", "The contact has opted out");
+    });
+    app.get("/by-accident", async () => {
+      throw Object.assign(new Error("secret detail"), { statusCode: 403 });
+    });
+    const meant = await app.inject({ method: "GET", url: "/on-purpose" });
+    expect(meant.statusCode).toBe(409);
+    expect(meant.json()).toEqual({
+      type: "about:blank",
+      title: "The contact has opted out",
+      status: 409,
+      code: "contact-opted-out",
+    });
+    const accident = await app.inject({ method: "GET", url: "/by-accident" });
+    expect(accident.statusCode).toBe(503);
+    expect(accident.body).not.toContain("secret detail");
+  });
+
+  test("a path that cannot be decoded is answered without repeating it, and there is no HEAD route", async () => {
+    const { app } = await server();
+    const broken = await app.inject({ method: "GET", url: "/webhooks/+15550142%zz" });
+    expect(broken.statusCode).toBe(400);
+    expect(broken.json()).toMatchObject({ code: "malformed" });
+    expect(broken.body).not.toContain("15550142");
+    expect((await app.inject({ method: "HEAD", url: "/webhooks/whatsapp" })).statusCode).toBe(404);
   });
 
   test("an unknown path or a broken request is answered without repeating anything of it", async () => {

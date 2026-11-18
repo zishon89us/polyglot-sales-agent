@@ -103,11 +103,14 @@ export async function sendText(
   if (response.status >= 300 && response.status < 400) {
     return failure("redirected", false);
   }
+  // A failure while reading the answer leaves it unknown. For a 200 that is
+  // "bad-response" and not retried: Meta has accepted the message, and
+  // sending it again would send it twice.
   const answer = await answerOf(response);
   if (response.ok) {
     const id = (answer as { messages?: { id?: unknown }[] } | undefined)?.messages?.[0]?.id;
     // Accepted by status but with no identifier: sending again could send twice.
-    return typeof id === "string" && /^\S{1,128}$/.test(id)
+    return typeof id === "string" && /^[\x21-\x7e]{1,128}$/.test(id)
       ? { accepted: true, channelMessageId: id }
       : failure("bad-response", false);
   }

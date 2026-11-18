@@ -7,7 +7,10 @@
 // The check runs before a body is read and the count rises after, so a
 // source can have any number of bodies on their way in at once. Bounding
 // that needs a limit on connections, which is the platform's
-// (`docs/design/api.md`, section 8).
+// (`docs/design/api.md`, section 3).
+//
+// It remembers 10,000 sources. With more than that active at once, one
+// that has not reached the limit is forgotten before it does.
 //
 // It lives in the memory of one process: with several API processes each
 // counts on its own, and a restart forgets. The numbers are the agent's

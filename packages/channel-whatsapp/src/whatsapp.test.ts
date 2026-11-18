@@ -321,7 +321,8 @@ describe("parseWebhook, on payloads that are not what was documented", () => {
       ];
     });
     const parsed = parseWebhook(body);
-    expect(parsed.ok && parsed.malformed).toBe(2);
+    // One message and one status, each counted once and as malformed only.
+    expect(parsed.ok && [parsed.malformed, parsed.skipped]).toEqual([2, 0]);
     expect(parsed.ok && parsed.batches[0]?.events.map((event) => event.channelMessageId)).toEqual([
       "wamid.SYNTHETIC0009",
       "wamid.SYNTHETIC0101",
@@ -368,9 +369,19 @@ describe("parseWebhook, on payloads that are not what was documented", () => {
     ['{"object":"page","entry":[]}', "wrong-object"],
     ['{"object":"whatsapp_business_account"}', "bad-shape"],
     ['{"object":"whatsapp_business_account","entry":{}}', "bad-shape"],
-    ['{"object":"whatsapp_business_account","entry":[{}]}', "bad-shape"],
   ])("refuses %j as %s", (body, code) => {
     expect(parseWebhook(Buffer.from(body))).toEqual({ ok: false, code });
+  });
+
+  test("an entry that cannot be walked is counted, and the entries beside it are read", () => {
+    const body = JSON.parse(fixture("two-numbers.json").toString("utf8"));
+    body.entry.splice(1, 0, {}, "not an entry", { changes: "not a list" });
+    const parsed = parseWebhook(Buffer.from(JSON.stringify(body)));
+    expect(parsed.ok && [parsed.malformed, parsed.skipped]).toEqual([3, 0]);
+    expect(parsed.ok && parsed.batches.map((batch) => batch.receivingNumberId)).toEqual([
+      "100000000000002",
+      "100000000000004",
+    ]);
   });
 
   test("a change that is not an object is counted and the rest is read", () => {
@@ -508,6 +519,30 @@ describe("sendText", () => {
     },
   );
 
+  test("an answer of exactly 64 KiB is read; one byte more is not", async () => {
+    const answer = (bytes: number) => {
+      const start = '{"messages":[{"id":"wamid.X"}],"padding":"';
+      return `${start}${"x".repeat(bytes - start.length - 2)}"}`;
+    };
+    for (const [bytes, accepted] of [
+      [64 * 1024, true],
+      [64 * 1024 + 1, false],
+    ] as const) {
+      const { stub } = answering(200, answer(bytes));
+      const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
+      expect(result.accepted, `${bytes} bytes`).toBe(accepted);
+    }
+  });
+
+  test("an identifier that is not plain printable characters is not taken for one", async () => {
+    const stub = (async () =>
+      new Response(Buffer.from('{"messages":[{"id":"wamid.\xff\xfe"}]}', "latin1"), {
+        status: 200,
+      })) as unknown as typeof fetch;
+    const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
+    expect(result).toEqual({ accepted: false, retryable: false, code: "bad-response" });
+  });
+
   test("an answer far larger than any real one is not read, and counts as no answer", async () => {
     const huge = JSON.stringify({ messages: [{ id: "wamid.X" }], padding: "x".repeat(200_000) });
     const { stub } = answering(200, huge);
@@ -565,6 +600,13 @@ describe("sendText", () => {
     [{ baseUrl: "not an address" }, "base address"],
     [{ baseUrl: "ftp://channel.invalid" }, "base address"],
     [{ baseUrl: "https://user:pass@channel.invalid" }, "base address"],
+    [{ baseUrl: "https://:pass@channel.invalid" }, "base address"],
+    [{ baseUrl: " https://channel.invalid " }, "base address"],
+    [{ baseUrl: "https://channel.invalid/" }, "base address"],
+    [{ baseUrl: "https://channel.invalid/path" }, "base address"],
+    [{ baseUrl: "https://channel.invalid?x=1" }, "base address"],
+    [{ timeoutMs: 0.5 }, "timeout"],
+    [{ timeoutMs: 2 ** 40 }, "timeout"],
     [{ apiVersion: "latest" }, "API version"],
     [{ apiVersion: "v27.0/../x" }, "API version"],
     [{ timeoutMs: Number.NaN }, "timeout"],

@@ -14,7 +14,13 @@ import { BadSignatureLimiter } from "./bad-signature-limiter.ts";
 /** How long the sink may take before the request is answered 503. The agent's proposal. */
 export const SINK_DEADLINE_MS = 5_000;
 
-/** Where verified webhooks go. A method that throws makes the answer 503, so that the channel sends again. */
+/**
+ * Where verified webhooks go. A method that throws, or does not finish in
+ * time, makes the answer 503, so that the channel sends again. The signal
+ * aborts at that deadline: a sink must stop then, or at least must be safe
+ * to run again for the same webhook, because the channel will send it again
+ * whether or not this run stored anything.
+ */
 export interface WebhookSink {
   /**
    * `skipped` counts parts this version does not handle; `malformed` counts
@@ -24,13 +30,17 @@ export interface WebhookSink {
   events(
     batches: readonly EventBatch[],
     counts: { skipped: number; malformed: number },
+    signal: AbortSignal,
   ): Promise<void>;
   /**
    * A body with a valid signature that could not be read. It gets a hash,
    * its size and a code, and never the body itself, which may hold a
    * stranger's number and text.
    */
-  unparsed(info: { code: string; sha256: string; size: number }): Promise<void>;
+  unparsed(
+    info: { code: string; sha256: string; size: number },
+    signal: AbortSignal,
+  ): Promise<void>;
 }
 
 export interface WebhookOptions {
@@ -69,12 +79,20 @@ export function problem(
 
 class SinkTooSlow extends Error {}
 
-function within<T>(work: Promise<T>, ms: number): Promise<T> {
+/** Runs the sink with a signal that aborts at the deadline, when the wait ends too. */
+function within(work: (signal: AbortSignal) => Promise<void>, ms: number): Promise<void> {
+  const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new SinkTooSlow()), ms);
+    timer = setTimeout(() => {
+      abort.abort();
+      reject(new SinkTooSlow());
+    }, ms);
   });
-  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+  const run = work(abort.signal);
+  // If the deadline wins, the sink's own late failure must not go unhandled.
+  run.catch(() => undefined);
+  return Promise.race([run, late]).finally(() => clearTimeout(timer));
 }
 
 /** Registers `GET` and `POST /webhooks/<channel name>` on their own scope of the server. */
@@ -143,16 +161,21 @@ export async function registerWebhook(
       }
       const parsed = options.channel.parseWebhook(rawBody);
       await within(
-        parsed.ok
-          ? options.sink.events(parsed.batches, {
-              skipped: parsed.skipped,
-              malformed: parsed.malformed,
-            })
-          : options.sink.unparsed({
-              code: parsed.code,
-              sha256: createHash("sha256").update(rawBody).digest("hex"),
-              size: rawBody.length,
-            }),
+        (signal) =>
+          parsed.ok
+            ? options.sink.events(
+                parsed.batches,
+                { skipped: parsed.skipped, malformed: parsed.malformed },
+                signal,
+              )
+            : options.sink.unparsed(
+                {
+                  code: parsed.code,
+                  sha256: createHash("sha256").update(rawBody).digest("hex"),
+                  size: rawBody.length,
+                },
+                signal,
+              ),
         deadline,
       );
       return reply.code(200).type("text/plain").send("");
