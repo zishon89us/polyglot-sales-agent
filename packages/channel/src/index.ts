@@ -85,11 +85,20 @@ export interface SendFrom {
 export type SendResult =
   | { readonly accepted: true; readonly channelMessageId: string }
   /**
-   * `retryable` says whether sending the same message again can help. A
-   * timeout is retryable and may have been accepted all the same: the
-   * channel offers no way to ask (threat model, A7 h).
+   * `retryable` says whether sending the same message again can help.
+   * `mayHaveArrived` says whether the channel may have accepted the message
+   * all the same: true for a timeout, a broken connection, a fault on the
+   * channel's side or an answer that could not be read; false only when the
+   * channel refused it or it was never sent. The channel offers no way to
+   * ask (threat model, A7 h), so the caller decides by the message's class
+   * whether to send again (architecture, "Sending a message once").
    */
-  | { readonly accepted: false; readonly retryable: boolean; readonly code: string };
+  | {
+      readonly accepted: false;
+      readonly retryable: boolean;
+      readonly mayHaveArrived: boolean;
+      readonly code: string;
+    };
 
 export interface Channel {
   /** A short name, as stored in `channel_accounts.channel`. */

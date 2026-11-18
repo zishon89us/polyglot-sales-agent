@@ -478,26 +478,51 @@ describe("sendText", () => {
       { phone: null, userId: null },
       "hi",
     );
-    expect(result).toEqual({ accepted: false, retryable: false, code: "no-recipient" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: false,
+      mayHaveArrived: false,
+      code: "no-recipient",
+    });
     expect(calls).toHaveLength(0);
   });
 
   test.each([
-    [401, { error: { code: 190 } }, { retryable: false, code: "not-authorised" }],
-    [403, { error: { code: 10 } }, { retryable: false, code: "not-authorised" }],
+    [
+      401,
+      { error: { code: 190 } },
+      { retryable: false, mayHaveArrived: false, code: "not-authorised" },
+    ],
+    [
+      403,
+      { error: { code: 10 } },
+      { retryable: false, mayHaveArrived: false, code: "not-authorised" },
+    ],
     [
       400,
       { error: { code: 131047, message: "Re-engagement message" } },
-      { retryable: false, code: "meta-131047" },
+      { retryable: false, mayHaveArrived: false, code: "meta-131047" },
     ],
-    [400, { error: { code: "<script>" } }, { retryable: false, code: "rejected" }],
-    [404, "not json", { retryable: false, code: "rejected" }],
-    [429, { error: { code: 130429 } }, { retryable: true, code: "rate-limited" }],
-    [500, "", { retryable: true, code: "server-error" }],
-    [503, { error: { code: 131016 } }, { retryable: true, code: "server-error" }],
-    [200, {}, { retryable: false, code: "bad-response" }],
-    [200, { messages: [{}] }, { retryable: false, code: "bad-response" }],
-    [200, "not json", { retryable: false, code: "bad-response" }],
+    [
+      400,
+      { error: { code: "<script>" } },
+      { retryable: false, mayHaveArrived: false, code: "rejected" },
+    ],
+    [404, "not json", { retryable: false, mayHaveArrived: false, code: "rejected" }],
+    [
+      429,
+      { error: { code: 130429 } },
+      { retryable: true, mayHaveArrived: false, code: "rate-limited" },
+    ],
+    [500, "", { retryable: true, mayHaveArrived: true, code: "server-error" }],
+    [
+      503,
+      { error: { code: 131016 } },
+      { retryable: true, mayHaveArrived: true, code: "server-error" },
+    ],
+    [200, {}, { retryable: false, mayHaveArrived: true, code: "bad-response" }],
+    [200, { messages: [{}] }, { retryable: false, mayHaveArrived: true, code: "bad-response" }],
+    [200, "not json", { retryable: false, mayHaveArrived: true, code: "bad-response" }],
   ])("an answer of %s %j is %j", async (status, body, expected) => {
     const { stub } = answering(status, body);
     const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
@@ -507,7 +532,12 @@ describe("sendText", () => {
   test("an answer of 408 may be retried", async () => {
     const { stub } = answering(408, "");
     const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
-    expect(result).toEqual({ accepted: false, retryable: true, code: "server-error" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: true,
+      mayHaveArrived: true,
+      code: "server-error",
+    });
   });
 
   test.each([" ", "wamid with space", "w".repeat(129)])(
@@ -515,7 +545,12 @@ describe("sendText", () => {
     async (id) => {
       const { stub } = answering(200, { messages: [{ id }] });
       const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
-      expect(result).toEqual({ accepted: false, retryable: false, code: "bad-response" });
+      expect(result).toEqual({
+        accepted: false,
+        retryable: false,
+        mayHaveArrived: true,
+        code: "bad-response",
+      });
     },
   );
 
@@ -540,14 +575,24 @@ describe("sendText", () => {
         status: 200,
       })) as unknown as typeof fetch;
     const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
-    expect(result).toEqual({ accepted: false, retryable: false, code: "bad-response" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: false,
+      mayHaveArrived: true,
+      code: "bad-response",
+    });
   });
 
   test("an answer far larger than any real one is not read, and counts as no answer", async () => {
     const huge = JSON.stringify({ messages: [{ id: "wamid.X" }], padding: "x".repeat(200_000) });
     const { stub } = answering(200, huge);
     const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
-    expect(result).toEqual({ accepted: false, retryable: false, code: "bad-response" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: false,
+      mayHaveArrived: true,
+      code: "bad-response",
+    });
   });
 
   test.each(["..", ".", "1/../2", "100000000000002?x=1", "", "mock-number"])(
@@ -560,7 +605,12 @@ describe("sendText", () => {
         CUSTOMER,
         "hi",
       );
-      expect(result).toEqual({ accepted: false, retryable: false, code: "bad-sender" });
+      expect(result).toEqual({
+        accepted: false,
+        retryable: false,
+        mayHaveArrived: false,
+        code: "bad-sender",
+      });
       expect(calls).toHaveLength(0);
     },
   );
@@ -575,7 +625,12 @@ describe("sendText", () => {
         CUSTOMER,
         "hi",
       );
-      expect(result).toEqual({ accepted: false, retryable: false, code: "bad-credentials" });
+      expect(result).toEqual({
+        accepted: false,
+        retryable: false,
+        mayHaveArrived: false,
+        code: "bad-credentials",
+      });
       expect(calls).toHaveLength(0);
     },
   );
@@ -593,7 +648,12 @@ describe("sendText", () => {
         headers: { location: "https://elsewhere.invalid/" },
       })) as unknown as typeof fetch;
     const result = await sendText({ ...options, fetch: stub }, from, CUSTOMER, "hi");
-    expect(result).toEqual({ accepted: false, retryable: false, code: "redirected" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: false,
+      mayHaveArrived: false,
+      code: "redirected",
+    });
   });
 
   test.each([
@@ -628,7 +688,12 @@ describe("sendText", () => {
       CUSTOMER,
       "hi",
     );
-    expect(result).toEqual({ accepted: false, retryable: true, code: "timeout" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: true,
+      mayHaveArrived: true,
+      code: "timeout",
+    });
   });
 
   test("a failed connection is a failure that may be retried, and says nothing of the token", async () => {
@@ -636,7 +701,12 @@ describe("sendText", () => {
       throw new TypeError("fetch failed: Bearer synthetic-token at https://channel.invalid");
     }) as unknown as typeof fetch;
     const result = await sendText({ ...options, fetch: broken }, from, CUSTOMER, "hi");
-    expect(result).toEqual({ accepted: false, retryable: true, code: "network" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: true,
+      mayHaveArrived: true,
+      code: "network",
+    });
     expect(JSON.stringify(result)).not.toContain("synthetic-token");
   });
 });

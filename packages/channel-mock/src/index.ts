@@ -35,7 +35,7 @@ export interface MockChannel extends Channel {
   /** Every message accepted so far, oldest first. */
   readonly sent: readonly SentMessage[];
   /** Makes the next send fail with this result, once. */
-  failNextSend(code: string, retryable: boolean): void;
+  failNextSend(code: string, retryable: boolean, mayHaveArrived?: boolean): void;
   /** A webhook body and its headers, signed, carrying these batches. */
   webhook(batches: readonly EventBatch[]): { rawBody: Buffer; headers: Headers };
 }
@@ -135,8 +135,8 @@ export function createMockChannel(): MockChannel {
     name: "mock",
     maxWebhookBytes: 1024 * 1024,
     sent,
-    failNextSend(code, retryable) {
-      failure = { accepted: false, retryable, code };
+    failNextSend(code, retryable, mayHaveArrived = false) {
+      failure = { accepted: false, retryable, mayHaveArrived, code };
     },
     webhook(batches) {
       const rawBody = Buffer.from(JSON.stringify({ mockBatches: batches }));
@@ -160,10 +160,10 @@ export function createMockChannel(): MockChannel {
         return result;
       }
       if (from.accessToken !== MOCK_ACCESS_TOKEN) {
-        return { accepted: false, retryable: false, code: "not-authorised" };
+        return { accepted: false, retryable: false, mayHaveArrived: false, code: "not-authorised" };
       }
       if (to.phone === null && to.userId === null) {
-        return { accepted: false, retryable: false, code: "no-recipient" };
+        return { accepted: false, retryable: false, mayHaveArrived: false, code: "no-recipient" };
       }
       const channelMessageId = `mock.${sent.length + 1}`;
       sent.push({ channelMessageId, from, to, body });

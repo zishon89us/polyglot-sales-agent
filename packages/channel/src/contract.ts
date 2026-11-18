@@ -119,7 +119,12 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
         { phone: "+15550142", userId: null },
         "hello",
       );
-      expect(refused).toEqual({ accepted: false, retryable: false, code: expect.any(String) });
+      expect(refused).toEqual({
+        accepted: false,
+        retryable: false,
+        mayHaveArrived: false,
+        code: expect.any(String),
+      });
     });
   });
 }
