@@ -313,8 +313,10 @@ again, and what was already stored is skipped. Messages already stored are
 found with one query for the whole webhook, so a large one sent again is
 answered quickly.
 
-As built in M2 a job is due at once. The batching window of "An inbound
-message is answered" is the worker's, and arrives with it (#288).
+As built in M2 a job is due at once, and there is no batching window: the
+worker answers every message of the conversation that no turn has dealt
+with, together. In place of steps 5 to 15 it sends an echo of the
+customer's text (#290).
 
 ### Processing one turn
 
@@ -366,26 +368,63 @@ findings S1, S2, S3 and A13.
 
 ### Sending a message once
 
-The channel is called outside any transaction, so a worker can die after the
-channel accepted a message and before that is recorded. The system cannot
-tell this from a call that never happened, and nothing here assumes the
-channel offers a way to ask (an assumption; see the threat model, section
-1). The policy differs by message class:
+The channel is called outside any transaction, and nothing here assumes the
+channel offers a way to ask whether it has a message (an assumption; see
+the threat model, section 1). So a call for a message ends in one of three
+ways:
+
+| Outcome | What it is |
+| --- | --- |
+| Accepted | The channel answered with its identifier for the message |
+| Refused | The channel answered and said no, or the message was never sent. The customer has nothing |
+| Unknown | A timeout, a broken connection, a fault on the channel's side (HTTP 5xx or 408), an answer that could not be read, or **a worker that stopped** after the call started and before its result was recorded. The customer may have the message |
+
+A stopped worker and a timeout are the same case and get the same rule
+(Gate 2 finding V5, #235). What follows an outcome depends only on the
+message's class, and every class has a row (finding V6, #236):
+
+| Class | After a refusal the channel says can be retried | After an unknown outcome |
+| --- | --- | --- |
+| Assistant reply, system reply, staff message | Called again: three calls in all, after 2 and 8 seconds, then `failed` with the channel's code | **Called once more.** A customer waiting for an answer is worse off with none than with two. If that call is unknown too, `failed` with the code `unconfirmed`: never a third |
+| Service notice (the holding message, `handover_followup`), business-initiated (reminder, booking notice) | The same | **Not called again.** `failed` with the code `unconfirmed`. A second message the business started, which may be paid for, is worse than a missed one |
+
+A refusal the channel says cannot be retried is `failed` at once with the
+channel's code, for every class. No message is ever called for more than
+three times, and at most one unknown outcome is ever followed by another
+call. So a customer can receive at most two copies of a reply and at most
+one of anything else, whatever the channel and the workers do (NFR-R2);
+the policy is one function in `packages/core`, and a test walks every
+sequence of outcomes.
+
+How a message moves:
 
 | Step | What happens |
 | --- | --- |
-| Before the call | In one transaction the message moves `pending` → `sending`, with the time |
-| After the call succeeds | `sending` → `sent`, with the channel's identifier |
-| After the call fails | Retried as the state machines say, then `failed` |
-| Found in `sending` for more than 2 minutes: an assistant reply, a system reply or a staff message | Sent **once more**, then treated normally. A customer waiting for an answer is worse off with none than with two. In this one case the customer may receive the same reply twice |
-| Found in `sending` for more than 2 minutes: a template (reminder, notice, follow-up) | **Not sent again.** It becomes `failed` with reason `unconfirmed` and appears in the withheld-messages list for staff. A second paid, business-initiated message is worse than a missed one |
+| Before the call | In one transaction the oldest waiting message of the conversation moves `pending` → `sending`, with the time and the count of calls |
+| After the call | In one transaction the result is recorded: `sent` with the channel's identifier, back to `pending` with the earliest time of the next call, or `failed` with a code. The record applies only if the message is still in the call that worker started |
+| Found in `sending` for more than 2 minutes | The outcome is unknown, and the table above decides. This is looked at when a send job for the conversation next runs: a later message's job, or the stopped worker's own job once its claim has run out, which is 5 minutes |
+
+**Order within a conversation.** One job, `send-messages`, sends what waits
+in a conversation, oldest first, one message at a time. While the oldest is
+being sent or waits to be called again, nothing behind it goes, so a
+message stuck in `sending` holds the next one until it is resolved as
+above and never lets it overtake (NFR-R6). A message that ends `failed`
+does not hold up the next. Waiting for the previous message to be reported
+delivered, or 10 seconds (NFR-R7), is not built (#290).
 
 So "exactly one reply" (US-C1 criterion 9) holds for a worker that stops
-before the channel call, which is the tested case. For a worker that stops
-in the short interval after the channel accepts and before that is recorded,
-the outcome is at most two copies of a reply and at most one copy of a
-template. The restart test in M2 must show all three outcomes by stopping
-the worker at each point.
+before the message is marked `sending`, and for one that stops after the
+result is recorded. A worker that stops in between leaves an unknown
+outcome. The restart test stops the worker at each point and shows, for a
+reply and for a business-initiated message: before the mark, one copy;
+after the mark and before the call, one copy of a reply (from the second
+call) and none of the other; after the channel accepted and before that
+was recorded, two copies of a reply and one of the other; after the
+record, one copy.
+
+As built in M2 unit U8, every message is sent as a free-form text and no
+pre-send check runs; the classes other than an assistant reply are stored
+only by tests. See #290.
 
 ### A reminder is sent
 

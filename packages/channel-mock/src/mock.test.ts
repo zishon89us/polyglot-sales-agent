@@ -57,10 +57,11 @@ describe("the mock channel", () => {
 
   test("can be told to fail the next send, once, and records nothing for it", async () => {
     const channel = createMockChannel();
-    channel.failNextSend("server-error", true);
+    channel.failNextSend("server-error", true, true);
     expect(await channel.sendText(FROM, CUSTOMER, "one")).toEqual({
       accepted: false,
       retryable: true,
+      mayHaveArrived: true,
       code: "server-error",
     });
     expect(channel.sent).toEqual([]);

@@ -22,8 +22,16 @@ export interface SendOptions {
   readonly fetch?: typeof fetch;
 }
 
+// The failures after which Meta may have the message all the same.
+const MAY_HAVE_ARRIVED: ReadonlySet<string> = new Set([
+  "timeout",
+  "network",
+  "server-error",
+  "bad-response",
+]);
+
 function failure(code: string, retryable: boolean): SendResult {
-  return { accepted: false, retryable, code };
+  return { accepted: false, retryable, mayHaveArrived: MAY_HAVE_ARRIVED.has(code), code };
 }
 
 /** The answer as JSON, or undefined if it is not JSON or is larger than any real answer. */

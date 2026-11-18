@@ -78,14 +78,19 @@ describe("the WhatsApp channel sending to mock-whatsapp over HTTP", () => {
   test("a wrong token is refused as Meta refuses it, and nothing is recorded", async () => {
     const { channel, sent } = await mock();
     const result = await channel.sendText({ ...FROM, accessToken: "wrong" }, CUSTOMER, "hi");
-    expect(result).toEqual({ accepted: false, retryable: false, code: "not-authorised" });
+    expect(result).toEqual({
+      accepted: false,
+      retryable: false,
+      mayHaveArrived: false,
+      code: "not-authorised",
+    });
     expect(await sent()).toEqual([]);
   });
 
   test.each([
-    [500, 131000, { retryable: true, code: "server-error" }],
-    [429, 130429, { retryable: true, code: "rate-limited" }],
-    [400, 131047, { retryable: false, code: "meta-131047" }],
+    [500, 131000, { retryable: true, mayHaveArrived: true, code: "server-error" }],
+    [429, 130429, { retryable: true, mayHaveArrived: false, code: "rate-limited" }],
+    [400, 131047, { retryable: false, mayHaveArrived: false, code: "meta-131047" }],
   ])(
     "a failure injected as %s with code %s is seen as %j, once",
     async (status, code, expected) => {
@@ -113,6 +118,7 @@ describe("the WhatsApp channel sending to mock-whatsapp over HTTP", () => {
     expect(await channel.sendText(FROM, CUSTOMER, "hi")).toEqual({
       accepted: false,
       retryable: true,
+      mayHaveArrived: true,
       code: "timeout",
     });
     await slow.close();
@@ -128,6 +134,7 @@ describe("the WhatsApp channel sending to mock-whatsapp over HTTP", () => {
     expect(await channel.sendText(FROM, CUSTOMER, "hi")).toEqual({
       accepted: false,
       retryable: true,
+      mayHaveArrived: true,
       code: "network",
     });
   });
@@ -385,6 +392,7 @@ describe("the mock's own controls", () => {
     expect(await channel.sendText(FROM, CUSTOMER, "hi")).toEqual({
       accepted: false,
       retryable: false,
+      mayHaveArrived: false,
       code: "redirected",
     });
     expect(seen).toEqual([]);
