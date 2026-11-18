@@ -299,16 +299,19 @@ decides anything runs in the worker.
 
 | Event | The webhook's transaction writes | Queues | Runs later, in the worker |
 | --- | --- | --- | --- |
-| A message from a customer, of any type | The contact, if new, matched on the channel's identifier and then on the number (#284). The conversation, if new. The message, once: its channel identifier is unique per tenant | One `process-conversation` job for the conversation, due at once, if at least one of its messages was new | Every step of "Processing one turn": opt-out, buttons, the reply window, the session, the model. None of them runs in the request |
+| A message from a customer, of any type | The contact, if new, found as the data model's table "Which contact a message belongs to" says (#284). The conversation, if new. The message, once: its channel identifier is unique per tenant and direction | One `process-conversation` job for the conversation, due at once, if at least one of its messages was new | Every step of "Processing one turn": opt-out, buttons, the reply window, the session, the model. None of them runs in the request |
 | The same message again | Nothing | Nothing | |
 | A delivery status | The status of the outbound message it names, and only forwards: `sent`, then `delivered`, then `read`; `failed` only before delivery. A status for a message nobody sent changes nothing | Nothing | |
-| Anything for a receiving number no tenant has | One row in `unroutable_events`: the channel, the two identifiers and the kind. Written by the cross-tenant role | Nothing | |
+| Anything for a receiving number no tenant has | One row in `unroutable_events` for each event: the channel, the two identifiers and the kind. Written by the cross-tenant role | Nothing | |
 | A body that cannot be read | One row in `unparsed_events`: a hash, the size and a code. Written by the cross-tenant role | One `operator-alert` job, once per body | |
 | A readable body with items left out as malformed | The rest as above, then one row in `unparsed_events` with the count | One `operator-alert` job, once per body | |
 
 One webhook can carry events for several receiving numbers. Each number's
-events are one transaction; if a later one fails the answer is 503, the
-channel sends the webhook again, and what was already stored is skipped.
+events are one transaction, however the channel grouped them in the body;
+if a later one fails the answer is 503, the channel sends the webhook
+again, and what was already stored is skipped. Messages already stored are
+found with one query for the whole webhook, so a large one sent again is
+answered quickly.
 
 As built in M2 a job is due at once. The batching window of "An inbound
 message is answered" is the worker's, and arrives with it (#288).

@@ -221,6 +221,25 @@ M0 Inception met its exit criteria on 2026-11-16; see
   now, with SQL kept in one package and a test that keeps it there (ADR
   0003). NFR-P1 measured here, not gated: 300 webhooks, ten at a time,
   median about 34 ms, 99th percentile about 105 ms.
+- 2026-11-18 — U7's code review: two High findings and thirteen others
+  (`docs/reviews/2026-11-18-gate4-u7-webhook.md`). **W1:** the contact
+  rules could put one person's message in another's conversation; they
+  are rewritten so that the identifier is the person and a number never
+  moves a conversation, and every case is a table in the data model with
+  a test each. **W2:** the test said to keep SQL out of the apps caught
+  one planted case in six; it is replaced by a rule that can be checked:
+  only `packages/db` imports the database driver, and the rest of the code
+  gets a handle that cannot run a query. Also fixed: database time limits
+  (a held lock no longer holds the API); start-up and `/readyz` check that
+  each connection is the role it should be; one log line per webhook
+  answered 503; the channel's sent time, a failed status's code and the
+  type of an unread message are stored; a large webhook sent again is
+  recognised in one query; uniqueness of a channel identifier is per
+  direction. Not fixed, in #288: the catalogue check does not pin the
+  columns of the unscoped tables (W14); a first delivery too large to
+  store in 5 seconds is answered 503 once before its 200 (measured at
+  12,000 messages: 7.6 s, then 32 ms); the hash of an unreadable body is
+  not keyed (W10, now stated).
 
 ## Next
 

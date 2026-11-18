@@ -218,7 +218,7 @@ per session, so that route is limited by the session, not by the throttle.
 
 | ID | Cat. | Threat | Mitigation | Link | Residual |
 | --- | --- | --- | --- | --- | --- |
-| T39 | E, R | The cross-tenant role is used beyond its stated jobs, or a person's use of it leaves no record | One module may use the role, enforced by an import-boundary test. The operator acts only through commands run on the server, each writing to an insert-only log; there is no operator route | ADR 0011, data model `operator_log`, **#162** | Someone with a shell and the database credential can bypass the log; only the platform's access log shows that (ADR 0009). A4 holds only while the operator is one trusted person |
+| T39 | E, R | The cross-tenant role is used beyond its stated jobs, or a person's use of it leaves no record | Only `packages/db` can reach the database at all: a test fails if another source file names the driver, and what the package exports takes a handle that cannot run a query. Which modules may hold the cross-tenant handle is not yet tested (#162). The operator acts only through commands run on the server, each writing to an insert-only log; there is no operator route | ADR 0011, data model `operator_log`, **#162** | Someone with a shell and the database credential can bypass the log; only the platform's access log shows that (ADR 0009). A4 holds only while the operator is one trusted person |
 | T40 | S | A deployment runs with the mock channel's test page, the fake model or logged emails | Start-up refuses these in production | **#165** | None once built |
 
 ### F9 — Repository and build

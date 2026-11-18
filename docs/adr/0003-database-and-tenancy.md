@@ -234,12 +234,24 @@ builder, the choice to be verified in M2. Two units deferred it. This
 settles it for M2, and it is the agent's decision, open to the maintainer.
 
 **Decision.** No query builder is added now. SQL is written as fixed text
-with parameters, and only in `packages/db`. A test fails if a source file
-of an app holds a statement or runs a query of its own.
+with parameters, and only in `packages/db`. The database driver is imported
+only there: a test fails if any other source file of an app or a package
+names it. What `packages/db` gives the rest is a handle with a role's name
+on it and nothing else; it cannot run a query, and the function that turns
+it back into a connection is not exported.
+
+Reworded after the Gate 4 review of unit U7 (finding W2). The first wording
+said a test fails if an app's source file "holds a statement or runs a
+query of its own". That test looked for SQL in text and caught one planted
+case in six. Text cannot be searched for every way of writing a query; an
+import can.
+
+**What the test does not show.** That the statements inside `packages/db`
+are fixed text. That is by reading: none builds its text from a value.
 
 **Why.** What the builder was for is two things. One is that query text is
 never built from outside input (threat T33): keeping every statement in one
-package, as fixed text, serves that directly, and can be checked. The other
+package, where it can be read in one sitting, serves that. The other
 is type safety between the code and the schema: that is not served, and
 the tests against a real database are what catches a wrong column today.
 
