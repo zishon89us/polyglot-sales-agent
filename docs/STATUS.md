@@ -264,7 +264,8 @@ v1.1.
 - **NFR-S2 was reworded by the agent** in unit U6. It said every request
   with a missing or invalid signature is "answered 401"; with the size
   limit and the limit on refused requests of #154, some are refused with
-  413, 429 or 400 before the signature can be read. "Not stored" is
+  413, 429, another 4xx or a closed connection before the signature can be
+  read. "Not stored" is
   unchanged. Confirm, or say which answers are acceptable.
 - **NFR-O1 was reworded by the agent** in unit U5. It said health and
   readiness endpoints are "present on API and worker"; the worker accepts
