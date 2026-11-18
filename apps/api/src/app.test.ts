@@ -199,6 +199,28 @@ describe("a validly signed event", () => {
     expect(await counts()).toMatchObject({ messages: 1, jobs: 1, unroutable_events: 0 });
   });
 
+  test("a failed status keeps the channel's code, from the webhook to the row", async () => {
+    await signed(fixture("inbound-text.json"));
+    const failed = JSON.parse(fixture("status-failed.json").toString("utf8"));
+    const id = failed.entry[0].changes[0].value.statuses[0].id as string;
+    await withTenant(app, tenant.a, (tx) =>
+      tx.query(
+        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, channel_message_id, body, status)
+         SELECT tenant_id, id, 'outbound', 'assistant-reply', 'text', $1, 'reply', 'sent'
+         FROM conversations`,
+        [id],
+      ),
+    );
+    expect((await signed(fixture("status-failed.json"))).statusCode).toBe(200);
+    const row = await withTenant(app, tenant.a, (tx) =>
+      tx.query<{ status: string; error_code: string }>(
+        "SELECT status, error_code FROM messages WHERE channel_message_id = $1",
+        [id],
+      ),
+    );
+    expect(row.rows).toEqual([{ status: "failed", error_code: "131026" }]);
+  });
+
   test("one number's events are one transaction and one job, however the channel grouped them", async () => {
     const body = JSON.parse(fixture("inbound-text.json").toString("utf8"));
     const second = structuredClone(body.entry[0].changes[0]);
@@ -477,6 +499,18 @@ describe("the sink stops between steps once its deadline has passed", () => {
     ).rejects.toMatchObject({ code: "deadline" });
     expect(await counts()).toMatchObject({ messages: 0, jobs: 0, unparsed_events: 0 });
   });
+
+  test("the record of what was left out is not written once the deadline has passed", async () => {
+    const sink = createSink({ channel, app: appDb, cross: crossDb });
+    // Nothing to store, so the only step left is the record.
+    const info = { skipped: 0, malformed: 1, sha256: "b".repeat(64), size: 1 };
+    await expect(sink.events([], info, AbortSignal.abort())).rejects.toMatchObject({
+      code: "deadline",
+    });
+    expect(await counts()).toMatchObject({ unparsed_events: 0, jobs: 0 });
+    await sink.events([], info, new AbortController().signal);
+    expect(await counts()).toMatchObject({ unparsed_events: 1 });
+  });
 });
 
 describe("health", () => {
@@ -577,6 +611,13 @@ describe("settings", () => {
     expect(readConfig({ ...complete, PSA_API_PORT: port }).port).toBe(Number(port));
   });
 
+  test("a blank host is this machine only, never every interface", () => {
+    for (const blank of ["", " "]) {
+      expect(readConfig({ ...complete, PSA_API_HOST: blank }).host).toBe("127.0.0.1");
+    }
+    expect(readConfig({ ...complete, PSA_API_HOST: " 192.0.2.7 " }).host).toBe("192.0.2.7");
+  });
+
   test("a setting that is empty or only spaces counts as not set", () => {
     for (const blank of ["", " ", "\t"]) {
       expect(() => readConfig({ ...complete, PSA_WHATSAPP_VERIFY_TOKEN: blank })).toThrow(
@@ -613,7 +654,7 @@ describe("only packages/db can reach the database (ADR 0003, amendment of 2026-1
         if (
           /\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(name) &&
           !/\.test\.[a-z]+$/.test(name) &&
-          !path.includes("node_modules") &&
+          !/(^|\/)node_modules\//.test(path) &&
           !path.startsWith("packages/db/")
         ) {
           found.push(path);
@@ -623,6 +664,21 @@ describe("only packages/db can reach the database (ADR 0003, amendment of 2026-1
     return found;
   }
   const DRIVER = /["'`]pg(\/[^"'`]*)?["'`]|["'`]pg-[a-z-]+["'`]|["'`]postgres["'`]/;
+
+  // Ways round the first pattern: the package's inner files and its testing
+  // entry, which do give a connection; and a module name that is built,
+  // escaped or resolved at run time, which no pattern can read.
+  const WAYS_ROUND = [
+    /["'`]@polyglot-sales-agent\/db\/[^"'`]*["'`]/,
+    /["'`][^"'`]*\/db\/(src|test)\/[^"'`]*["'`]/,
+    /\bcreateRequire\b/,
+    /\bimport\.meta\.resolve\b/,
+    // Anything but one plain string between the brackets.
+    /\bimport\(\s*(?!["'][^"'\\]*["']\s*\))/,
+    // Anything but one plain string between the brackets.
+    /\brequire\(\s*(?!["'][^"'\\]*["']\s*\))/,
+    /\b(from|import)\s*\(?\s*["'][^"'\n]*\\[^"'\n]*["']/,
+  ];
 
   test("the scan sees the product's files", () => {
     const all = sources();
@@ -637,6 +693,48 @@ describe("only packages/db can reach the database (ADR 0003, amendment of 2026-1
       DRIVER.test(readFileSync(`${root}${path}`, "utf8")),
     );
     expect(offenders).toEqual([]);
+  });
+
+  test("no file outside packages/db goes round it", () => {
+    const offenders = sources().filter((path) => {
+      const text = readFileSync(`${root}${path}`, "utf8");
+      return WAYS_ROUND.some((pattern) => pattern.test(text));
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  test("each way round that was tried is caught", () => {
+    for (const text of [
+      'import { poolOf } from "@polyglot-sales-agent/db/testing";',
+      'import { poolOf } from "../../../packages/db/src/connect.ts";',
+      'import { adopt } from "../../../packages/db/test/harness.ts";',
+      'const pg = await import("p" + "g");',
+      "const pg = await import(name);",
+      'const pg = createRequire(import.meta.url)(["p", "g"].join(""));',
+      'createRequire(import.meta.resolve("@polyglot-sales-agent/db"))',
+      'import pg from "\\x70g";',
+      "const pg = require(name);",
+    ]) {
+      expect(
+        WAYS_ROUND.some((pattern) => pattern.test(text)),
+        text,
+      ).toBe(true);
+    }
+    for (const text of [
+      'import { storeInbound } from "@polyglot-sales-agent/db";',
+      'import { buildApi } from "./app.ts";',
+      'const page = await import("./page.ts");',
+    ]) {
+      expect(
+        WAYS_ROUND.some((pattern) => pattern.test(text)),
+        text,
+      ).toBe(false);
+    }
+  });
+
+  test("a folder that only has node_modules in its name is still scanned", () => {
+    expect(/(^|\/)node_modules\//.test("apps/api/src/node_modules_shim/x.ts")).toBe(false);
+    expect(/(^|\/)node_modules\//.test("apps/api/node_modules/pg/index.js")).toBe(true);
   });
 
   test("the pattern catches every way of naming the driver", () => {

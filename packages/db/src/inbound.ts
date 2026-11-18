@@ -56,17 +56,20 @@ export async function tenantOfReceivingNumber(
 
 /**
  * Finds the contact for a customer, or makes one. The rules, each of which
- * has a row in `docs/design/data-model.md`, decision 16:
+ * has a row in `docs/design/data-model.md`, "Which contact a message
+ * belongs to":
  *
- * - The channel's identifier is the person; the number is something the
- *   person has. A contact with the identifier is the contact, whatever
- *   number comes with it, and takes a new number as its own if no other
- *   contact holds that number.
- * - With no contact for the identifier, a contact with the number is used
- *   only if it has no identifier yet, and then takes this one. If it has
- *   another, the number has passed to another person: a new contact is
- *   made, without the number, and the old one is left as it is.
+ * - The channel's identifier is the person. A contact with the identifier
+ *   is the contact, whatever number comes with it.
+ * - A number belongs to the identifier the channel last sent it with. When
+ *   it arrives with an identifier, a contact with another identifier that
+ *   holds it loses it, and this person's contact takes it. A contact that
+ *   holds it with no identifier keeps it.
+ * - With no contact for the identifier, a contact that holds the number
+ *   with no identifier is the person, and takes the identifier.
  * - With no identifier, the number alone decides.
+ * - An identifier is never changed, and no contact is ever given another's
+ *   conversation.
  *
  * Two webhooks for one new customer at the same moment end with one contact.
  */
@@ -76,6 +79,14 @@ async function contactFor(
   who: { phone: string | null; userId: string | null },
 ): Promise<string> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (who.userId !== null && who.phone !== null) {
+      // The channel says this number is this person's now: nobody else's.
+      await tx.query(
+        `UPDATE contacts SET phone = NULL
+         WHERE phone = $1 AND channel_user_id IS NOT NULL AND channel_user_id <> $2`,
+        [who.phone, who.userId],
+      );
+    }
     if (who.userId !== null) {
       const byIdentifier = await tx.query<{ id: string; phone: string | null }>(
         "SELECT id, phone FROM contacts WHERE channel_user_id = $1",
@@ -84,6 +95,7 @@ async function contactFor(
       const known = byIdentifier.rows[0];
       if (known !== undefined) {
         if (who.phone !== null && who.phone !== known.phone) {
+          // Not taken from a contact with no identifier: the two may be one person, and nothing merges them.
           await tx.query(
             `UPDATE contacts SET phone = $2
              WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM contacts WHERE phone = $2)`,
@@ -93,36 +105,31 @@ async function contactFor(
         return known.id;
       }
     }
-    let phone = who.phone;
     if (who.phone !== null) {
-      const byNumber = await tx.query<{ id: string; channel_user_id: string | null }>(
-        "SELECT id, channel_user_id FROM contacts WHERE phone = $1",
-        [who.phone],
-      );
+      const byNumber = await tx.query<{ id: string }>("SELECT id FROM contacts WHERE phone = $1", [
+        who.phone,
+      ]);
       const known = byNumber.rows[0];
       if (known !== undefined) {
         if (who.userId === null) {
           return known.id;
         }
-        if (known.channel_user_id === null) {
-          const taken = await tx.query(
-            "UPDATE contacts SET channel_user_id = $2 WHERE id = $1 AND channel_user_id IS NULL",
-            [known.id, who.userId],
-          );
-          if (taken.rowCount === 1) {
-            return known.id;
-          }
-          // Another transaction gave it an identifier first: look again.
-          continue;
+        // It has no identifier, or it would have lost the number above.
+        const taken = await tx.query(
+          "UPDATE contacts SET channel_user_id = $2 WHERE id = $1 AND channel_user_id IS NULL",
+          [known.id, who.userId],
+        );
+        if (taken.rowCount === 1) {
+          return known.id;
         }
-        // The number belongs to a contact with another identifier.
-        phone = null;
+        // Another transaction gave it an identifier first: look again.
+        continue;
       }
     }
     const made = await tx.query<{ id: string }>(
       `INSERT INTO contacts (tenant_id, phone, channel_user_id) VALUES ($1, $2, $3)
        ON CONFLICT DO NOTHING RETURNING id`,
-      [tenantId, phone, who.userId],
+      [tenantId, who.phone, who.userId],
     );
     if (made.rows[0] !== undefined) {
       return made.rows[0].id;

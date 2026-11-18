@@ -33,7 +33,8 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): A
   const port = /^[0-9]{1,5}$/.test(portText) ? Number(portText) : Number.NaN;
   const proxies = list(env["PSA_TRUSTED_PROXIES"] ?? "");
   const config: ApiConfig = {
-    host: env["PSA_API_HOST"] ?? "127.0.0.1",
+    // A blank host would make Node listen on every interface.
+    host: (env["PSA_API_HOST"] ?? "").trim() || "127.0.0.1",
     port,
     appDatabaseUrl: need("PSA_DB_APP_URL"),
     crossDatabaseUrl: need("PSA_DB_CROSS_URL"),

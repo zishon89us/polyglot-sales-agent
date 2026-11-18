@@ -9,9 +9,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest"
 import {
   APP_ROLE,
   CROSS_ROLE,
+  closeDatabase,
+  DATABASE_TIMEOUTS,
   type Database,
   type IncomingMessage,
   MIGRATE_ROLE,
+  openDatabase,
   PROCESS_CONVERSATION_JOB,
   recordUnparsed,
   recordUnroutable,
@@ -19,7 +22,7 @@ import {
   tenantOfReceivingNumber,
   withTenant,
 } from "../src/index.ts";
-import { adopt, createTestDatabase, type TestDatabase } from "./harness.ts";
+import { adopt, createTestDatabase, poolOf, type TestDatabase } from "./harness.ts";
 
 let database: TestDatabase;
 let app: pg.Pool;
@@ -215,8 +218,8 @@ describe("storeInbound: a message", () => {
     expect(await store(batch)).toMatchObject({ stored: 1_500, duplicates: 0 });
     const started = Date.now();
     expect(await store(batch)).toEqual({ stored: 0, duplicates: 1_500, statusesApplied: 0 });
-    // The first pass takes seconds; the second is one query.
-    expect(Date.now() - started).toBeLessThan(1_000);
+    // Message by message this took over a second here; as one query, about ten milliseconds.
+    expect(Date.now() - started).toBeLessThan(250);
     expect(await jobs()).toHaveLength(50);
   }, 60_000);
 
@@ -334,27 +337,67 @@ describe("storeInbound: who the customer is (data model, decision 16)", () => {
       [[P2, U1, 3]],
     ],
     [
-      "a number that passed to another person: the newcomer is a new contact, without the number",
+      "a number that passed to another person: the newcomer is a new contact and the number goes with them",
       [
         [P1, U1],
         [P1, U2],
         [null, U2],
       ],
       [
-        [P1, U1, 1],
-        [null, U2, 2],
+        [null, U1, 1],
+        [P1, U2, 2],
       ],
     ],
     [
-      "the old holder is not displaced, and is still reached by the identifier",
+      "the old holder keeps the conversation and is still reached by the identifier",
       [
         [P1, U1],
         [P1, U2],
         [null, U1],
       ],
       [
-        [P1, U1, 2],
-        [null, U2, 1],
+        [null, U1, 2],
+        [P1, U2, 1],
+      ],
+    ],
+    [
+      "after a number has passed on, the number alone reaches its new holder",
+      [
+        [P1, U1],
+        [P1, U2],
+        [P1, null],
+      ],
+      [
+        [null, U1, 1],
+        [P1, U2, 2],
+      ],
+    ],
+    [
+      "two people who swap numbers each end with the number they now use",
+      [
+        [P1, U1],
+        [P2, U2],
+        [P2, U1],
+        [P1, U2],
+      ],
+      [
+        [P2, U1, 2],
+        [P1, U2, 2],
+      ],
+    ],
+    [
+      "the verifier's sequence: no contact is left showing a number that is another person's",
+      [
+        [P1, U1],
+        [P2, null],
+        [P2, U1],
+        [P1, U2],
+        [P1, U2],
+      ],
+      [
+        [null, U1, 2],
+        [P2, null, 1],
+        [P1, U2, 2],
       ],
     ],
     [
@@ -433,6 +476,25 @@ describe("storeInbound: who the customer is (data model, decision 16)", () => {
     expect(await insert("has a space", null)).toBe("23514");
     expect(await insert("", null)).toBe("23514");
   });
+
+  test("two identifiers arriving at once with one identifier-less contact's number: neither is overwritten", async () => {
+    for (let round = 0; round < 15; round += 1) {
+      await administrator.query("TRUNCATE messages, conversations, contacts, jobs CASCADE");
+      await store([message({ phone: P1, userId: null })]);
+      const settle = async (userId: string) => {
+        // The loser of the race may be told to come again, as the channel would.
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          try {
+            return await store([message({ phone: P1, userId })]);
+          } catch {}
+        }
+        throw new Error("never stored");
+      };
+      await Promise.all([settle(U1), settle(U2)]);
+      const identifiers = (await rows("contacts")).map((row) => row.channel_user_id).sort();
+      expect(identifiers, `round ${round}`).toEqual([U1, U2]);
+    }
+  }, 30_000);
 
   test("ten first messages of one new customer at the same moment end with one contact", async () => {
     const results = await Promise.allSettled(
@@ -533,6 +595,18 @@ describe("storeInbound: a status", () => {
       (row) => row.channel_message_id === "wamid.OUT1",
     );
     expect(delivered).toMatchObject({ status: "delivered", error_code: null });
+  });
+
+  test("a failure's code has a plain form, or the row is refused", async () => {
+    await outbound("sent", "wamid.OUT1");
+    const set = (code: string) =>
+      administrator.query("UPDATE messages SET error_code = $1", [code]).then(
+        () => "stored",
+        (error: { code?: string }) => error.code,
+      );
+    expect(await set("131026")).toBe("stored");
+    expect(await set("has a space")).toBe("23514");
+    expect(await set("x".repeat(41))).toBe("23514");
   });
 
   test("a customer's message with the identifier of a sent message is a message, not a duplicate", async () => {
@@ -669,4 +743,25 @@ describe("events that reach no tenant", () => {
       await expect(attempt).rejects.toMatchObject({ code: "42501" });
     }
   });
+});
+
+describe("a handle opened for the product carries its time limits", () => {
+  test("each limit is set on the connection, and a statement over its limit is stopped", async () => {
+    const limited = openDatabase(APP_ROLE, database.url(APP_ROLE), { max: 1 });
+    try {
+      const pool = poolOf(limited);
+      const shown = await pool.query<{ statement: string; lock: string; idle: string }>(
+        `SELECT current_setting('statement_timeout') AS statement,
+                current_setting('lock_timeout') AS lock,
+                current_setting('idle_in_transaction_session_timeout') AS idle`,
+      );
+      expect(shown.rows[0]).toEqual({ statement: "4s", lock: "3s", idle: "10s" });
+      expect(pool.options.connectionTimeoutMillis).toBe(DATABASE_TIMEOUTS.connectMs);
+      const started = Date.now();
+      await expect(pool.query("SELECT pg_sleep(8)")).rejects.toMatchObject({ code: "57014" });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      await closeDatabase(limited);
+    }
+  }, 15_000);
 });
