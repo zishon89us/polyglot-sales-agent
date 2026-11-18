@@ -141,8 +141,13 @@ The request does four things and nothing else (NFR-P1):
 
 The webhook never answers 400 or 429 to a validly signed request: the first
 would be pointless, since the channel cannot repair its own payload, and the
-second would throttle the channel's deliveries. Requests with a bad
-signature may be rate-limited per source and answered 429 (#154).
+second would throttle the channel's deliveries, with one exception that
+follows from the limit on bad signatures (#154). A source that sends 10
+requests with a bad signature within a minute is refused for the next
+minute with 429, before its body is read; while it lasts, a validly signed
+request from that same source is refused too. Only bad signatures count, so
+the channel's own traffic never starts it. A source is the address the
+server sees, which behind a proxy must be configured to be the caller's.
 
 What is trusted from a signed event: that the channel sent it, the sender's
 number and the receiving number (threat-model assumption A1). What is never
@@ -282,8 +287,8 @@ dashboard shows "no data".
 | --- | --- | --- |
 | Failed sign-ins per account | 5 in 15 minutes, then refused for 15 minutes | NFR-S6 |
 | Sign-in and reset requests per source | Not set | #156 |
-| Webhook requests with a bad signature, per source | Not set | #154 |
-| Webhook body size | Not set | #154 |
+| Webhook requests with a bad signature, per source | 10 in a minute, then refused for a minute. Counted in each API process's memory | #154; the agent's proposal |
+| Webhook body size | 3 MiB. Meta says a payload can be up to 3 MB (read 2026-11-18) | #154 |
 | Contact exports per tenant | Not set | #164 |
 | Any signed-in session | Not set; a general ceiling is added with the code in M4 | — |
 

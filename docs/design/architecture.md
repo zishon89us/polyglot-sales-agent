@@ -145,7 +145,7 @@ flowchart TB
 | `worker` | Claim and run jobs: process a conversation, send a message, fire a timer, run maintenance. Record a heartbeat, which is its health probe | Accept inbound HTTP |
 | `dashboard` | Render screens; call `api` | Hold secrets; reach the database |
 | PostgreSQL | Hold all state, including jobs (ADR 0004) and login sessions (ADR 0008) | |
-| `mock-whatsapp` | Development and CI only: imitate the Cloud API, and offer a test page to send customer messages | Ship in a deployment |
+| `mock-whatsapp` | Development and CI only: stand in for Meta's servers. It accepts the send call that `channel-whatsapp` makes, and posts webhooks signed as Meta signs them; a test page plays the customer | Ship in a deployment. Listen on anything but this machine |
 
 The webhook path does three things only: verify the signature, write the
 message and its job in one transaction, answer 200. Everything else is the
@@ -191,12 +191,26 @@ flowchart TB
 | `core` | The rules that hold for every pack, as pure functions: the order of checks, the six core state machines (handover, session, contact messaging permission, outbound message, provider availability, tenant), message classes and their pre-send checks, quiet hours, and the core metric definitions. No database, network, clock or framework import; time is passed in. It contains nothing about bookings (ADR 0012). |
 | `db` | The schema and migrations; typed queries; the function that opens a transaction for a tenant and sets row-level security; the jobs table and its claim, retry and dead-letter logic. |
 | `channel` | The interface a channel implements: verify a webhook, parse it into the system's own event types, send a free-form or template message, submit a template, check credentials. |
-| `channel-whatsapp`, `channel-mock` | Implementations. All knowledge of Meta's payloads lives in the first. |
+| `channel-whatsapp` | The WhatsApp implementation. All knowledge of Meta's payloads lives here. In development and CI it talks over HTTP to the `mock-whatsapp` app, so the same code runs as in a deployment, against another address |
+| `channel-mock` | A second implementation that lives in memory, with a format of its own. It imitates nothing; it is what a test uses when the test is not about WhatsApp, and it is the second implementation that shows the interface fits more than one channel (NFR-M2) |
 | `ai` | `LlmClient` and its adapters; loading versioned prompts; building the business profile; validating structured output; checking claims; writing traces. |
 | `pack` | The interface a pack implements (below). |
 | `packs/booking` | Everything about appointments: the booking and reminder state machines, the reminder timing rule, slots and capacity, its tables and migrations, its tools, templates, buttons, timers, API routes, settings and metrics (ADR 0012). |
 | `packs/faq-only` | The trial pack: a prompt fragment and evals. It uses the core business profile and adds no code. |
 | `integrations` | Reserved for v1.1. Empty in v1.0. |
+
+**The two mocks** (Gate 2 finding S34, decided in M2 unit U6). They are not
+alternatives.
+
+| | `apps/mock-whatsapp` | `packages/channel-mock` |
+| --- | --- | --- |
+| What it replaces | Meta's servers | The whole WhatsApp channel |
+| How it is reached | Over HTTP, by `channel-whatsapp` | In the test's own process |
+| Used by | The contract tests of `channel-whatsapp`; the end-to-end tests; a developer, through its test page | Tests of the worker and of the webhook path that are not about WhatsApp; the test of NFR-M2 |
+| What it proves | That the code which will talk to Meta sends and reads what was documented on the fixtures' date | That nothing outside `channel-whatsapp` knows about WhatsApp |
+
+Neither proves that Meta behaves as documented. Only the supervised live
+test before v1.0.0 does (risk R-T3).
 
 **Dependency rule.** `core` imports nothing from this repository. No package
 imports from `apps`. The core never imports a pack; packs are registered with

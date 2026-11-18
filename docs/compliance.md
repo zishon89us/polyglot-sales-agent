@@ -245,6 +245,18 @@ Tracked in #61 unless noted.
 - ADRs in #38: hosting region and model-provider location as decisions with
   legal weight; whether to use Meta's thread-control API for handover.
 
+## Re-read on 2026-11-18, for the channel code
+
+Made while writing the webhook fixtures of M2 unit U6. What was read, and
+how, is listed in `packages/channel-whatsapp/fixtures/2026-11-18/README.md`.
+
+| Finding | What it changes |
+| --- | --- |
+| **A customer may have no phone number in a webhook.** Since early April 2026 every messages webhook carries a business-scoped user ID, and a customer who uses a username arrives without `from` and `wa_id`, unless the business and the customer were in touch through that number in the last 30 days or the customer is in the business's contact book. A business can send to the identifier in place of the number. | The design identifies a customer by number throughout. Issue #284; to be decided before a contact is stored. |
+| A webhook payload can be up to 3 MB. | The webhook's size limit is 3 MiB (`docs/design/api.md`, section 8). |
+| A webhook that is not answered 200 is sent again with decreasing frequency for up to 7 days, and this can cause duplicates. | Confirms threat-model assumption A7 (c) as to redelivery; the page does not say the identifier is the same, though deduplicating by it is Meta's own advice elsewhere. |
+| The signature header is `X-Hub-Signature-256`, `sha256=` and a SHA-256 signature made with the app secret. | Agrees with A7 (a) and (b). Read as a search extract, not in full. |
+
 ## Not verified
 
 - **The WhatsApp Business Messaging Policy was not read in full.** Its page
