@@ -371,10 +371,10 @@ opt-out. Only the opt-in event does.
 | `held` | Waiting: for quiet hours to end, for the daily limit, or for the previous message in the conversation to be delivered. |
 | `discarded` | An assistant reply dropped before sending because a newer message arrived or staff took over. Terminal. |
 | `withheld` | Not attempted; stores a reason. Terminal. |
-| `sending` | The channel call has started and its result is not yet recorded. A message found here after 2 minutes is sent once more if it is a reply or staff message, and becomes `failed` with reason `unconfirmed` if it is a template (`architecture.md`, "Sending a message once"). |
+| `sending` | The channel call has started and its result is not yet recorded. A message found here after 2 minutes has an unknown outcome, and its class decides what follows (`architecture.md`, "Sending a message once"). |
 | `sent` | Accepted by the channel API. |
 | `delivered`, `read` | Reported by the channel. |
-| `failed` | Rejected by the channel or reported failed; stores the error code. Terminal. |
+| `failed` | Rejected by the channel or reported failed; stores the error code. Also a message whose outcome nobody knows and which is not called for again; it stores the code `unconfirmed`, and the customer may have it. Terminal. |
 
 Pre-send checks depend only on the message class
 (`glossary.md`, "Message classes"):
@@ -393,9 +393,11 @@ Sending:
 | Event | Effect |
 | --- | --- |
 | Previous message in the conversation is `delivered`, or 10 seconds have passed since it was `sent` | The next `held` message may go |
+| As built in M2 (#290) | The next message goes when the one before it is `sent` or `failed`; the delivery wait is not built |
 | Send call accepted | → `sent` |
-| Send call fails with a temporary error | Retry: 3 attempts in total, waits of 2 and 8 seconds, then → `failed` |
-| Send call fails with a permanent error | → `failed` |
+| Send call refused, and the channel says it can be retried | Retry: 3 calls in total, waits of 2 and 8 seconds, then → `failed` |
+| Send call ends with an unknown outcome: a timeout, a broken connection, a fault on the channel's side, or a worker that stopped | An assistant reply, a system reply or a staff message is called for once more, and after a second unknown outcome → `failed` with `unconfirmed`. A service notice or a business-initiated message → `failed` with `unconfirmed` at once |
+| Send call refused for good | → `failed` |
 | Channel status event | → `delivered`, `read` or `failed` |
 
 A `failed` or `withheld` business-initiated message, or a failed or withheld

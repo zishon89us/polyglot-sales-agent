@@ -237,3 +237,29 @@ any fairness between tenants. Of "Confirmation", this unit shows the retry
 and dead-letter test with the alert queued, and the lease at the level of
 the database. The restart, five-times and ordering tests need the webhook
 and the worker (U7, U8).
+
+## Amendment, 2026-11-19: the worker, as built in M2 unit U8
+
+Made while building the worker (issue #269). The decision is unchanged.
+
+- **The loop.** One worker runs one job at a time: it claims the due job
+  that has waited longest, runs its handler and records the result; with
+  none due it sleeps for the poll interval. The heartbeat has a loop of
+  its own, so a long job does not make a live worker look dead. A fault of
+  the loop itself, such as a database that cannot be reached, is reported
+  and tried again; the worker does not exit, and its stale heartbeat is
+  what tells anyone. On SIGTERM it finishes the job in hand and stops.
+- **Two job types.** `process-conversation` takes the conversation's lease,
+  reads what the customer wrote that no turn has dealt with, and in one
+  transaction marks it, stores the reply and queues the send.
+  `send-messages` sends what waits in one conversation, oldest first. Its
+  subject is the conversation, not a message: order within a conversation
+  then needs no rule of its own (architecture, "Sending a message once").
+- **A handler waits by putting its job back**, never by sleeping: for a
+  conversation another worker holds (1 second), for a message that may be
+  called for again after 2 or 8 seconds, and for a call under way that is
+  not yet 2 minutes old.
+- **The worker holds no connection.** Like the API it is given handles and
+  calls functions of `packages/db` (ADR 0003, amendment of 2026-11-18).
+
+What is not built is listed in #290.

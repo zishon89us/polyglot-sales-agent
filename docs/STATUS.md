@@ -254,11 +254,31 @@ M0 Inception met its exit criteria on 2026-11-16; see
   the same two new customers in opposite order deadlock, and the loser is
   answered 503 and succeeds when sent again (X7).
 
+- 2026-11-19 — U7 merged as #289. M2 unit U8 (#269): the worker. A
+  customer's message is answered with an echo of its text, once; the same
+  message delivered five times gets one reply. What waits in a
+  conversation is sent by one job, oldest first, one at a time. The send
+  policy is decided by message class and has a row for every class
+  (#235, #236): a refusal that can be retried is tried three times; an
+  outcome nobody knows (a timeout, a fault on the channel's side, a worker
+  that stopped) is followed by one more call for a reply and by none for a
+  service notice or a business-initiated message, which end `failed` with
+  the code `unconfirmed`. The restart test stops the worker at four
+  points, for a reply and for a business-initiated message, and shows one
+  copy, one or none, two or one, and one. Two workers with bursts of five
+  messages reply once each and in order. The API, the worker and the mock
+  were run together by hand: a message sent through the mock came back as
+  an echo. **Decided by the agent:** the policy's rows, 5xx as unknown,
+  one send job per conversation, `handled_at`, and where `unconfirmed` is
+  stored. **Not built:** everything after step 4 of the order of checks,
+  templates and pre-send checks, per-tenant credentials (one setting for
+  every tenant until then), the delivery wait of NFR-R7 (#290).
+
 ## Next
 
-1. Maintainer reviews and merges U7 (#268), **after its code review and
+1. Maintainer reviews and merges U8 (#269), **after its code review and
    the verification of its fixes are both in**.
-2. M2 unit U8: the worker, an echo reply and the send policy (#269).
+2. M2 unit U9: operator commands (#270).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);

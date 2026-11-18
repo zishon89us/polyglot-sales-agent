@@ -84,6 +84,8 @@ The channel interface; the `mock-whatsapp` app; a decision, recorded, on what ea
 
 Steps 1 to 4 of the order of checks and an echo reply in place of the model. The outbound message machine with `sending`. The send policy by message class, including a timeout (#235, #236).
 
+**As built:** the worker's loop and heartbeat, the echo, the send policy as one function with a row for every class, and one send job per conversation. Of step 4, the message is stored; sessions and the reply window are not built. No template can be sent and no pre-send check runs. Credentials are one setting for every tenant. These and the rest are in #290.
+
 ### U9: Operator commands (#270)
 
 `ops tenant create` (the tenant only; the owner's invitation arrives in M4, #201), `ops tenant list`, `ops jobs list-dead` and `retry`. The insert-only `operator_log` (ADR 0011).

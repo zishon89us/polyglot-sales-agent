@@ -259,7 +259,10 @@ null when no worker holds it).
 | `class` | For outbound: one of the five message classes |
 | `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on) |
 | `channel_sent_at` | For a message from a customer, the time the channel says it was sent. `created_at` is when the row was stored, taken per row, so the messages of one webhook keep their order |
-| `error_code` | The channel's code for a `failed` status. Letters, digits, `_` and `-`, at most 40 |
+| `error_code` | For a `failed` message: the channel's code, or one of the worker's own: `unconfirmed` (nobody knows whether the channel has it; decision 19), `no-channel`, `unsupported-kind`. Letters, digits, `_` and `-`, at most 40 |
+| `handled_at` | For a message from a customer: when a turn dealt with it. Null until then (decision 18) |
+| `send_attempts`, `unknown_outcomes` | For a message to send: how many times the channel was called for it, and how many of those calls ended with nobody knowing whether it was accepted. The second is the resend counter of US-C1 criterion 9 |
+| `sending_at`, `send_not_before` | When the call under way started, set exactly while the status is `sending`; and the earliest time of the next call after a refusal that can be retried |
 | `channel_message_id` | Unique per tenant and direction when not null. This constraint is the deduplication of US-C1. Per direction, so that a customer's message can never be dropped for sharing an identifier with one that was sent |
 | `body` ⚑ | The text. Null for unsupported types, whose content is never stored, and null after retention or deletion |
 | `button_payload` | Opaque to the core: the pack that registered the button reads it (for the booking pack's Confirm: the booking and the start time it was sent for). **The handler must check that the booking belongs to the sending contact** |
@@ -513,6 +516,8 @@ question for a lawyer (open question OQ-4).
 | 15 | `jobs.subject_id`, a UUID, replaces `dedupe_key` | A timer has to be found again to be cancelled; an identifier cannot carry text. There is no uniqueness on it (ADR 0004, amendment) |
 | 16 | A contact has the channel's own identifier as well as a number, either of which may be missing. The identifier is the person; the number is something a person holds for a time. Every case is in the table under `contacts`, "Which contact a message belongs to" | Since April 2026 a WhatsApp customer who uses a username arrives with no number (#284). **The agent's decision, awaiting the maintainer.** Reworked after the Gate 4 review of unit U7 (finding W1): the first version let a number carry one person's conversation to another. What is still not done: nothing merges two contacts that turn out to be one person (#288) |
 | 17 | `unparsed_events` and `unroutable_events` each have the channel's name and a uniqueness rule | The channel sends an unanswered webhook again, and a slow request can commit after it was answered 503; the same event must be one row |
+| 18 | `messages.handled_at` marks a customer's message that a turn has dealt with | The worker must know what is still to answer, so that a job run twice answers once. The design does this with sessions and batches, which do not exist until M3. **The agent's decision**; it may go when they arrive (#290) |
+| 19 | A message has a count of calls and a count of unknown outcomes; `unconfirmed` is a code in `error_code`, not a status or a withheld reason | Gate 2 finding V6 (#236): "never a third" needs a counter, and `unconfirmed` had no home. A withheld message was never attempted, which is not true of this one. **The agent's decision** |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
 noted for the Gate 2 review and are not yet reflected in the stories.
