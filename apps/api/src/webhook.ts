@@ -62,6 +62,8 @@ export interface WebhookOptions {
   /** Defaults to the largest body the channel says it sends. */
   readonly bodyLimit?: number;
   readonly sinkDeadlineMs?: number;
+  /** Called with the cause each time a request is answered 503. For a log; it must not throw. */
+  readonly onUnavailable?: (error: unknown) => void;
   /** For tests. Milliseconds. */
   readonly now?: () => number;
 }
@@ -78,7 +80,9 @@ export function problem(
     .send({ type: "about:blank", title, status, code });
 }
 
-class SinkTooSlow extends Error {}
+class SinkTooSlow extends Error {
+  readonly code = "sink-too-slow";
+}
 
 /** Runs the sink with a signal that aborts at the deadline, when the wait ends too. */
 function within(work: (signal: AbortSignal) => Promise<void>, ms: number): Promise<void> {
@@ -128,6 +132,7 @@ export async function registerWebhook(
         return problem(reply, 400, "malformed", "The request could not be read");
       }
       // Nothing of the error is sent: it can describe the request.
+      options.onUnavailable?.(error);
       return problem(reply, 503, "unavailable", "The request could not be handled; send it again");
     });
 

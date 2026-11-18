@@ -17,7 +17,7 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): A
   const missing: string[] = [];
   const need = (name: string): string => {
     const value = env[name];
-    if (value === undefined || value === "") {
+    if (value === undefined || value.trim() === "") {
       missing.push(name);
       return "";
     }
@@ -29,7 +29,8 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): A
       .map((part) => part.trim())
       .filter((part) => part !== "");
 
-  const port = Number(env["PSA_API_PORT"] ?? "3000");
+  const portText = env["PSA_API_PORT"] ?? "3000";
+  const port = /^[0-9]{1,5}$/.test(portText) ? Number(portText) : Number.NaN;
   const proxies = list(env["PSA_TRUSTED_PROXIES"] ?? "");
   const config: ApiConfig = {
     host: env["PSA_API_HOST"] ?? "127.0.0.1",

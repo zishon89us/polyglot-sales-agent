@@ -8,6 +8,21 @@ ALTER TABLE contacts
   ADD COLUMN channel_user_id text CHECK (channel_user_id ~ '^[\x21-\x7e]{1,140}$'),
   ADD CONSTRAINT contacts_channel_user_unique UNIQUE (tenant_id, channel_user_id);
 
+-- What the channel says about a message and will not say again: when it was
+-- sent, and, for a failed one, why. `kind` already holds the channel's name
+-- for a type this version does not read.
+ALTER TABLE messages
+  ADD COLUMN channel_sent_at timestamptz,
+  ADD COLUMN error_code text CHECK (error_code ~ '^[A-Za-z0-9_-]{1,40}$');
+
+-- A message is unique by its channel identifier within its direction: what
+-- a customer sent and what the business sent are numbered apart, and one
+-- must never be taken for a duplicate of the other.
+ALTER TABLE messages
+  DROP CONSTRAINT messages_tenant_id_channel_message_id_key,
+  ADD CONSTRAINT messages_channel_identifier_unique
+    UNIQUE (tenant_id, direction, channel_message_id);
+
 -- A validly signed webhook, or part of one, that could not be read. It has
 -- no tenant. Only what cannot identify anyone is kept: a hash of the body,
 -- its size and a code. Never the body, a number or any text.

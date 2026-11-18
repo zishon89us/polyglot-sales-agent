@@ -3,22 +3,27 @@
 // from the environment; tests call it with a test database.
 
 import type { Channel } from "@polyglot-sales-agent/channel";
-import { databaseAnswers, type Queryable } from "@polyglot-sales-agent/db";
+import { errorCode } from "@polyglot-sales-agent/core";
+import { type Database, databaseReady } from "@polyglot-sales-agent/db";
 import type { FastifyInstance } from "fastify";
-import type pg from "pg";
 import type { BadSignatureLimiter } from "./bad-signature-limiter.ts";
 import { createApiServer, type ServerOptions } from "./server.ts";
 import { createSink } from "./sink.ts";
 import { registerWebhook } from "./webhook.ts";
 
+/** One line for the log: what happened, and a short code. Never anything of a request. */
+export type Report = (event: "webhook-unavailable", code: string) => void;
+
 export interface ApiOptions extends ServerOptions {
   readonly channel: Channel;
   /** Answers the channel's registration check. */
   readonly registration: (query: Readonly<Record<string, unknown>>) => string | undefined;
-  /** Connects as the application role. */
-  readonly app: pg.Pool;
-  /** Connects as the cross-tenant role. */
-  readonly cross: Queryable;
+  /** The application role's. */
+  readonly app: Database;
+  /** The cross-tenant role's. */
+  readonly cross: Database;
+  /** Told of each webhook answered 503. Without it nothing says why the channel is being turned away. */
+  readonly report?: Report;
   readonly limiter?: BadSignatureLimiter;
   readonly sinkDeadlineMs?: number;
   /** For tests. Milliseconds. */
@@ -33,20 +38,29 @@ export async function buildApi(options: ApiOptions): Promise<FastifyInstance> {
     reply.code(200).type("application/json").send({ status: "ok" }),
   );
 
-  // The process can do its work: both database roles answer. It says
-  // nothing of the worker, which is probed on its own (ADR 0004, amendment).
+  // The process can do its work: each database handle answers, in time,
+  // as the role it is meant to be. It says nothing of the worker, which is
+  // probed on its own (ADR 0004, amendment).
   server.get("/readyz", async (_request, reply) => {
-    const ready = (await databaseAnswers(options.app)) && (await databaseAnswers(options.cross));
+    const [app, cross] = await Promise.all([
+      databaseReady(options.app),
+      databaseReady(options.cross),
+    ]);
+    const ready = app && cross;
     return reply
       .code(ready ? 200 : 503)
       .type("application/json")
       .send({ status: ready ? "ready" : "not-ready" });
   });
 
+  const report = options.report;
   await registerWebhook(server, {
     channel: options.channel,
     registration: options.registration,
     sink: createSink({ channel: options.channel, app: options.app, cross: options.cross }),
+    ...(report === undefined
+      ? {}
+      : { onUnavailable: (error: unknown) => report("webhook-unavailable", errorCode(error)) }),
     ...(options.limiter === undefined ? {} : { limiter: options.limiter }),
     ...(options.sinkDeadlineMs === undefined ? {} : { sinkDeadlineMs: options.sinkDeadlineMs }),
     ...(options.now === undefined ? {} : { now: options.now }),

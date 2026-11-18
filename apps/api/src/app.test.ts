@@ -2,6 +2,7 @@
 // rows and a job out, and nothing at all for a request that is refused.
 
 import { readdirSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import {
   createWhatsAppChannel,
@@ -9,13 +10,21 @@ import {
   SIGNATURE_HEADER,
   sign,
 } from "@polyglot-sales-agent/channel-whatsapp";
-import { APP_ROLE, CROSS_ROLE, withTenant } from "@polyglot-sales-agent/db";
-import { createTestDatabase, type TestDatabase } from "@polyglot-sales-agent/db/testing";
+import {
+  APP_ROLE,
+  CROSS_ROLE,
+  closeDatabase,
+  type Database,
+  openDatabase,
+  withTenant,
+} from "@polyglot-sales-agent/db";
+import { adopt, createTestDatabase, type TestDatabase } from "@polyglot-sales-agent/db/testing";
 import type { FastifyInstance } from "fastify";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { buildApi } from "./app.ts";
 import { readConfig } from "./config.ts";
+import { createSink } from "./sink.ts";
 
 const SECRET = "synthetic-app-secret";
 const FIXTURES = fileURLToPath(
@@ -29,6 +38,9 @@ let app: pg.Pool;
 let cross: pg.Pool;
 let administrator: pg.Client;
 let api: FastifyInstance;
+let appDb: Database;
+let crossDb: Database;
+const reported: string[] = [];
 const tenant = { a: "", b: "" };
 
 const channel = createWhatsAppChannel({
@@ -55,12 +67,15 @@ beforeAll(async () => {
       [tenant[key], NUMBER[key]],
     );
   }
+  appDb = adopt(APP_ROLE, app);
+  crossDb = adopt(CROSS_ROLE, cross);
   api = await buildApi({
     channel,
     registration: (query) => registrationChallenge(query, "synthetic-verify-token"),
-    app,
-    cross,
+    app: appDb,
+    cross: crossDb,
     trustedProxies: false,
+    report: (event, code) => reported.push(`${event} ${code}`),
   });
 }, 30_000);
 
@@ -75,6 +90,7 @@ beforeEach(async () => {
   await administrator.query(
     "TRUNCATE messages, conversations, contacts, jobs, unparsed_events, unroutable_events CASCADE",
   );
+  reported.length = 0;
 });
 
 const post = (body: Buffer | string, signature?: string, server: FastifyInstance = api) =>
@@ -173,7 +189,7 @@ describe("a validly signed event", () => {
 
   test("a message of a type that is not read is stored as such", async () => {
     await signed(fixture("inbound-image.json"));
-    expect(await messagesOf("a")).toMatchObject([{ kind: "unsupported", body: null }]);
+    expect(await messagesOf("a")).toMatchObject([{ kind: "image", body: null }]);
   });
 
   test("one webhook for two tenants' numbers stores each tenant's part in its own tenant", async () => {
@@ -181,6 +197,24 @@ describe("a validly signed event", () => {
     expect(await messagesOf("a")).toMatchObject([{ channel_message_id: "wamid.SYNTHETIC0005" }]);
     expect(await messagesOf("b")).toEqual([]);
     expect(await counts()).toMatchObject({ messages: 1, jobs: 1, unroutable_events: 0 });
+  });
+
+  test("one number's events are one transaction and one job, however the channel grouped them", async () => {
+    const body = JSON.parse(fixture("inbound-text.json").toString("utf8"));
+    const second = structuredClone(body.entry[0].changes[0]);
+    second.value.messages[0].id = "wamid.SYNTHETIC0011";
+    body.entry[0].changes.push(second);
+    expect((await signed(JSON.stringify(body))).statusCode).toBe(200);
+    expect(await counts()).toMatchObject({ contacts: 1, conversations: 1, messages: 2, jobs: 1 });
+  });
+
+  test("a webhook for a known number and an unknown one: the first is stored, the second recorded", async () => {
+    const body = JSON.parse(fixture("two-numbers.json").toString("utf8"));
+    body.entry[1].changes[0].value.metadata.phone_number_id = "999000000000001";
+    expect((await signed(JSON.stringify(body))).statusCode).toBe(200);
+    expect(await counts()).toMatchObject({ messages: 1, jobs: 1, unroutable_events: 1 });
+    const recorded = await administrator.query("SELECT kind FROM unroutable_events");
+    expect(recorded.rows, "the stranger's event was a status").toEqual([{ kind: "status" }]);
   });
 
   test("a status moves the message it is about, and queues nothing", async () => {
@@ -249,6 +283,14 @@ describe("a validly signed event that reaches no tenant", () => {
     expect(recorded.rows).toEqual([{ error_code: "malformed-items", items_left_out: 1 }]);
     // The conversation's job and the alert.
     expect((await counts())["jobs"]).toBe(2);
+    // A part that is merely not handled is not counted as left out.
+    await administrator.query("TRUNCATE unparsed_events, jobs");
+    const withOther = JSON.parse(JSON.stringify(body));
+    withOther.entry[0].changes.push({ field: "account_update", value: {} });
+    withOther.entry[0].changes[0].value.messages[1].id = "wamid.SYNTHETIC0009";
+    await signed(JSON.stringify(withOther));
+    const again = await administrator.query("SELECT items_left_out FROM unparsed_events");
+    expect(again.rows).toEqual([{ items_left_out: 1 }]);
   });
 });
 
@@ -276,26 +318,27 @@ describe("a request that is refused stores nothing at all (NFR-S2)", () => {
 
 describe("when the database cannot be reached", () => {
   let down: FastifyInstance;
-  let deadApp: pg.Pool;
-  let deadCross: pg.Pool;
+  let deadApp: Database;
+  let deadCross: Database;
+  const refusals: string[] = [];
 
   beforeAll(async () => {
-    // Port 9 on this machine: nothing listens there.
-    const nowhere = "postgres://psa_app:x@127.0.0.1:9/none";
-    deadApp = new pg.Pool({ connectionString: nowhere, connectionTimeoutMillis: 500 });
-    deadCross = new pg.Pool({ connectionString: nowhere, connectionTimeoutMillis: 500 });
+    // Port 9 on this machine: nothing listens there. Opened as `main.ts` opens them.
+    deadApp = openDatabase(APP_ROLE, "postgres://psa_app:x@127.0.0.1:9/none");
+    deadCross = openDatabase(CROSS_ROLE, "postgres://psa_cross:x@127.0.0.1:9/none");
     down = await buildApi({
       channel,
       registration: () => undefined,
       app: deadApp,
       cross: deadCross,
       trustedProxies: false,
+      report: (event, code) => refusals.push(`${event} ${code}`),
     });
   });
   afterAll(async () => {
     await down.close();
-    await deadApp.end();
-    await deadCross.end();
+    await closeDatabase(deadApp);
+    await closeDatabase(deadCross);
   });
 
   test("a valid event is answered 503, so that the channel sends it again, and nothing of the fault is shown", async () => {
@@ -306,13 +349,22 @@ describe("when the database cannot be reached", () => {
     expect(response.body).not.toMatch(/127\.0\.0\.1|ECONNREFUSED|postgres/i);
   });
 
+  test("each refusal is reported for the log, as an event and a short code and nothing else", async () => {
+    refusals.length = 0;
+    const body = fixture("inbound-text.json");
+    await post(body, sign(body, SECRET), down);
+    expect(refusals).toEqual(["webhook-unavailable ECONNREFUSED"]);
+  });
+
   test("an unreadable body is answered 503 too: it could not be recorded", async () => {
     const response = await post("not json", sign(Buffer.from("not json"), SECRET), down);
     expect(response.statusCode).toBe(503);
   });
 
   test("a bad signature is still answered 401: the database is not needed to refuse", async () => {
+    refusals.length = 0;
     expect((await post(fixture("inbound-text.json"), undefined, down)).statusCode).toBe(401);
+    expect(refusals).toEqual([]);
   });
 
   test("the process is alive but not ready", async () => {
@@ -320,6 +372,110 @@ describe("when the database cannot be reached", () => {
     const ready = await down.inject({ method: "GET", url: "/readyz" });
     expect(ready.statusCode).toBe(503);
     expect(ready.json()).toEqual({ status: "not-ready" });
+  });
+});
+
+describe("readiness is about being able to work, not about answering", () => {
+  async function readiness(appHandle: Database, crossHandle: Database): Promise<number> {
+    const server = await buildApi({
+      channel,
+      registration: () => undefined,
+      app: appHandle,
+      cross: crossHandle,
+      trustedProxies: false,
+    });
+    try {
+      return (await server.inject({ method: "GET", url: "/readyz" })).statusCode;
+    } finally {
+      await server.close();
+    }
+  }
+
+  test("ready only when each handle is the role it is meant to be", async () => {
+    expect(await readiness(appDb, crossDb)).toBe(200);
+    // The addresses swapped, as a wrong setting would have them: both answer, neither can work.
+    expect(await readiness(adopt(APP_ROLE, cross), adopt(CROSS_ROLE, app))).toBe(503);
+    expect(await readiness(appDb, adopt(CROSS_ROLE, app)), "only the second is wrong").toBe(503);
+    expect(await readiness(adopt(APP_ROLE, cross), crossDb), "only the first is wrong").toBe(503);
+  });
+
+  test("a database that accepts the connection and then says nothing is not waited for", async () => {
+    const silent = createServer(() => undefined);
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    const port = (silent.address() as { port: number }).port;
+    const mute = openDatabase(APP_ROLE, `postgres://psa_app:x@127.0.0.1:${port}/none`);
+    const started = Date.now();
+    try {
+      expect(await readiness(mute, crossDb)).toBe(503);
+      expect(Date.now() - started).toBeLessThan(4_000);
+    } finally {
+      await closeDatabase(mute).catch(() => undefined);
+      silent.close();
+    }
+  }, 15_000);
+});
+
+describe("a row held by another transaction does not hold the API (database time limits)", () => {
+  test("the webhook gives up on the lock with 503 and a code; another tenant is served meanwhile", async () => {
+    // Handles opened as `main.ts` opens them, so its time limits are the ones tested.
+    const limitedApp = openDatabase(APP_ROLE, database.url(APP_ROLE));
+    const limitedCross = openDatabase(CROSS_ROLE, database.url(CROSS_ROLE), { max: 4 });
+    const codes: string[] = [];
+    const server = await buildApi({
+      channel,
+      registration: () => undefined,
+      app: limitedApp,
+      cross: limitedCross,
+      trustedProxies: false,
+      report: (_event, code) => codes.push(code),
+    });
+    const first = fixture("inbound-text.json");
+    try {
+      expect((await post(first, sign(first, SECRET), server)).statusCode).toBe(200);
+      await administrator.query("BEGIN");
+      await administrator.query("SELECT 1 FROM conversations FOR UPDATE");
+      const again = JSON.parse(first.toString("utf8"));
+      again.entry[0].changes[0].value.messages[0].id = "wamid.SYNTHETIC0012";
+      const blocked = Buffer.from(JSON.stringify(again));
+      const other = JSON.parse(first.toString("utf8"));
+      other.entry[0].changes[0].value.metadata.phone_number_id = NUMBER.b;
+      const free = Buffer.from(JSON.stringify(other));
+      const started = Date.now();
+      const [held, served] = await Promise.all([
+        post(blocked, sign(blocked, SECRET), server),
+        post(free, sign(free, SECRET), server),
+      ]);
+      expect(served.statusCode, "the other tenant").toBe(200);
+      expect(held.statusCode).toBe(503);
+      expect(Date.now() - started).toBeLessThan(4_500);
+      // 55P03: the lock was not had in time.
+      expect(codes).toEqual(["55P03"]);
+      expect((await server.inject({ method: "GET", url: "/readyz" })).statusCode).toBe(200);
+    } finally {
+      await administrator.query("ROLLBACK");
+      await server.close();
+      await closeDatabase(limitedApp);
+      await closeDatabase(limitedCross);
+    }
+  }, 20_000);
+});
+
+describe("the sink stops between steps once its deadline has passed", () => {
+  test("with the signal already aborted, nothing is stored or recorded", async () => {
+    const sink = createSink({ channel, app: appDb, cross: crossDb });
+    const aborted = AbortSignal.abort();
+    const parsed = channel.parseWebhook(fixture("inbound-text.json"));
+    if (!parsed.ok) {
+      throw new Error("the fixture must parse");
+    }
+    const info = { skipped: 0, malformed: 0, sha256: "a".repeat(64), size: 1 };
+    await expect(sink.events(parsed.batches, info, aborted)).rejects.toMatchObject({
+      code: "deadline",
+    });
+    await expect(
+      sink.unparsed({ code: "not-json", sha256: "a".repeat(64), size: 1 }, aborted),
+    ).rejects.toMatchObject({ code: "deadline" });
+    expect(await counts()).toMatchObject({ messages: 0, jobs: 0, unparsed_events: 0 });
   });
 });
 
@@ -408,6 +564,27 @@ describe("settings", () => {
     expect(attempt).not.toThrow("secret");
   });
 
+  test.each(["0", "65536", "0x9a1a", "3000.5", " 3000", "-1", ""])(
+    "a port of %j is refused",
+    (port) => {
+      expect(() => readConfig({ ...complete, PSA_API_PORT: port })).toThrow(
+        "PSA_API_PORT is not a port number",
+      );
+    },
+  );
+
+  test.each(["1", "65535"])("a port of %j is accepted", (port) => {
+    expect(readConfig({ ...complete, PSA_API_PORT: port }).port).toBe(Number(port));
+  });
+
+  test("a setting that is empty or only spaces counts as not set", () => {
+    for (const blank of ["", " ", "\t"]) {
+      expect(() => readConfig({ ...complete, PSA_WHATSAPP_VERIFY_TOKEN: blank })).toThrow(
+        "PSA_WHATSAPP_VERIFY_TOKEN is not set",
+      );
+    }
+  });
+
   test("the example file names every setting the API reads", () => {
     const example = readFileSync(
       fileURLToPath(new URL("../../../.env.example", import.meta.url)),
@@ -425,23 +602,64 @@ describe("settings", () => {
   });
 });
 
-describe("no SQL outside packages/db (ADR 0003, amendment of unit U7)", () => {
-  test("no source file of an app holds a statement or runs a query of its own", () => {
-    const apps = fileURLToPath(new URL("../../", import.meta.url));
-    const offenders: string[] = [];
-    for (const name of readdirSync(apps, { recursive: true, encoding: "utf8" })) {
-      if (!name.endsWith(".ts") || name.endsWith(".test.ts") || name.includes("node_modules")) {
-        continue;
-      }
-      const text = readFileSync(`${apps}${name}`, "utf8");
-      if (
-        /\.query\(|\b(SELECT|INSERT INTO|UPDATE|DELETE FROM)\b[^.\n]*\b(FROM|SET|VALUES|WHERE)\b/.test(
-          text,
-        )
-      ) {
-        offenders.push(name);
+describe("only packages/db can reach the database (ADR 0003, amendment of 2026-11-18)", () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  /** Every source file of the product outside packages/db that is not a test. */
+  function sources(): string[] {
+    const found: string[] = [];
+    for (const top of ["apps", "packages"]) {
+      for (const name of readdirSync(`${root}${top}`, { recursive: true, encoding: "utf8" })) {
+        const path = `${top}/${name}`;
+        if (
+          /\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(name) &&
+          !/\.test\.[a-z]+$/.test(name) &&
+          !path.includes("node_modules") &&
+          !path.startsWith("packages/db/")
+        ) {
+          found.push(path);
+        }
       }
     }
+    return found;
+  }
+  const DRIVER = /["'`]pg(\/[^"'`]*)?["'`]|["'`]pg-[a-z-]+["'`]|["'`]postgres["'`]/;
+
+  test("the scan sees the product's files", () => {
+    const all = sources();
+    expect(all).toContain("apps/api/src/main.ts");
+    expect(all).toContain("apps/api/src/sink.ts");
+    expect(all).toContain("packages/channel-whatsapp/src/send.ts");
+    expect(all.some((path) => path.startsWith("packages/db/"))).toBe(false);
+  });
+
+  test("no file outside packages/db names the database driver, so none can hold a connection", () => {
+    const offenders = sources().filter((path) =>
+      DRIVER.test(readFileSync(`${root}${path}`, "utf8")),
+    );
     expect(offenders).toEqual([]);
+  });
+
+  test("the pattern catches every way of naming the driver", () => {
+    for (const text of [
+      'import pg from "pg";',
+      "import { Pool } from 'pg';",
+      'const pg = require("pg");',
+      'await import("pg");',
+      'import type { Pool } from "pg";',
+      'import Pool from "pg-pool";',
+      'import x from "pg/lib/client";',
+      "import postgres from 'postgres';",
+    ]) {
+      expect(DRIVER.test(text), text).toBe(true);
+    }
+    expect(DRIVER.test('import { storeInbound } from "@polyglot-sales-agent/db";')).toBe(false);
+  });
+
+  test("the package gives out handles, not connections", async () => {
+    const db = await import("@polyglot-sales-agent/db");
+    expect(Object.keys(db)).not.toContain("poolOf");
+    expect(Object.keys(db)).not.toContain("adopt");
+    expect(Object.keys(appDb)).toEqual(["role"]);
+    expect(Object.isFrozen(appDb)).toBe(true);
   });
 });

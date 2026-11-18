@@ -5,17 +5,27 @@ import {
   DEFAULT_SEND_TIMEOUT_MS,
   registrationChallenge,
 } from "@polyglot-sales-agent/channel-whatsapp";
-import pg from "pg";
+import {
+  APP_ROLE,
+  CROSS_ROLE,
+  closeDatabase,
+  databaseReady,
+  openDatabase,
+} from "@polyglot-sales-agent/db";
 import { buildApi } from "./app.ts";
 import { readConfig } from "./config.ts";
 
 try {
   const config = readConfig(process.env);
-  const app = new pg.Pool({ connectionString: config.appDatabaseUrl });
-  const cross = new pg.Pool({ connectionString: config.crossDatabaseUrl, max: 4 });
-  // A connection lost while idle must not end the process.
-  app.on("error", () => undefined);
-  cross.on("error", () => undefined);
+  const app = openDatabase(APP_ROLE, config.appDatabaseUrl);
+  const cross = openDatabase(CROSS_ROLE, config.crossDatabaseUrl, { max: 4 });
+  // Wrong addresses, passwords or roles are found now, not at the first webhook.
+  if (!(await databaseReady(app))) {
+    throw new Error(`api: PSA_DB_APP_URL does not reach the database as ${APP_ROLE}`);
+  }
+  if (!(await databaseReady(cross))) {
+    throw new Error(`api: PSA_DB_CROSS_URL does not reach the database as ${CROSS_ROLE}`);
+  }
   const server = await buildApi({
     channel: createWhatsAppChannel({
       appSecrets: config.whatsappAppSecrets,
@@ -27,11 +37,25 @@ try {
     app,
     cross,
     trustedProxies: config.trustedProxies,
+    // One line of JSON per webhook turned away: a time, the event and a short code.
+    report: (event, code) =>
+      console.error(
+        JSON.stringify({ time: new Date().toISOString(), level: "error", event, code }),
+      ),
   });
-  const address = await server.listen({ host: config.host, port: config.port });
-  console.log(`api: listening on ${address}`);
+  await server.listen({ host: config.host, port: config.port });
+  console.log(`api: listening on ${config.host}, port ${config.port}`);
+  // Stop taking requests, let those in hand finish, then let go of the database.
+  process.once("SIGTERM", () => {
+    server
+      .close()
+      .then(() => Promise.all([closeDatabase(app), closeDatabase(cross)]))
+      .catch(() => {
+        process.exitCode = 1;
+      });
+  });
 } catch (error) {
   // The message only: an error object can carry a connection string.
   console.error(error instanceof Error ? error.message : "api: could not start");
-  process.exitCode = 1;
+  process.exit(1);
 }

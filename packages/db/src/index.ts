@@ -1,7 +1,13 @@
 export { ensureRoles, prepareDatabase, type RolePasswords, scramVerifier } from "./bootstrap.ts";
+export {
+  closeDatabase,
+  DATABASE_TIMEOUTS,
+  type Database,
+  databaseReady,
+  openDatabase,
+} from "./connect.ts";
 export { recordHeartbeat, type WorkerReadiness, workerReadiness } from "./heartbeat.ts";
 export {
-  databaseAnswers,
   type IncomingMessage,
   type IncomingStatus,
   PROCESS_CONVERSATION_JOB,

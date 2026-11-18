@@ -1,12 +1,12 @@
 // What the channel webhook writes (`docs/design/api.md`, section 3; the
-// table of event kinds is in `docs/design/architecture.md`, "Receiving an
-// event"). Everything here is safe to run again for the same webhook: the
-// channel sends a webhook again whenever it was not answered 200, and may
-// do so after a run that did commit.
+// table of event kinds is in `docs/design/architecture.md`, "What the
+// webhook does with each kind of event"). Everything here is safe to run
+// again for the same webhook: the channel sends a webhook again whenever it
+// was not answered 200, and may do so after a run that did commit.
 
 import { OPERATOR_ALERT_JOB } from "@polyglot-sales-agent/core";
-import type pg from "pg";
-import { enqueueJob, type Queryable } from "./jobs.ts";
+import { type Database, poolOf } from "./connect.ts";
+import { enqueueJob } from "./jobs.ts";
 import { type Tx, withTenant } from "./tenant.ts";
 
 /** The job that makes a worker look at a conversation. */
@@ -18,15 +18,19 @@ export interface IncomingMessage {
   readonly phone: string | null;
   /** The channel's own identifier for the customer, or null. One of the two is set. */
   readonly userId: string | null;
-  /** `text`, or `unsupported` for anything this version does not read. */
-  readonly kind: "text" | "unsupported";
+  /** `text`, or the channel's name for a type this version does not read. */
+  readonly kind: string;
   /** The text, for a text message; null otherwise. Untrusted. */
   readonly body: string | null;
+  /** When the channel says it was sent. */
+  readonly sentAt: Date;
 }
 
 export interface IncomingStatus {
   readonly channelMessageId: string;
   readonly status: "sent" | "delivered" | "read" | "failed";
+  /** The channel's code for a failed message, or null. */
+  readonly errorCode: string | null;
 }
 
 export interface StoredBatch {
@@ -38,12 +42,12 @@ export interface StoredBatch {
   readonly statusesApplied: number;
 }
 
-/** The tenant a receiving number belongs to, if any. Run as the cross-tenant role. */
+/** The tenant a receiving number belongs to, if any. The handle is the cross-tenant role's. */
 export async function tenantOfReceivingNumber(
-  cross: Queryable,
+  cross: Database,
   receivingNumberId: string,
 ): Promise<string | undefined> {
-  const result = await cross.query(
+  const result = await poolOf(cross).query<{ tenant_id: string }>(
     "SELECT tenant_id FROM channel_routes WHERE receiving_number_id = $1",
     [receivingNumberId],
   );
@@ -51,10 +55,20 @@ export async function tenantOfReceivingNumber(
 }
 
 /**
- * Finds the contact for a customer, or makes one. Matched on the channel's
- * identifier first, then on the number; whichever of the two the contact
- * lacked is filled in. Two webhooks for one new customer at the same moment
- * end with one contact.
+ * Finds the contact for a customer, or makes one. The rules, each of which
+ * has a row in `docs/design/data-model.md`, decision 16:
+ *
+ * - The channel's identifier is the person; the number is something the
+ *   person has. A contact with the identifier is the contact, whatever
+ *   number comes with it, and takes a new number as its own if no other
+ *   contact holds that number.
+ * - With no contact for the identifier, a contact with the number is used
+ *   only if it has no identifier yet, and then takes this one. If it has
+ *   another, the number has passed to another person: a new contact is
+ *   made, without the number, and the old one is left as it is.
+ * - With no identifier, the number alone decides.
+ *
+ * Two webhooks for one new customer at the same moment end with one contact.
  */
 async function contactFor(
   tx: Tx,
@@ -63,32 +77,52 @@ async function contactFor(
 ): Promise<string> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (who.userId !== null) {
-      const known = await tx.query<{ id: string }>(
-        `UPDATE contacts SET phone = coalesce(phone, (
-           SELECT $2::text WHERE NOT EXISTS (SELECT 1 FROM contacts WHERE phone = $2)))
-         WHERE channel_user_id = $1 RETURNING id`,
-        [who.userId, who.phone],
+      const byIdentifier = await tx.query<{ id: string; phone: string | null }>(
+        "SELECT id, phone FROM contacts WHERE channel_user_id = $1",
+        [who.userId],
       );
-      if (known.rows[0] !== undefined) {
-        return known.rows[0].id;
+      const known = byIdentifier.rows[0];
+      if (known !== undefined) {
+        if (who.phone !== null && who.phone !== known.phone) {
+          await tx.query(
+            `UPDATE contacts SET phone = $2
+             WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM contacts WHERE phone = $2)`,
+            [known.id, who.phone],
+          );
+        }
+        return known.id;
       }
     }
+    let phone = who.phone;
     if (who.phone !== null) {
-      // The identifier is taken as given even if the contact had another:
-      // the channel makes a new one when it must (issue #284).
-      const known = await tx.query<{ id: string }>(
-        `UPDATE contacts SET channel_user_id = coalesce($2, channel_user_id)
-         WHERE phone = $1 RETURNING id`,
-        [who.phone, who.userId],
+      const byNumber = await tx.query<{ id: string; channel_user_id: string | null }>(
+        "SELECT id, channel_user_id FROM contacts WHERE phone = $1",
+        [who.phone],
       );
-      if (known.rows[0] !== undefined) {
-        return known.rows[0].id;
+      const known = byNumber.rows[0];
+      if (known !== undefined) {
+        if (who.userId === null) {
+          return known.id;
+        }
+        if (known.channel_user_id === null) {
+          const taken = await tx.query(
+            "UPDATE contacts SET channel_user_id = $2 WHERE id = $1 AND channel_user_id IS NULL",
+            [known.id, who.userId],
+          );
+          if (taken.rowCount === 1) {
+            return known.id;
+          }
+          // Another transaction gave it an identifier first: look again.
+          continue;
+        }
+        // The number belongs to a contact with another identifier.
+        phone = null;
       }
     }
     const made = await tx.query<{ id: string }>(
       `INSERT INTO contacts (tenant_id, phone, channel_user_id) VALUES ($1, $2, $3)
        ON CONFLICT DO NOTHING RETURNING id`,
-      [tenantId, who.phone, who.userId],
+      [tenantId, phone, who.userId],
     );
     if (made.rows[0] !== undefined) {
       return made.rows[0].id;
@@ -106,22 +140,22 @@ async function conversationFor(
   contactId: string,
   channelAccountId: string,
 ): Promise<string> {
-  await tx.query(
-    `INSERT INTO conversations (tenant_id, contact_id, channel_account_id) VALUES ($1, $2, $3)
-     ON CONFLICT (tenant_id, contact_id) DO NOTHING`,
-    [tenantId, contactId, channelAccountId],
-  );
   const found = await tx.query<{ id: string }>(
-    "SELECT id FROM conversations WHERE contact_id = $1",
-    [contactId],
+    `WITH made AS (
+       INSERT INTO conversations (tenant_id, contact_id, channel_account_id) VALUES ($1, $2, $3)
+       ON CONFLICT (tenant_id, contact_id) DO NOTHING RETURNING id
+     )
+     SELECT id FROM made UNION ALL SELECT id FROM conversations WHERE contact_id = $2 LIMIT 1`,
+    [tenantId, contactId, channelAccountId],
   );
   return found.rows[0]?.id as string;
 }
 
 // A status only ever moves a message forward. `read` may arrive before
 // `delivered`, and `sent` may arrive while the send is still being recorded.
+// A failure's code is kept with it.
 const FORWARD = `
-  UPDATE messages SET status = $2
+  UPDATE messages SET status = $2, error_code = CASE WHEN $2 = 'failed' THEN $3 ELSE error_code END
   WHERE channel_message_id = $1 AND direction = 'outbound' AND (
        ($2 = 'sent' AND status = 'sending')
     OR ($2 = 'delivered' AND status IN ('sending', 'sent'))
@@ -132,16 +166,19 @@ const FORWARD = `
  * Stores one tenant's events from one webhook, in one transaction: each new
  * message with its contact and conversation, and one job per conversation
  * that got a new message. A message already stored is skipped, and queues
- * nothing. The pool is the application role's.
+ * nothing. The handle is the application role's.
+ *
+ * Messages already stored are found with one query before anything else,
+ * so that a webhook sent again costs little however large it is.
  */
 export function storeInbound(
-  app: pg.Pool,
+  app: Database,
   tenantId: string,
   receivingNumberId: string,
   messages: readonly IncomingMessage[],
   statuses: readonly IncomingStatus[],
 ): Promise<StoredBatch> {
-  return withTenant(app, tenantId, async (tx) => {
+  return withTenant(poolOf(app), tenantId, async (tx) => {
     const account = await tx.query<{ id: string }>(
       "SELECT id FROM channel_accounts WHERE receiving_number_id = $1",
       [receivingNumberId],
@@ -152,22 +189,43 @@ export function storeInbound(
         code: "no-channel-account",
       });
     }
+    const already = await tx.query<{ channel_message_id: string }>(
+      `SELECT channel_message_id FROM messages
+       WHERE direction = 'inbound' AND channel_message_id = ANY($1)`,
+      [messages.map((message) => message.channelMessageId)],
+    );
+    const seen = new Set(already.rows.map((row) => row.channel_message_id));
     let stored = 0;
     let duplicates = 0;
     const touched = new Set<string>();
     for (const message of messages) {
+      if (seen.has(message.channelMessageId)) {
+        duplicates += 1;
+        continue;
+      }
+      seen.add(message.channelMessageId);
       const contactId = await contactFor(tx, tenantId, message);
       const conversationId = await conversationFor(tx, tenantId, contactId, channelAccountId);
+      // The clock is read for each row, so that messages of one webhook keep their order.
       const inserted = await tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, kind, channel_message_id, body)
-         VALUES ($1, $2, 'inbound', $3, $4, $5)
-         ON CONFLICT (tenant_id, channel_message_id) DO NOTHING`,
-        [tenantId, conversationId, message.kind, message.channelMessageId, message.body],
+        `INSERT INTO messages (tenant_id, conversation_id, direction, kind, channel_message_id,
+                               body, channel_sent_at, created_at)
+         VALUES ($1, $2, 'inbound', $3, $4, $5, $6, clock_timestamp())
+         ON CONFLICT (tenant_id, direction, channel_message_id) DO NOTHING`,
+        [
+          tenantId,
+          conversationId,
+          message.kind,
+          message.channelMessageId,
+          message.body,
+          message.sentAt,
+        ],
       );
       if (inserted.rowCount === 1) {
         stored += 1;
         touched.add(conversationId);
       } else {
+        // Stored by another transaction since the look above.
         duplicates += 1;
       }
     }
@@ -181,7 +239,11 @@ export function storeInbound(
     }
     let statusesApplied = 0;
     for (const status of statuses) {
-      const moved = await tx.query(FORWARD, [status.channelMessageId, status.status]);
+      const moved = await tx.query(FORWARD, [
+        status.channelMessageId,
+        status.status,
+        status.errorCode,
+      ]);
       statusesApplied += moved.rowCount;
     }
     return { stored, duplicates, statusesApplied };
@@ -190,10 +252,10 @@ export function storeInbound(
 
 /**
  * Records that an event arrived for a receiving number no tenant has. The
- * same event twice is one row. Run as the cross-tenant role.
+ * same event twice is one row. The handle is the cross-tenant role's.
  */
 export async function recordUnroutable(
-  cross: Queryable,
+  cross: Database,
   event: {
     channel: string;
     receivingNumberId: string;
@@ -201,7 +263,7 @@ export async function recordUnroutable(
     kind: "message" | "status";
   },
 ): Promise<void> {
-  await cross.query(
+  await poolOf(cross).query(
     `INSERT INTO unroutable_events (channel, receiving_number_id, channel_message_id, kind)
      VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
     [event.channel, event.receivingNumberId, event.channelMessageId, event.kind],
@@ -211,10 +273,11 @@ export async function recordUnroutable(
 /**
  * Records a body, or part of one, that could not be read, and queues an
  * operator alert for it, as one statement. The same body twice is one row
- * and one alert. Returns whether it was new. Run as the cross-tenant role.
+ * and one alert. Returns whether it was new. The handle is the cross-tenant
+ * role's.
  */
 export async function recordUnparsed(
-  cross: Queryable,
+  cross: Database,
   event: {
     channel: string;
     payloadHash: string;
@@ -224,7 +287,7 @@ export async function recordUnparsed(
     itemsLeftOut: number | null;
   },
 ): Promise<boolean> {
-  const result = await cross.query(
+  const result = await poolOf(cross).query(
     `WITH recorded AS (
        INSERT INTO unparsed_events (channel, payload_hash, size_bytes, error_code, items_left_out)
        VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING RETURNING id
@@ -243,14 +306,4 @@ export async function recordUnparsed(
     ],
   );
   return result.rows.length === 1;
-}
-
-/** True if the database answers. For the readiness endpoint; any pool. */
-export async function databaseAnswers(pool: Queryable): Promise<boolean> {
-  try {
-    await pool.query("SELECT 1");
-    return true;
-  } catch {
-    return false;
-  }
 }
