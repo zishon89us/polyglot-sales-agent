@@ -135,6 +135,11 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Detached handover expiry | 14 days after its session ended | US-C14 |
 | Handover escalation clock | Counts only while the tenant is inside business hours; runs while a handover is unanswered, attached or detached; stops when a follow-up is sent and restarts from zero on re-attachment | US-C14 |
 | Credential check that cannot complete | No state change; retried within the hour | US-D6 |
+| Job retries | 5, after waits of 2, 4, 8, 16 and 32 seconds; then the job is dead and an operator alert is queued | NFR-R5 |
+| Conversation lease | 2 minutes, renewed before each model attempt | ADR 0004 |
+| Claim on a job | 5 minutes; after that another worker may take it. A single run is failed after 4 minutes | ADR 0004, amendment |
+| Job poll interval | 500 milliseconds | ADR 0004, amendment |
+| Worker heartbeat | Every 10 seconds; a worker is ready if one was seen within 30 seconds | NFR-O1 |
 | Notification email throttle | 1 email per tenant per 5 minutes; 3 send attempts | US-C14 |
 | Sign-in lockout | 5 failures in 15 minutes, then 15 minutes | US-D1, NFR-S6 |
 | Dashboard session | 60 minutes idle, 12 hours total | US-D1 |

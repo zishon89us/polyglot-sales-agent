@@ -1,11 +1,13 @@
 // Database commands for a person or a deploy step:
-//   node packages/db/src/cli.ts bootstrap | up | down | status | check
+//   node packages/db/src/cli.ts bootstrap | up | down | status | check | worker-status
 // Connection strings and passwords come from the environment and are never
 // printed.
 
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { ensureRoles, prepareDatabase } from "./bootstrap.ts";
+import { workerReadiness } from "./heartbeat.ts";
+import { deadJobs } from "./jobs.ts";
 import { loadMigrations, migrateDown, migrateUp, migrationStatus } from "./migrate.ts";
 import { findIsolationProblems } from "./policy-check.ts";
 import { APP_ROLE, CROSS_ROLE, MIGRATE_ROLE } from "./roles.ts";
@@ -73,6 +75,18 @@ const commands: Record<string, () => Promise<number>> = {
     }
     console.log(problems.length === 0 ? "db: no isolation problem found" : "db: check failed");
     return problems.length === 0 ? 0 : 1;
+  },
+  // The worker's readiness probe: exit 0 if a worker was seen recently.
+  async "worker-status"() {
+    const [state, dead] = await connected(
+      env("PSA_DB_CROSS_URL"),
+      async (client) => [await workerReadiness(client), await deadJobs(client)] as const,
+    );
+    const seen = state.lastSeenAt === undefined ? "never" : state.lastSeenAt.toISOString();
+    console.log(`db: worker ${state.ready ? "ready" : "not ready"}, last seen ${seen}`);
+    // Not part of the exit code, but the only sign of an alert nobody received.
+    console.log(`db: dead jobs ${dead.dead}, of which undelivered alerts ${dead.deadAlerts}`);
+    return state.ready ? 0 : 1;
   },
 };
 

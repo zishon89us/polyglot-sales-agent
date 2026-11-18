@@ -48,6 +48,6 @@ Behaviour required by `nfr.md` that no story carries. Each gets an issue when it
 | Work | Requirement | Milestone | Issue | Tests |
 | --- | --- | --- | --- | --- |
 | Daily retention job | NFR-V4 | M5 |  |  |
-| Dead-letter queue and operator alert | NFR-R5 | M2 |  |  |
+| Dead-letter queue and operator alert | NFR-R5 | M2 | #266 | `packages/db/test/jobs.test.ts`: retries, dead-letter, alert queued. Nothing delivers the alert yet (#282) |
 | Trial second pack `faq-only` | NFR-M1 | M5 |  |  |
-| Health and readiness endpoints, structured logs | NFR-O1, NFR-O2 | M2 |  |  |
+| Health and readiness endpoints, structured logs | NFR-O1, NFR-O2 | M2 | #266 (worker probe only) | `packages/db/test/jobs.test.ts`: the heartbeat |

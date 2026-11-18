@@ -15,6 +15,15 @@ export type Role = (typeof ROLES)[number];
 export const UNSCOPED_TABLES: Readonly<Record<string, string>> = {
   channel_routes: "read to find the tenant of a webhook, before a tenant is known",
   schema_migrations: "the migration runner's own record",
+  worker_heartbeats: "one row per worker process; belongs to no tenant",
+};
+
+/**
+ * Tables with a policy set of their own, each with the reason. What the
+ * application role may do on each is spelled out in `policy-check.ts`.
+ */
+export const SPECIAL_TABLES: Readonly<Record<string, string>> = {
+  jobs: "a worker claims a job before the tenant is known; the application role may add a job for its tenant, see which exist and cancel a queued one, and may not read what they hold",
 };
 
 /**

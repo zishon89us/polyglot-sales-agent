@@ -110,7 +110,7 @@ business data, metrics and settings.
 
 | ID | Requirement | Target | How it is checked |
 | --- | --- | --- | --- |
-| NFR-O1 | Health and readiness endpoints | Present on API and worker | Smoke test |
+| NFR-O1 | Health and readiness | Endpoints on the API. For the worker, which accepts no HTTP, a probe command that reads its heartbeat (ADR 0004, amendment) | Smoke test |
 | NFR-O2 | Structured logs | JSON with request and conversation IDs on every line | Log schema test |
 | NFR-O3 | Rollback | A release can be rolled back in ≤ 15 minutes following the runbook | Rehearsed once in staging |
 | NFR-O4 | Migrations are reversible | Every migration has a tested down step, or a documented reason it cannot | CI migration test |

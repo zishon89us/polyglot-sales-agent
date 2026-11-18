@@ -1,4 +1,23 @@
 export { ensureRoles, prepareDatabase, type RolePasswords, scramVerifier } from "./bootstrap.ts";
+export { recordHeartbeat, type WorkerReadiness, workerReadiness } from "./heartbeat.ts";
+export {
+  cancelJobs,
+  claimJob,
+  completeJob,
+  deadJobs,
+  deferJob,
+  enqueueJob,
+  failJob,
+  type Job,
+  type JobHandler,
+  type NewJob,
+  type Queryable,
+  type RunOptions,
+  type RunOutcome,
+  replaceJob,
+  runNextJob,
+} from "./jobs.ts";
+export { holdsLease, releaseLease, renewLease, takeLease } from "./lease.ts";
 export {
   loadMigrations,
   type Migration,
@@ -14,6 +33,7 @@ export {
   MIGRATE_ROLE,
   ROLES,
   type Role,
+  SPECIAL_TABLES,
   UNSCOPED_TABLES,
 } from "./roles.ts";
 export { type Tx, withTenant } from "./tenant.ts";

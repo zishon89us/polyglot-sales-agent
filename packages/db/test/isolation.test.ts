@@ -32,13 +32,16 @@ const PRIVILEGES = {
     channel_accounts: "SELECT",
     contacts: "INSERT,SELECT,UPDATE",
     conversations: "INSERT,SELECT,UPDATE",
+    jobs: "DELETE",
     messages: "INSERT,SELECT,UPDATE",
     tenants: "SELECT",
   },
   psa_cross: {
     channel_accounts: "INSERT,SELECT",
     channel_routes: "SELECT",
+    jobs: "DELETE,INSERT,SELECT,UPDATE",
     tenants: "INSERT,SELECT",
+    worker_heartbeats: "DELETE,INSERT,SELECT,UPDATE",
   },
 };
 
@@ -403,7 +406,7 @@ describe("the application role cannot go around the policies", () => {
 });
 
 describe("privileges", () => {
-  test("the two working roles hold exactly the table privileges listed, and none on single columns", async () => {
+  test("the two working roles hold exactly the table privileges listed, and privileges by column on one table only", async () => {
     const grants = await migrate.query<{ grantee: string; table_name: string; privileges: string }>(
       `SELECT grantee, table_name, string_agg(privilege_type, ',' ORDER BY privilege_type) AS privileges
        FROM information_schema.role_table_grants
@@ -420,7 +423,11 @@ describe("privileges", () => {
        WHERE attacl IS NOT NULL AND attrelid IN
          (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)`,
     );
-    expect(columns.rows).toEqual([]);
+    // The one table with privileges by column (ADR 0004, amendment).
+    expect([...new Set(columns.rows.map((row) => row.table))]).toEqual(["jobs"]);
+    expect(columns.rows.map((row) => row.attname).sort()).toEqual(
+      ["id", "payload", "run_at", "state", "subject_id", "tenant_id", "type"].sort(),
+    );
   });
 
   test("the functions are executable only by the roles that need them", async () => {
@@ -446,6 +453,14 @@ describe("privileges", () => {
         settings: ["search_path=pg_catalog, public"],
         app: false,
         cross: false,
+        everyone: false,
+      },
+      {
+        name: "job_payload_ok",
+        definer: false,
+        settings: null,
+        app: true,
+        cross: true,
         everyone: false,
       },
     ]);

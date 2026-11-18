@@ -147,7 +147,7 @@ administrator; nothing after it does.
 | --- | --- | --- |
 | `psa_migrate` | Migrations | Owns the schema. Row-level security is forced, and it has no policy, so it reads no rows of tenant-owned tables |
 | `psa_app` | The application | Reads and writes the rows of the transaction's tenant, within the privileges granted per table. Cannot create, alter or truncate anything, and cannot update or delete audit entries |
-| `psa_cross` | Lookups and jobs that cross tenants by design | Sees every tenant's rows, in the tables it has been granted. Today: `tenants`, `channel_accounts`, `channel_routes` |
+| `psa_cross` | Lookups and jobs that cross tenants by design | Sees every tenant's rows, in the tables it has been granted. As of unit U4: `tenants`, `channel_accounts`, `channel_routes`. Later units add to this; the list that is kept current is the one in `packages/db/test/isolation.test.ts` |
 
 None of the three is a superuser or has the attribute that bypasses
 row-level security. The cross-tenant role sees all rows through a policy of

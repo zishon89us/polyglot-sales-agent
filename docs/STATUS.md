@@ -168,10 +168,27 @@ M0 Inception met its exit criteria on 2026-11-16; see
   then four Medium ones a verifier found in the fixes. 119 database tests
   now. What is not fixed is in #279.
 
+- 2026-11-17 — U4's fixes merged as #281. M2 unit U5 (#266): the job queue,
+  the conversation lease and the worker heartbeat, as functions in
+  `packages/db` with their rules in `packages/core`. The tests show: a job
+  that keeps failing runs six times, after waits of 2, 4, 8, 16 and 32
+  seconds, and is then dead with an alert queued; four workers never claim
+  the same job; of two workers taking a lease at once exactly one gets it,
+  fifty times over; a worker that lost the lease has its result discarded.
+  The worker's probe is a command that reads its heartbeat (#187). The code
+  review found 15 defects, one High: the application role could not cancel
+  or replace a timer, which the design requires, and the plan's item on
+  timers (#195) had been dropped without a word. It also found that
+  everything compared against each process's own clock. Both are changed:
+  timers can be cancelled and replaced, and the database's clock is the
+  only one. **Not built:** the worker process that would call these
+  functions, and anything that delivers an alert; both in #282, with the
+  query builder, deferred once more.
+
 ## Next
 
-1. Maintainer reviews and merges the U4 fixes (#281), which close #265.
-2. M2 unit U5: jobs, the conversation lease and worker health (#266).
+1. Maintainer reviews and merges U5 (#266), **after its code review is in**.
+2. M2 unit U6: the channel interface and the mock channel (#267).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
@@ -221,6 +238,10 @@ v1.1.
 
 ## Blocked on the maintainer
 
+- **NFR-O1 was reworded by the agent** in unit U5. It said health and
+  readiness endpoints are "present on API and worker"; the worker accepts
+  no HTTP, so it now says the worker is probed by a command that reads its
+  heartbeat. Confirm, or say how the worker should be probed instead.
 - Open questions with the maintainer as owner, in
   `requirements/open-questions.md`. None blocks v1.0 on the mock channel
   except OQ-9 (model provider) before M3 and OQ-11 (merge style) before M2.

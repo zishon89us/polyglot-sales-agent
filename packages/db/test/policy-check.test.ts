@@ -8,6 +8,7 @@ import {
   DEFINER_FUNCTIONS,
   findIsolationProblems,
   MIGRATE_ROLE,
+  SPECIAL_TABLES,
   UNSCOPED_TABLES,
 } from "../src/index.ts";
 import { createTestDatabase, type TestDatabase } from "./harness.ts";
@@ -47,7 +48,12 @@ describe("findIsolationProblems", () => {
   });
 
   test("the two lists of exceptions hold exactly what this change needs", () => {
-    expect(Object.keys(UNSCOPED_TABLES)).toEqual(["channel_routes", "schema_migrations"]);
+    expect(Object.keys(UNSCOPED_TABLES)).toEqual([
+      "channel_routes",
+      "schema_migrations",
+      "worker_heartbeats",
+    ]);
+    expect(Object.keys(SPECIAL_TABLES)).toEqual(["jobs"]);
     expect(Object.keys(DEFINER_FUNCTIONS)).toEqual(["channel_routes_sync()"]);
   });
 
@@ -197,7 +203,111 @@ describe("findIsolationProblems", () => {
     [
       "an unscoped table that no longer exists",
       "DROP TABLE channel_routes",
-      ["table channel_routes: is on the list of unscoped tables but does not exist"],
+      ["table channel_routes: is on a list of exceptions but does not exist"],
+    ],
+    [
+      "the whole jobs table readable by the application role",
+      "GRANT SELECT ON jobs TO psa_app",
+      [
+        "table jobs: psa_app may read (attempts, created_at, id, last_error, locked_until, payload, run_at, state, subject_id, tenant_id, type), expected (id, state, subject_id, tenant_id, type)",
+      ],
+    ],
+    [
+      "a job's payload readable by the application role",
+      "GRANT SELECT (payload) ON jobs TO psa_app",
+      [
+        "table jobs: psa_app may read (id, payload, state, subject_id, tenant_id, type), expected (id, state, subject_id, tenant_id, type)",
+      ],
+    ],
+    [
+      "a job's state settable by the application role",
+      "GRANT INSERT (state) ON jobs TO psa_app",
+      [
+        "table jobs: psa_app may set (payload, run_at, state, subject_id, tenant_id, type), expected (payload, run_at, subject_id, tenant_id, type)",
+      ],
+    ],
+    [
+      "a job's due time changeable by the application role",
+      "GRANT UPDATE (run_at) ON jobs TO psa_app",
+      ["table jobs: psa_app may change (run_at), expected nothing"],
+    ],
+    [
+      "jobs changeable by the application role",
+      "GRANT UPDATE ON jobs TO psa_app",
+      [
+        "table jobs: psa_app may change (attempts, created_at, id, last_error, locked_until, payload, run_at, state, subject_id, tenant_id, type), expected nothing",
+      ],
+    ],
+    [
+      "the jobs table open to inserts for any tenant",
+      "DROP POLICY tenant_insert ON jobs; CREATE POLICY tenant_insert ON jobs FOR INSERT TO psa_app WITH CHECK (true)",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "jobs dated into the past allowed to the application role",
+      "DROP POLICY tenant_insert ON jobs; CREATE POLICY tenant_insert ON jobs FOR INSERT TO psa_app WITH CHECK (tenant_id = app_tenant_id() AND type <> 'operator-alert')",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "the alert type open to the application role",
+      "DROP POLICY tenant_insert ON jobs; CREATE POLICY tenant_insert ON jobs FOR INSERT TO psa_app WITH CHECK (tenant_id = app_tenant_id())",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "every tenant's jobs visible to the application role",
+      "DROP POLICY tenant_select ON jobs; CREATE POLICY tenant_select ON jobs FOR SELECT TO psa_app USING (true)",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "running jobs removable by the application role",
+      "DROP POLICY tenant_cancel ON jobs; CREATE POLICY tenant_cancel ON jobs FOR DELETE TO psa_app USING (tenant_id = app_tenant_id())",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "one more policy on the jobs table",
+      "CREATE POLICY more ON jobs FOR UPDATE TO psa_app USING (true)",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "a restrictive policy in place of a plain one on the jobs table",
+      "DROP POLICY tenant_select ON jobs; CREATE POLICY tenant_select ON jobs AS RESTRICTIVE FOR SELECT TO psa_app USING (tenant_id = app_tenant_id())",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "a policy for everyone on the jobs table",
+      "CREATE POLICY wide ON jobs FOR SELECT USING (true)",
+      [
+        "table jobs: its policies besides psa_cross's must be exactly: INSERT USING null WITH CHECK ((tenant_id = app_tenant_id()) AND (type <> 'operator-alert'::text) AND (run_at >= (now() - '00:01:00'::interval))); SELECT USING (tenant_id = app_tenant_id()) WITH CHECK null; DELETE USING ((tenant_id = app_tenant_id()) AND (state = 'queued'::text)) WITH CHECK null",
+      ],
+    ],
+    [
+      "row-level security not forced on the jobs table",
+      "ALTER TABLE jobs NO FORCE ROW LEVEL SECURITY",
+      ["table jobs: row-level security is not enabled and forced"],
+    ],
+    [
+      "row-level security disabled on the jobs table",
+      "ALTER TABLE jobs DISABLE ROW LEVEL SECURITY",
+      ["table jobs: row-level security is not enabled and forced"],
+    ],
+    [
+      "the jobs table dropped",
+      "DROP TABLE jobs",
+      ["table jobs: is on a list of exceptions but does not exist"],
     ],
     [
       "the application role allowed to create tables",
