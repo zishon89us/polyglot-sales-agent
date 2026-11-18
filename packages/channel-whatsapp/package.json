@@ -1,0 +1,13 @@
+{
+  "name": "@polyglot-sales-agent/channel-whatsapp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The WhatsApp Cloud API channel. All knowledge of Meta's payloads lives here.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyglot-sales-agent/channel": "workspace:*"
+  }
+}

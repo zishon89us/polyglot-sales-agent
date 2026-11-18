@@ -132,6 +132,7 @@ vulnerabilities on that date.
 | commitlint | 21.2.4 | MIT | 2026-10-18 | Enforces the commit format of `AGENTS.md` section 4 | A hand-written check |
 | @types/node | 22.20.5 | MIT | — | Types for the Node.js line above | — |
 | yaml | 2.9.1 | ISC | Not recorded; added in unit U3, when `pnpm audit` again reported no known vulnerabilities | Reads the OpenAPI file in the shared-names check | A hand-written extraction of the enums, which would be fragile |
+| fastify | 5.12.8 | MIT | 2026-11-02; added in unit U6 | The framework this record chose. It brings 46 packages of its own, all MIT, ISC or BSD-3-Clause; their maintenance was not looked at one by one |
 | @redocly/cli | 2.79.0 | MIT | Not recorded; added in unit U2 | Lints the OpenAPI file; the rule set was already in `redocly.yaml` | Spectral |
 
 CI actions, added in unit U2 and pinned to the commit each release tag

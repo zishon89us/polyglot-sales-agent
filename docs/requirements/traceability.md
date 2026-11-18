@@ -51,3 +51,5 @@ Behaviour required by `nfr.md` that no story carries. Each gets an issue when it
 | Dead-letter queue and operator alert | NFR-R5 | M2 | #266 | `packages/db/test/jobs.test.ts`: retries, dead-letter, alert queued. Nothing delivers the alert yet (#282) |
 | Trial second pack `faq-only` | NFR-M1 | M5 |  |  |
 | Health and readiness endpoints, structured logs | NFR-O1, NFR-O2 | M2 | #266 (worker probe only) | `packages/db/test/jobs.test.ts`: the heartbeat |
+| Webhook authenticity and unauthenticated load | NFR-S2, #154 | M2 | #267 | `apps/api/src/webhook.test.ts`: 401 and nothing handed on, the size limit, the limit on bad signatures. That nothing is stored needs the sink of #268 |
+| A second channel fits the interface | NFR-M2 | M2 | #267 | `packages/channel/src/contract.ts`, run by both channels. The test on imports is not written yet |

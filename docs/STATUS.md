@@ -185,10 +185,25 @@ M0 Inception met its exit criteria on 2026-11-16; see
   functions, and anything that delivers an alert; both in #282, with the
   query builder, deferred once more.
 
+- 2026-11-18 — U5 merged as #283. M2 unit U6 (#267): the channel
+  interface; the WhatsApp channel, which checks a signature, reads a
+  webhook and sends a text; a second channel that lives in memory; the
+  `mock-whatsapp` app that stands in for Meta's servers; and the webhook
+  guard in `apps/api`. Contract tests run on dated, synthetic fixtures
+  written from Meta's documentation as read that day. A bad signature is
+  answered 401 and nothing is handed on; a body over 3 MiB is refused
+  before it is read; ten refused requests within a minute block a source
+  for a minute. What each mock is for is decided and written in the architecture
+  (#202). Reading the documentation turned up a fact the design did not
+  assume: **a WhatsApp customer may arrive with no phone number** (#284).
+  Not built: the sink that stores, which is U7's; templates and credential
+  checks; statuses from the mock. All in #285.
+
 ## Next
 
-1. Maintainer reviews and merges U5 (#266), **after its code review is in**.
-2. M2 unit U6: the channel interface and the mock channel (#267).
+1. Maintainer reviews and merges U6 (#267), **after its code review is in**.
+2. M2 unit U7: the webhook stores and queues (#268). Before a contact is
+   stored, #284 must be decided.
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
@@ -238,6 +253,19 @@ v1.1.
 
 ## Blocked on the maintainer
 
+- **The dependency audit fails, on `main` too, since 2026-11-18.** An
+  advisory was published for `picomatch` up to 4.0.7 (GHSA-fc5q-39xc-vjpf,
+  a slow match on a crafted pattern). It is here only through `vitest`, the
+  test runner; no fixed version exists. The CI job "Dependency audit and
+  secret scan" is red on every pull request until a fix is released or the
+  maintainer decides to have the audit pass over this one advisory. The
+  agent did not make that decision: it would switch off part of a check.
+
+- **NFR-S2 was reworded by the agent** in unit U6. It said every request
+  with a missing or invalid signature is "answered 401"; with the size
+  limit and the limit on refused requests of #154, some are refused with
+  413, 429 or 400 before the signature can be read. "Not stored" is
+  unchanged. Confirm, or say which answers are acceptable.
 - **NFR-O1 was reworded by the agent** in unit U5. It said health and
   readiness endpoints are "present on API and worker"; the worker accepts
   no HTTP, so it now says the worker is probed by a command that reads its
