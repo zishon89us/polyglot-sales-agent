@@ -235,19 +235,32 @@ settles it for M2, and it is the agent's decision, open to the maintainer.
 
 **Decision.** No query builder is added now. SQL is written as fixed text
 with parameters, and only in `packages/db`. The database driver is imported
-only there: a test fails if any other source file of an app or a package
-names it. What `packages/db` gives the rest is a handle with a role's name
-on it and nothing else; it cannot run a query, and the function that turns
-it back into a connection is not exported.
+only there. What `packages/db` gives the API is a handle with a role's name
+on it and nothing else; it cannot run a query. The function that turns a
+handle back into a connection is not in the package's main entry. It is in
+the testing entry, `@polyglot-sales-agent/db/testing`, which tests need.
 
-Reworded after the Gate 4 review of unit U7 (finding W2). The first wording
-said a test fails if an app's source file "holds a statement or runs a
-query of its own". That test looked for SQL in text and caught one planted
-case in six. Text cannot be searched for every way of writing a query; an
-import can.
+A test scans every source file of every app and package outside
+`packages/db` that is not a test, and fails if one:
 
-**What the test does not show.** That the statements inside `packages/db`
-are fixed text. That is by reading: none builds its text from a value.
+- names the driver in a string (`pg`, `pg-…`, `postgres`);
+- imports the package's testing entry or any file inside `packages/db`;
+- uses `createRequire` or `import.meta.resolve`, or a dynamic `import()` or
+  `require()` whose argument is anything but one plain string;
+- has a backslash escape in an import's module name.
+
+Reworded twice. The first wording said a test fails if an app's source file
+"holds a statement or runs a query of its own"; that test searched text for
+SQL and caught one planted case in six (Gate 4 review of U7, finding W2).
+The second said the connection function "is not exported"; it was, at the
+testing entry, and eight of sixteen planted files still reached the
+database (verification, X1). All eight are now cases in the test.
+
+**What the test does not show.** It is a guard against a shortcut taken by
+accident, not against an author set on getting round it: source text can
+be made to hide a module name in ways no pattern reads. Nor does it show
+that the statements inside `packages/db` are fixed text. That is by
+reading: none builds its text from a value.
 
 **Why.** What the builder was for is two things. One is that query text is
 never built from outside input (threat T33): keeping every statement in one

@@ -237,9 +237,22 @@ M0 Inception met its exit criteria on 2026-11-16; see
   recognised in one query; uniqueness of a channel identifier is per
   direction. Not fixed, in #288: the catalogue check does not pin the
   columns of the unscoped tables (W14); a first delivery too large to
-  store in 5 seconds is answered 503 once before its 200 (measured at
-  12,000 messages: 7.6 s, then 32 ms); the hash of an unreadable body is
-  not keyed (W10, now stated).
+  store in 5 seconds is answered 503 until its first run has committed,
+  and 200 after (measured at 12,000 messages: 7.6 s to store, then 32 ms);
+  the hash of an unreadable body is not keyed (W10, now stated).
+- 2026-11-18 — The fixes were checked by a second agent
+  (`docs/reviews/2026-11-18-gate4-u7-verification.md`): no High, nine
+  findings. It confirmed the contact rules in code and the time limits,
+  and found that the driver boundary still claimed more than its test
+  showed (eight of sixteen planted files got through), that a contact
+  could be left showing a number that had become someone else's, and that
+  a blank `PSA_API_HOST` listened on every interface. All three are fixed:
+  the test now covers the eight ways and the decision record says it is a
+  guard against accident, not against intent; a number now leaves a
+  contact when the channel sends it with another person's identifier; a
+  blank host is this machine only. Not fixed, in #288: two webhooks with
+  the same two new customers in opposite order deadlock, and the loser is
+  answered 503 and succeeds when sent again (X7).
 
 ## Next
 

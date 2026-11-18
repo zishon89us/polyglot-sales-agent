@@ -131,15 +131,20 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 #### Which contact a message belongs to
 
 Decision 16. The channel gives a number, an identifier, or both. "Holds"
-means a contact of this tenant has that value now. No row is ever changed
-except to fill a value that was missing, or to follow a person to a new
-number.
+means a contact of this tenant has that value now. Two things never
+happen: an identifier is never changed, and a contact is never given
+another contact's conversation.
 
-| The message carries | What exists | The contact used | What changes |
+A number belongs to the identifier the channel last sent it with. So the
+first thing done with a message that carries both is this: **any contact
+with a different identifier that holds the number loses it.** Its row keeps
+its identifier and its conversation, and has no number until its person
+writes again from one. Then:
+
+| The message carries | What exists, after that | The contact used | What changes |
 | --- | --- | --- | --- |
-| An identifier | A contact holds the identifier | That contact, whatever number came with the message | If a number came and no other contact holds it, the contact takes it: this is how a changed number is followed. If another contact holds it, nothing changes |
-| An identifier and a number | Nobody holds the identifier; a contact holds the number and has no identifier | That contact | It takes the identifier |
-| An identifier and a number | Nobody holds the identifier; a contact holds the number and has another identifier | A new contact with the identifier and **no number** | Nothing of the other contact. The number has passed to a new person, and the old holder keeps the conversation |
+| An identifier, with or without a number | A contact holds the identifier | That contact | If a number came and nobody holds it now, the contact takes it: a changed number is followed. If a contact with no identifier holds it, nothing changes |
+| An identifier and a number | Nobody holds the identifier; a contact with no identifier holds the number | That contact | It takes the identifier |
 | An identifier, with or without a number | Nobody holds either | A new contact with what came | |
 | A number only | A contact holds the number | That contact, with or without an identifier | Nothing |
 | A number only | Nobody holds it | A new contact with the number | |
@@ -147,17 +152,25 @@ number.
 What follows from the table and is accepted:
 
 - A person first seen by number alone and later by identifier alone is two
-  contacts until a message carries both. If by then each has a
-  conversation, they stay two; nothing merges contacts (#288).
-- A number alone that has passed to a new person reaches the old holder's
-  contact. Without an identifier the two cannot be told apart. `compliance.md`
-  records that the channel sends the identifier with every message since
-  April 2026, so this needs a channel that sends none.
-- After a number passes to a new person, the old holder's row still shows
-  it until that person writes from another number.
+  contacts, and stays two even when a message then carries both: the
+  message goes to the contact with the identifier, and the other keeps the
+  number. Nothing merges contacts (#288).
+- A contact known by number alone is taken by whichever identifier first
+  arrives with that number. If the number had passed to a new person
+  before any identifier was seen, that person joins the old holder's
+  conversation. Without an identifier the two cannot be told apart.
+  `compliance.md` records that every message webhook carries the identifier
+  since April 2026, so this needs a contact made before then, or a channel
+  that sends none.
+- A number alone reaches whoever holds it now. After it has passed on with
+  an identifier, that is the new person.
+- A contact's number is the one the channel last sent with its identifier,
+  unless another person has since arrived with that number, and then it
+  has none. Anything sent later to a contact goes to a number the channel
+  itself paired with that person, or is not sent by number at all.
 
-Each row of the table, and the sequence of the review's finding W1, is a
-test in `packages/db/test/inbound.test.ts`.
+Each row of the table is a test in `packages/db/test/inbound.test.ts`, as
+are the sequences of the review's finding W1 and the verification's X2.
 
 ### `consent_records` — tenant-owned
 
@@ -241,7 +254,7 @@ null when no worker holds it).
 | `button_payload` | Opaque to the core: the pack that registered the button reads it (for the booking pack's Confirm: the booking and the start time it was sent for). **The handler must check that the booking belongs to the sending contact** |
 | `template_id`, `template_variables` ⚑ | Variables can hold a service name and a time; treated as personal with the message |
 | `status` | `pending`, `held`, `discarded`, `withheld`, `sending`, `sent`, `delivered`, `read`, `failed` |
-| `withheld_reason`, `error_code` | |
+| `withheld_reason` | |
 | `sent_by_user_id` | For staff messages |
 | `fee_amount`, `fee_currency` | As reported by the channel; null if not reported |
 | `received_while_not_answering` | |
@@ -390,9 +403,12 @@ could not be read (`unparsed_events`) with its `operator-alert` job, and
 the API's readiness check. Nothing else may use the cross-tenant role.
 
 What enforces it today is narrower than "which modules": a test fails if
-any source file outside `packages/db` names the database driver, so the
-role can be used only through the functions that package exports, each of
-which takes a handle that cannot run a query. A test of which *modules*
+any source file outside `packages/db` names the database driver, imports
+that package's inner files or its testing entry, or builds a module name
+at run time. The API therefore reaches the database only through the
+functions it is given for the webhook, each of which takes a handle that
+cannot run a query. (The package's job, lease and migration functions take
+a connection; nothing outside the package and its tests can make one.) A test of which *modules*
 may hold the cross-tenant handle is not built (#162).
 
 ## Constraints that carry invariants
