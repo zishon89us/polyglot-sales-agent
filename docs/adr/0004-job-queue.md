@@ -262,4 +262,14 @@ Made while building the worker (issue #269). The decision is unchanged.
 - **The worker holds no connection.** Like the API it is given handles and
   calls functions of `packages/db` (ADR 0003, amendment of 2026-11-18).
 
+- **How long one job can hold the worker.** A worker runs one job at a
+  time. A turn is a few statements. A run of `send-messages` makes at most
+  20 calls to the channel and ends at the first that is not accepted, so
+  its worst case is twenty quick calls and one that takes the send
+  timeout of 10 seconds. More workers are the answer to more load; nothing
+  shares a worker fairly between tenants (#282).
+- **Nothing sweeps.** A message waits for a job. If its job dies, it
+  waits for the next job about its conversation, and expires after 15
+  minutes (architecture, "Sending a message once").
+
 What is not built is listed in #290.

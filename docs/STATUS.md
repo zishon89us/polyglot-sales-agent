@@ -274,6 +274,22 @@ M0 Inception met its exit criteria on 2026-11-16; see
   templates and pre-send checks, per-tenant credentials (one setting for
   every tenant until then), the delivery wait of NFR-R7 (#290).
 
+- 2026-11-19 — U8's code review: no High finding, four Medium, eight Low
+  (`docs/reviews/2026-11-19-gate4-u8-worker.md`). In its own runs, with
+  four workers and a channel that hung, threw and lied, no reply was
+  delivered more than twice and nothing else more than once. Fixed: a
+  message that has waited more than 15 minutes is not sent (replies left
+  by a dead send job were being sent days late); the down step of
+  migration 0004 can be followed by up again; a turn that fails frees its
+  conversation; a failed message is reported and stores `unconfirmed`
+  whenever the customer may have it; a run of sends stops at the first
+  call that is not accepted; a test now shows the job loop working again
+  after the database comes back. Not fixed, in #290: nothing sweeps for
+  messages whose job died; one worker shares nothing fairly between
+  tenants. **For the maintainer:** US-C1 criterion 9 allows a second copy
+  of a reply only when a worker stopped; the build also resends after a
+  timeout, and the story's text is left as it was.
+
 ## Next
 
 1. Maintainer reviews and merges U8 (#269), **after its code review and
