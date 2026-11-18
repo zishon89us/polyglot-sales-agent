@@ -374,7 +374,7 @@ opt-out. Only the opt-in event does.
 | `sending` | The channel call has started and its result is not yet recorded. A message found here after 2 minutes has an unknown outcome, and its class decides what follows (`architecture.md`, "Sending a message once"). |
 | `sent` | Accepted by the channel API. |
 | `delivered`, `read` | Reported by the channel. |
-| `failed` | Rejected by the channel or reported failed; stores the error code. Also a message whose outcome nobody knows and which is not called for again; it stores the code `unconfirmed`, and the customer may have it. Terminal. |
+| `failed` | Rejected by the channel or reported failed; stores the error code. Also a message whose outcome nobody knows and which is not called for again; it stores the code `unconfirmed`, and the customer may have it. Also a message that waited more than 15 minutes to be sent; it stores `expired`, or `unconfirmed` if a call for it had ended unknown. Terminal. |
 
 Pre-send checks depend only on the message class
 (`glossary.md`, "Message classes"):

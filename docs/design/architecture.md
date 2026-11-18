@@ -88,7 +88,7 @@ flowchart LR
 | Neighbour | Direction | What crosses | Trust |
 | --- | --- | --- | --- |
 | WhatsApp Cloud API | In | Webhooks: customer messages, delivery statuses, template status changes | Authenticated by signature; content is untrusted customer input |
-| WhatsApp Cloud API | Out | Messages, template submissions, credential checks | Authenticated with the tenant's own credentials |
+| WhatsApp Cloud API | Out | Messages, template submissions, credential checks | Authenticated with the tenant's own credentials. As built in M2: one credential for every tenant, from the worker's settings (#290) |
 | Language model provider | Out and back | The business profile, the session's messages, tool results; structured output | Output is untrusted until validated and its claims checked (ADR 0007) |
 | Email service | Out | Invitations, password resets, staff and operator notifications | No customer message text in any email |
 | Browser | In and out | Dashboard requests | Authenticated by session (ADR 0008) |
@@ -385,11 +385,12 @@ message's class, and every class has a row (finding V6, #236):
 
 | Class | After a refusal the channel says can be retried | After an unknown outcome |
 | --- | --- | --- |
-| Assistant reply, system reply, staff message | Called again: three calls in all, after 2 and 8 seconds, then `failed` with the channel's code | **Called once more.** A customer waiting for an answer is worse off with none than with two. If that call is unknown too, `failed` with the code `unconfirmed`: never a third |
+| Assistant reply, system reply, staff message | Called again: three calls in all, after 2 and 8 seconds, then `failed` with the channel's code, or with `unconfirmed` if an earlier call for it ended unknown | **Called once more.** A customer waiting for an answer is worse off with none than with two. If that call is unknown too, `failed` with the code `unconfirmed`: never a third |
 | Service notice (the holding message, `handover_followup`), business-initiated (reminder, booking notice) | The same | **Not called again.** `failed` with the code `unconfirmed`. A second message the business started, which may be paid for, is worse than a missed one |
 
-A refusal the channel says cannot be retried is `failed` at once with the
-channel's code, for every class. No message is ever called for more than
+A refusal the channel says cannot be retried is `failed` at once, for every
+class: with the channel's code, or with `unconfirmed` if an earlier call for
+the same message ended unknown, because the customer may then have it. No message is ever called for more than
 three times, and at most one unknown outcome is ever followed by another
 call. So a customer can receive at most two copies of a reply and at most
 one of anything else, whatever the channel and the workers do (NFR-R2);
@@ -403,6 +404,7 @@ How a message moves:
 | Before the call | In one transaction the oldest waiting message of the conversation moves `pending` → `sending`, with the time and the count of calls |
 | After the call | In one transaction the result is recorded: `sent` with the channel's identifier, back to `pending` with the earliest time of the next call, or `failed` with a code. The record applies only if the message is still in the call that worker started |
 | Found in `sending` for more than 2 minutes | The outcome is unknown, and the table above decides. This is looked at when a send job for the conversation next runs: a later message's job, or the stopped worker's own job once its claim has run out, which is 5 minutes |
+| Found waiting more than 15 minutes after it could first have gone (after it was stored, or after the time it was last put off to) | Not sent. `failed` with the code `expired` if the channel was never left holding it, `unconfirmed` otherwise. An answer that arrives hours late is worse than none. **This holds whatever kept it waiting**: a dead job, no worker running, or a queue more than 15 minutes behind. The customer's message has by then been marked as dealt with, so nothing answers it; each such message is reported as `send-failed expired`. A call under way that is not yet 2 minutes old is left alone however old the message is |
 
 **Order within a conversation.** One job, `send-messages`, sends what waits
 in a conversation, oldest first, one message at a time. While the oldest is
@@ -411,6 +413,17 @@ message stuck in `sending` holds the next one until it is resolved as
 above and never lets it overtake (NFR-R6). A message that ends `failed`
 does not hold up the next. Waiting for the previous message to be reported
 delivered, or 10 seconds (NFR-R7), is not built (#290).
+
+One run of the job makes at most 20 calls and stops at the first that is
+not accepted, so that a slow channel in one conversation costs the other
+jobs one call's wait, not twenty.
+
+**When the send job itself dies** (it failed six times, for instance with
+the database unreachable), an operator alert is queued and the
+conversation's waiting messages stay where they are: nothing sweeps for
+them. They are looked at when the next message for that conversation is
+stored, or when an operator retries the job (U9). By then those older than
+15 minutes expire as above; they are not sent late.
 
 So "exactly one reply" (US-C1 criterion 9) holds for a worker that stops
 before the message is marked `sending`, and for one that stops after the
@@ -553,6 +566,7 @@ trace per model call (US-C10).
 **Configuration and secrets.** Configuration from the environment, validated
 at start-up. Secrets from the environment or a secret manager; tenants'
 channel credentials encrypted at rest with a key held outside the database
+(not built in M2: the worker has one credential, in its settings, #290)
 (NFR-S5).
 
 **Security.** The threat model is `docs/design/threat-model.md` (issue #42).

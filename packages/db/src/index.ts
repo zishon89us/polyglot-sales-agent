@@ -43,6 +43,7 @@ export {
   migrationStatus,
 } from "./migrate.ts";
 export {
+  abandonTurn,
   beginTurn,
   type CallResult,
   claimNextSend,

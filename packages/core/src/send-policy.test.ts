@@ -82,6 +82,25 @@ describe("the send policy, by message class", () => {
     },
   );
 
+  test.each(REPLIES)(
+    "%s: refused after an unknown outcome is unconfirmed, not the channel's code: the customer may have it",
+    (name) => {
+      expect(decideAfterSend(name, { attempts: 2, unknownBefore: 1 }, no)).toEqual({
+        next: "failed",
+        code: UNCONFIRMED,
+      });
+      expect(decideAfterSend(name, { attempts: 3, unknownBefore: 1 }, busy)).toEqual({
+        next: "failed",
+        code: UNCONFIRMED,
+      });
+      // Still tried again while a call is left: a refusal is safe to retry.
+      expect(decideAfterSend(name, { attempts: 2, unknownBefore: 1 }, busy)).toEqual({
+        next: "retry",
+        waitMs: 8_000,
+      });
+    },
+  );
+
   test.each(OTHERS)("%s: an unknown outcome is never followed by another call", (name) => {
     expect(decideAfterSend(name, { attempts: 1, unknownBefore: 0 }, unknown)).toEqual({
       next: "failed",

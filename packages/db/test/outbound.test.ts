@@ -5,16 +5,27 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import {
   APP_ROLE,
+  abandonTurn,
   beginTurn,
   claimNextSend,
   type Database,
   finishTurn,
+  loadMigrations,
+  MIGRATE_ROLE,
+  migrateDown,
+  migrateUp,
   recordSend,
   SEND_MESSAGES_JOB,
   storeInbound,
   withTenant,
 } from "../src/index.ts";
-import { adopt, createTestDatabase, sqlState, type TestDatabase } from "./harness.ts";
+import {
+  adopt,
+  createTestDatabase,
+  MIGRATIONS_DIRECTORY,
+  sqlState,
+  type TestDatabase,
+} from "./harness.ts";
 
 let database: TestDatabase;
 let pool: pg.Pool;
@@ -201,6 +212,23 @@ describe("a turn", () => {
     expect(next).toMatchObject({ busy: false, messages: [{ body: "one" }, { body: "two" }] });
   });
 
+  test("can be given up: the conversation is free at once, and nothing is stored", async () => {
+    const conversation = await arrives("one");
+    const turn = await beginTurn(app, tenant.a, conversation);
+    if (turn.busy) {
+      throw new Error("busy");
+    }
+    // Not with another's token, nor from another tenant.
+    await abandonTurn(app, tenant.a, conversation, "00000000-0000-4000-8000-000000000000");
+    await abandonTurn(app, tenant.b, conversation, turn.token);
+    expect(await beginTurn(app, tenant.a, conversation)).toEqual({ busy: true });
+    await abandonTurn(app, tenant.a, conversation, turn.token);
+    expect(await beginTurn(app, tenant.a, conversation)).toMatchObject({
+      busy: false,
+      messages: [{ body: "one" }],
+    });
+  });
+
   test("cannot be begun or ended for another tenant's conversation", async () => {
     const conversation = await arrives("one", "a");
     await expect(beginTurn(app, tenant.b, conversation)).rejects.toMatchObject({
@@ -241,12 +269,170 @@ describe("a send", () => {
     ).toBe(1);
   });
 
-  test("is nothing when nothing waits, and nothing for another tenant", async () => {
+  test("is nothing when nothing waits; for another tenant's conversation it is a fault, not nothing", async () => {
     const conversation = await arrives("one");
     expect(await claimNextSend(app, tenant.a, conversation)).toEqual({ kind: "none" });
     await answered(conversation, "the reply");
-    expect(await claimNextSend(app, tenant.b, conversation)).toEqual({ kind: "none" });
+    await expect(claimNextSend(app, tenant.b, conversation)).rejects.toMatchObject({
+      code: "conversation-not-found",
+    });
     expect(await count("messages WHERE status = 'pending'")).toBe(1);
+  });
+
+  test("a result for a message that is not being sent changes nothing", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "the reply");
+    const waiting = await administrator.query<{ id: string }>(
+      "SELECT id FROM messages WHERE status = 'pending'",
+    );
+    const id = waiting.rows[0]?.id as string;
+    expect(
+      await recordSend(
+        app,
+        tenant.a,
+        { id, attempt: 0 },
+        { kind: "accepted", channelMessageId: "x" },
+      ),
+    ).toBe("superseded");
+    expect(await count("messages WHERE status = 'pending' AND channel_message_id IS NULL")).toBe(1);
+  });
+
+  test("a message that has waited over fifteen minutes is not sent: expired, and the next one goes", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "old");
+    const stored = new Date();
+    const edge = await claimNextSend(
+      app,
+      tenant.a,
+      conversation,
+      new Date(stored.getTime() + 14 * 60_000),
+    );
+    expect(edge).toMatchObject({ kind: "send", message: { body: "old" } });
+    await administrator.query(
+      "UPDATE messages SET status = 'pending', sending_at = NULL, send_attempts = 0 WHERE direction = 'outbound'",
+    );
+    await arrives("two");
+    await administrator.query(
+      "UPDATE messages SET created_at = created_at - interval '16 minutes' WHERE direction = 'outbound'",
+    );
+    await answered(conversation, "new");
+    expect(await claimNextSend(app, tenant.a, conversation)).toMatchObject({
+      kind: "send",
+      message: { body: "new" },
+    });
+    expect(
+      await count(
+        "messages WHERE body = 'old' AND status = 'failed' AND error_code = 'expired' AND send_attempts = 0",
+      ),
+    ).toBe(1);
+  });
+
+  test("a message put off to a later time is counted from that time, and a refused one that then waits too long is expired", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "the reply");
+    await administrator.query(
+      "UPDATE messages SET send_not_before = clock_timestamp() + interval '20 minutes' WHERE direction = 'outbound'",
+    );
+    const start = Date.now();
+    // Four minutes before it is due, sixteen after it was stored: it waits, and is not expired.
+    expect(
+      await claimNextSend(app, tenant.a, conversation, new Date(start + 16 * 60_000)),
+    ).toMatchObject({ kind: "wait" });
+    expect(
+      await claimNextSend(app, tenant.a, conversation, new Date(start + 21 * 60_000)),
+    ).toMatchObject({ kind: "send", message: { attempt: 1 } });
+    // Refused for now, and then nobody looks for sixteen minutes: expired, though it was called for once.
+    const waiting = await administrator.query<{ id: string }>(
+      "SELECT id FROM messages WHERE status = 'sending'",
+    );
+    await recordSend(
+      app,
+      tenant.a,
+      { id: waiting.rows[0]?.id as string, attempt: 1 },
+      { kind: "refused", retryable: true, code: "rate-limited" },
+      new Date(start + 21 * 60_000),
+    );
+    expect(await claimNextSend(app, tenant.a, conversation, new Date(start + 40 * 60_000))).toEqual(
+      { kind: "none", ended: ["expired"] },
+    );
+    expect(
+      await count(
+        "messages WHERE status = 'failed' AND error_code = 'expired' AND send_attempts = 1",
+      ),
+    ).toBe(1);
+  });
+
+  test("a reply left being sent by a worker that stopped long ago is not called for again", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "the reply");
+    const start = new Date();
+    await claimNextSend(app, tenant.a, conversation, start);
+    expect(
+      await claimNextSend(app, tenant.a, conversation, new Date(start.getTime() + 16 * 60_000)),
+    ).toEqual({ kind: "none", ended: ["unconfirmed"] });
+    expect(
+      await count(
+        "messages WHERE status = 'failed' AND error_code = 'unconfirmed' AND send_attempts = 1 AND unknown_outcomes = 1",
+      ),
+    ).toBe(1);
+  });
+
+  test("a call under way and not yet stale is left alone however old the message is", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "the reply");
+    await administrator.query(
+      "UPDATE messages SET created_at = created_at - interval '16 minutes' WHERE direction = 'outbound'",
+    );
+    await administrator.query(
+      "UPDATE messages SET status = 'sending', sending_at = clock_timestamp(), send_attempts = 1 WHERE direction = 'outbound'",
+    );
+    expect(await claimNextSend(app, tenant.a, conversation)).toMatchObject({ kind: "wait" });
+    expect(await count("messages WHERE status = 'sending'")).toBe(1);
+  });
+
+  test("a notice found stale is ended unconfirmed, and the look says so", async () => {
+    const conversation = await arrives("one");
+    await administrator.query(
+      `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status, sending_at, send_attempts)
+       SELECT tenant_id, id, 'outbound', 'service-notice', 'text', 'a notice', 'sending', clock_timestamp() - interval '3 minutes', 1
+       FROM conversations`,
+    );
+    expect(await claimNextSend(app, tenant.a, conversation)).toEqual({
+      kind: "none",
+      ended: ["unconfirmed"],
+    });
+  });
+
+  test("an old message the channel may already have is unconfirmed, not expired, and is not called for again", async () => {
+    const conversation = await arrives("one");
+    await answered(conversation, "old");
+    // Waiting to be called again after an unknown outcome.
+    await administrator.query(
+      `UPDATE messages SET send_attempts = 1, unknown_outcomes = 1,
+                           send_not_before = clock_timestamp() - interval '16 minutes',
+                           created_at = created_at - interval '17 minutes'
+       WHERE direction = 'outbound'`,
+    );
+    expect(await claimNextSend(app, tenant.a, conversation)).toEqual({
+      kind: "none",
+      ended: ["unconfirmed"],
+    });
+    expect(await count("messages WHERE status = 'failed' AND error_code = 'unconfirmed'")).toBe(1);
+    // And one found being sent, by a worker that stopped long ago: the same, even for a reply.
+    await administrator.query(
+      `UPDATE messages SET status = 'sending', sending_at = clock_timestamp() - interval '16 minutes',
+                           unknown_outcomes = 0, error_code = NULL
+       WHERE direction = 'outbound'`,
+    );
+    expect(await claimNextSend(app, tenant.a, conversation)).toEqual({
+      kind: "none",
+      ended: ["unconfirmed"],
+    });
+    expect(
+      await count(
+        "messages WHERE status = 'failed' AND error_code = 'unconfirmed' AND send_attempts = 1 AND unknown_outcomes = 1",
+      ),
+    ).toBe(1);
   });
 
   test("accepted: sent, with the channel's identifier and the time", async () => {
@@ -386,4 +572,43 @@ describe("what the database itself refuses", () => {
     await arrives("one");
     expect(await insert("handled_at", "'pending', now()")).toBe("23514");
   });
+});
+
+describe("migration 0004, down and up again, with a message being sent", () => {
+  test("the message ends unconfirmed and the migration can be applied again", async () => {
+    const scratch = await createTestDatabase({ migrate: true });
+    try {
+      const all = loadMigrations(MIGRATIONS_DIRECTORY);
+      const upTo = all.slice(0, all.findIndex((migration) => migration.name === "sending") + 1);
+      const admin = await scratch.administrator();
+      const made = await admin.query<{ id: string }>(
+        `INSERT INTO tenants (name, pack, time_zone, default_language)
+         VALUES ('t', 'faq-only', 'Asia/Riyadh', 'ar') RETURNING id`,
+      );
+      const tenantId = made.rows[0]?.id;
+      await admin.query(
+        `WITH account AS (
+           INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id) VALUES ($1, 'mock', '100000000000009') RETURNING id
+         ), contact AS (
+           INSERT INTO contacts (tenant_id, phone) VALUES ($1, '+15550142') RETURNING id
+         ), conversation AS (
+           INSERT INTO conversations (tenant_id, contact_id, channel_account_id)
+           SELECT $1, contact.id, account.id FROM contact, account RETURNING id
+         )
+         INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status, sending_at, send_attempts)
+         SELECT $1, id, 'outbound', 'assistant-reply', 'text', 'in flight', 'sending', now(), 1 FROM conversation`,
+        [tenantId],
+      );
+      const migrator = await scratch.client(MIGRATE_ROLE);
+      // Down from the newest to just below 0004.
+      for (let step = all.length; step >= upTo.length; step -= 1) {
+        await migrateDown(migrator, all.slice(0, step));
+      }
+      const after = await admin.query("SELECT status, error_code FROM messages");
+      expect(after.rows).toEqual([{ status: "failed", error_code: "unconfirmed" }]);
+      expect(await migrateUp(migrator, all)).toContain("sending");
+    } finally {
+      await scratch.drop();
+    }
+  }, 30_000);
 });
