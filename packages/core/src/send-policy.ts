@@ -23,10 +23,24 @@ export const SEND_RETRY_WAITS_MS = [2_000, 8_000] as const;
 export const SENDING_STALE_MS = 2 * 60_000;
 
 /**
- * The code stored with a message that is `failed` because nobody knows
- * whether the channel accepted it. The customer may have it.
+ * The code stored with a message that is `failed` after a call for it ended
+ * with nobody knowing whether the channel accepted it. The customer may
+ * have it. It is stored whenever any call for the message ended that way,
+ * even if a later call was refused: the channel's code for that refusal
+ * would say the customer has nothing, which is not known.
  */
 export const UNCONFIRMED = "unconfirmed";
+
+/**
+ * A message that has waited this long to be sent is not sent: an answer
+ * that arrives hours late, out of nowhere, is worse than none. It can only
+ * wait so long when the job that sends its conversation's messages has
+ * died. The agent's number.
+ */
+export const SEND_EXPIRES_MS = 15 * 60_000;
+
+/** The code stored with a message that waited too long and was never called for. */
+export const EXPIRED = "expired";
 
 /**
  * The classes sent once more after an unknown outcome. Someone is waiting
@@ -78,9 +92,10 @@ export function decideAfterSend(
   const wait = SEND_RETRY_WAITS_MS[history.attempts - 1];
   const mayCallAgain = history.attempts < SEND_MAX_ATTEMPTS && wait !== undefined;
   if (outcome.kind === "refused") {
-    return outcome.retryable && mayCallAgain
-      ? { next: "retry", waitMs: wait }
-      : { next: "failed", code: outcome.code };
+    if (outcome.retryable && mayCallAgain) {
+      return { next: "retry", waitMs: wait };
+    }
+    return { next: "failed", code: history.unknownBefore > 0 ? UNCONFIRMED : outcome.code };
   }
   return RESENT_AFTER_UNKNOWN[messageClass] && history.unknownBefore === 0 && mayCallAgain
     ? { next: "retry", waitMs: wait }

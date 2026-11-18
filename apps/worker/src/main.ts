@@ -32,6 +32,9 @@ try {
     apiVersion: config.whatsappApiVersion,
     timeoutMs: DEFAULT_SEND_TIMEOUT_MS,
   });
+  // One line of JSON per fault: a time, the event and a short code.
+  const report = (event: string, code: string): void =>
+    console.error(JSON.stringify({ time: new Date().toISOString(), level: "error", event, code }));
   const stop = new AbortController();
   // Finish the job in hand, then let go of the database.
   process.once("SIGTERM", () => stop.abort());
@@ -43,13 +46,10 @@ try {
       app,
       channels: { [whatsapp.name]: whatsapp },
       accessToken: config.whatsappAccessToken,
+      report,
     }),
     signal: stop.signal,
-    // One line of JSON per fault: a time, the event and a short code.
-    report: (event, code) =>
-      console.error(
-        JSON.stringify({ time: new Date().toISOString(), level: "error", event, code }),
-      ),
+    report,
   });
   await Promise.all([closeDatabase(app), closeDatabase(cross)]);
   console.log("worker: stopped");

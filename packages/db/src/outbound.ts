@@ -7,10 +7,13 @@
 
 import {
   decideAfterSend,
+  EXPIRED,
   type MessageClass,
+  SEND_EXPIRES_MS,
   SENDING_STALE_MS,
   type SendDecision,
   type SendOutcome,
+  UNCONFIRMED,
 } from "@polyglot-sales-agent/core";
 import { type Database, poolOf } from "./connect.ts";
 import { enqueueJob } from "./jobs.ts";
@@ -129,6 +132,19 @@ export function finishTurn(
   });
 }
 
+/**
+ * Gives the lease back without storing anything, for a turn that failed.
+ * Without it the conversation would stay held until the lease ran out.
+ */
+export function abandonTurn(
+  app: Database,
+  tenantId: string,
+  conversationId: string,
+  token: string,
+): Promise<void> {
+  return withTenant(poolOf(app), tenantId, (tx) => releaseLease(tx, conversationId, token));
+}
+
 /** A message whose call to the channel this worker must now make. */
 export interface MessageToSend {
   readonly id: string;
@@ -145,10 +161,15 @@ export interface MessageToSend {
 
 export type NextSend =
   /** Nothing in the conversation waits to be sent. */
-  | { readonly kind: "none" }
-  /** The oldest waiting message cannot go yet: come back after this long. */
-  | { readonly kind: "wait"; readonly ms: number }
-  | { readonly kind: "send"; readonly message: MessageToSend };
+  (
+    | { readonly kind: "none" }
+    /** The oldest waiting message cannot go yet: come back after this long. */
+    | { readonly kind: "wait"; readonly ms: number }
+    | { readonly kind: "send"; readonly message: MessageToSend }
+  ) & {
+    /** The codes of messages this look ended as `failed` without a call, if any. For a log. */
+    readonly ended?: readonly string[];
+  };
 
 interface Waiting {
   id: string;
@@ -162,6 +183,8 @@ interface Waiting {
   sending_for: number | null;
   /** Milliseconds until the next call may start; not positive when it may. */
   due_in: number | null;
+  /** Milliseconds since the message was stored. */
+  waiting_for: number;
   phone: string | null;
   channel_user_id: string | null;
   channel: string;
@@ -172,6 +195,7 @@ const OLDEST_WAITING = (now: number) => `
   SELECT m.id, m.class, m.kind, m.body, m.status, m.send_attempts, m.unknown_outcomes,
          extract(epoch FROM ${NOW(now)} - m.sending_at) * 1000 AS sending_for,
          extract(epoch FROM m.send_not_before - ${NOW(now)}) * 1000 AS due_in,
+         extract(epoch FROM ${NOW(now)} - m.created_at) * 1000 AS waiting_for,
          p.phone, p.channel_user_id, a.channel, a.receiving_number_id
   FROM messages m
   JOIN conversations c ON c.id = m.conversation_id
@@ -230,6 +254,13 @@ async function apply(
  * send policy decides by its class: it is sent once more, or it becomes
  * `failed` with the code `unconfirmed` and the next message is looked at.
  *
+ * A message that has waited longer than `SEND_EXPIRES_MS` is not sent: it
+ * becomes `failed`, with the code `expired` if the channel was never left
+ * holding it and `unconfirmed` otherwise.
+ *
+ * Throws if the tenant has no such conversation, which is a fault in the
+ * job and must not look like "nothing to send".
+ *
  * `now` is for tests.
  */
 export function claimNextSend(
@@ -239,17 +270,38 @@ export function claimNextSend(
   now?: Date,
 ): Promise<NextSend> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
+    const ended: string[] = [];
+    const also = (): { ended?: readonly string[] } => (ended.length > 0 ? { ended } : {});
     // Each pass either returns or ends one message for good, so this ends.
     for (;;) {
       const found = await tx.query<Waiting>(OLDEST_WAITING(2), [conversationId, now ?? null]);
       const waiting = found.rows[0];
       if (waiting === undefined) {
-        return { kind: "none" };
+        const exists = await tx.query("SELECT 1 FROM conversations WHERE id = $1", [
+          conversationId,
+        ]);
+        if (exists.rowCount === 0) {
+          throw Object.assign(new Error("claimNextSend: no such conversation in this tenant"), {
+            code: "conversation-not-found",
+          });
+        }
+        return { kind: "none", ...also() };
       }
+      const expired = Number(waiting.waiting_for) > SEND_EXPIRES_MS;
       if (waiting.status === "sending") {
         const age = Number(waiting.sending_for);
         if (age < SENDING_STALE_MS) {
-          return { kind: "wait", ms: Math.ceil(SENDING_STALE_MS - age) };
+          return { kind: "wait", ms: Math.ceil(SENDING_STALE_MS - age), ...also() };
+        }
+        if (expired) {
+          await apply(
+            tx,
+            { id: waiting.id, attempts: waiting.send_attempts },
+            { next: "failed", code: UNCONFIRMED },
+            { unknown: true, now },
+          );
+          ended.push(UNCONFIRMED);
+          continue;
         }
         const decision = decideAfterSend(
           waiting.class,
@@ -263,10 +315,21 @@ export function claimNextSend(
           decision.next === "retry" ? { next: "retry", waitMs: 0 } : decision,
           { unknown: true, now },
         );
+        if (decision.next === "failed") {
+          ended.push(decision.code);
+        }
+        continue;
+      }
+      if (expired) {
+        await tx.query(
+          "UPDATE messages SET status = 'failed', error_code = $2, send_not_before = NULL WHERE id = $1",
+          [waiting.id, waiting.unknown_outcomes > 0 ? UNCONFIRMED : EXPIRED],
+        );
+        ended.push(waiting.unknown_outcomes > 0 ? UNCONFIRMED : EXPIRED);
         continue;
       }
       if (waiting.due_in !== null && Number(waiting.due_in) > 0) {
-        return { kind: "wait", ms: Math.ceil(Number(waiting.due_in)) };
+        return { kind: "wait", ms: Math.ceil(Number(waiting.due_in)), ...also() };
       }
       await tx.query(
         `UPDATE messages SET status = 'sending', sending_at = ${NOW(2)},
@@ -275,6 +338,7 @@ export function claimNextSend(
         [waiting.id, now ?? null],
       );
       return {
+        ...also(),
         kind: "send",
         message: {
           id: waiting.id,

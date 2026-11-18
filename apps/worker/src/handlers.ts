@@ -10,8 +10,9 @@
 // policy still holds (architecture, "Sending a message once").
 
 import type { Channel } from "@polyglot-sales-agent/channel";
-import { echoReply } from "@polyglot-sales-agent/core";
+import { echoReply, JOB_MAX_DEFER_MS } from "@polyglot-sales-agent/core";
 import {
+  abandonTurn,
   beginTurn,
   type CallResult,
   claimNextSend,
@@ -28,8 +29,15 @@ import {
 /** How long to wait for a conversation another worker holds. */
 export const BUSY_WAIT_MS = 1_000;
 
-/** The most messages one run of `send-messages` sends before it gives others a turn. */
+/**
+ * The most messages one run of `send-messages` sends before it gives other
+ * jobs a turn. A run also ends at the first call that is not accepted, so
+ * one run costs at most this many quick calls and one slow one.
+ */
 export const SENDS_PER_RUN = 20;
+
+/** Told of each message that ends `failed`, with its code. For a log: never anything of the message. */
+export type SendReport = (event: "send-failed", code: string) => void;
 
 export interface HandlerOptions {
   /** The application role's. */
@@ -42,6 +50,7 @@ export interface HandlerOptions {
    * are not built.
    */
   readonly accessToken: string;
+  readonly report?: SendReport;
 }
 
 function ids(job: Job): { tenantId: string; conversationId: string } {
@@ -91,32 +100,48 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
       const reply = echoReply(
         turn.messages.map((message) => (message.kind === "text" ? message.body : null)),
       );
-      const end = await finishTurn(
-        options.app,
-        tenantId,
-        conversationId,
-        turn.token,
-        turn.messages.map((message) => message.id),
-        reply,
-      );
-      // The customer wrote again meanwhile: answer everything together.
-      return end === "newer-message" ? { deferMs: 0 } : undefined;
+      try {
+        const end = await finishTurn(
+          options.app,
+          tenantId,
+          conversationId,
+          turn.token,
+          turn.messages.map((message) => message.id),
+          reply,
+        );
+        // The customer wrote again meanwhile: answer everything together.
+        return end === "newer-message" ? { deferMs: 0 } : undefined;
+      } catch (error) {
+        // Nothing was stored. Free the conversation, so that the retry need not wait for the lease to run out.
+        await abandonTurn(options.app, tenantId, conversationId, turn.token).catch(() => undefined);
+        throw error;
+      }
     },
 
     async [SEND_MESSAGES_JOB](job) {
       const { tenantId, conversationId } = ids(job);
       for (let sent = 0; sent < SENDS_PER_RUN; sent += 1) {
         const next = await claimNextSend(options.app, tenantId, conversationId);
+        for (const code of next.ended ?? []) {
+          options.report?.("send-failed", code);
+        }
         if (next.kind === "none") {
           return undefined;
         }
         if (next.kind === "wait") {
-          return { deferMs: next.ms };
+          return { deferMs: Math.min(next.ms, JOB_MAX_DEFER_MS) };
         }
         const result = await call(options, next.message);
         const decision = await recordSend(options.app, tenantId, next.message, result);
+        if (decision !== "superseded" && decision.next === "failed") {
+          options.report?.("send-failed", decision.code);
+        }
         if (decision !== "superseded" && decision.next === "retry") {
           return { deferMs: decision.waitMs };
+        }
+        // A call that was not accepted may have been slow: let other jobs run before the next.
+        if (result.kind !== "accepted") {
+          return { deferMs: 0 };
         }
       }
       return { deferMs: 0 };
