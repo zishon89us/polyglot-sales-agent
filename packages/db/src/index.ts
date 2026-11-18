@@ -42,6 +42,19 @@ export {
   migrateUp,
   migrationStatus,
 } from "./migrate.ts";
+export {
+  beginTurn,
+  type CallResult,
+  claimNextSend,
+  finishTurn,
+  type MessageToSend,
+  type NextSend,
+  recordSend,
+  SEND_MESSAGES_JOB,
+  type TurnEnd,
+  type TurnStart,
+  type UnhandledMessage,
+} from "./outbound.ts";
 export { findIsolationProblems, tenantColumn, tenantOwnedTables } from "./policy-check.ts";
 export {
   APP_ROLE,
@@ -54,3 +67,4 @@ export {
   UNSCOPED_TABLES,
 } from "./roles.ts";
 export { type Tx, withTenant } from "./tenant.ts";
+export { beat, workOnce } from "./worker.ts";

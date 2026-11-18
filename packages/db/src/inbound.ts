@@ -163,7 +163,8 @@ async function conversationFor(
 // `delivered`, and `sent` may arrive while the send is still being recorded.
 // A failure's code is kept with it.
 const FORWARD = `
-  UPDATE messages SET status = $2, error_code = CASE WHEN $2 = 'failed' THEN $3 ELSE error_code END
+  UPDATE messages SET status = $2, sending_at = NULL,
+                      error_code = CASE WHEN $2 = 'failed' THEN $3 ELSE error_code END
   WHERE channel_message_id = $1 AND direction = 'outbound' AND (
        ($2 = 'sent' AND status = 'sending')
     OR ($2 = 'delivered' AND status IN ('sending', 'sent'))
