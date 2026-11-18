@@ -77,6 +77,31 @@ importers:
         specifier: workspace:*
         version: link:../../packages/channel
 
+  apps/worker:
+    dependencies:
+      '@polyglot-sales-agent/channel':
+        specifier: workspace:*
+        version: link:../../packages/channel
+      '@polyglot-sales-agent/channel-whatsapp':
+        specifier: workspace:*
+        version: link:../../packages/channel-whatsapp
+      '@polyglot-sales-agent/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@polyglot-sales-agent/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+    devDependencies:
+      '@polyglot-sales-agent/channel-mock':
+        specifier: workspace:*
+        version: link:../../packages/channel-mock
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+
   packages/channel:
     devDependencies:
       vitest:

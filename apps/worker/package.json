@@ -1,0 +1,21 @@
+{
+  "name": "@polyglot-sales-agent/worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The process that runs jobs: answers conversations and sends what is waiting.",
+  "type": "module",
+  "dependencies": {
+    "@polyglot-sales-agent/channel": "workspace:*",
+    "@polyglot-sales-agent/channel-whatsapp": "workspace:*",
+    "@polyglot-sales-agent/core": "workspace:*",
+    "@polyglot-sales-agent/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@polyglot-sales-agent/channel-mock": "workspace:*",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
