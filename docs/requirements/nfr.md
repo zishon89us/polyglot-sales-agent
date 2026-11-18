@@ -46,7 +46,7 @@ report. It is a provisional sizing assumption, not a forecast.
 | ID | Requirement | Target | How it is checked |
 | --- | --- | --- | --- |
 | NFR-S1 | Tenant isolation | 0 cross-tenant reads or writes | Automated tests that attempt them on every tenant-owned table and tool |
-| NFR-S2 | Webhook authenticity | 100% of requests with a missing or invalid signature are answered 401 and not stored. A validly signed redelivery is accepted and deduplicated by message ID (US-C1); the channel documents no timestamp for rejecting replays | Contract and integration tests |
+| NFR-S2 | Webhook authenticity | 100% of requests with a missing or invalid signature are refused and not stored. The answer is 401, or, where the request is refused before its signature can be read, 413 (over the size limit), 429 (from a source blocked for repeated refusals, #154) or 400 (not well-formed). A validly signed redelivery is accepted and deduplicated by message ID (US-C1); the channel documents no timestamp for rejecting replays | Contract and integration tests |
 | NFR-S3 | No secrets in the repository | 0 findings | Secret scanning on every pull request |
 | NFR-S4 | Dependency vulnerabilities | 0 known high or critical vulnerabilities on `main` | Dependency scan in CI |
 | NFR-S5 | Channel credentials protected at rest | Encrypted in the database; never written to logs | Unit test and log scan |

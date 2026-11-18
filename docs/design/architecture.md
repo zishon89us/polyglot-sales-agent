@@ -206,8 +206,8 @@ alternatives.
 | --- | --- | --- |
 | What it replaces | Meta's servers | The whole WhatsApp channel |
 | How it is reached | Over HTTP, by `channel-whatsapp` | In the test's own process |
-| Used by | The contract tests of `channel-whatsapp`; the end-to-end tests; a developer, through its test page | Tests of the worker and of the webhook path that are not about WhatsApp; the test of NFR-M2 |
-| What it proves | That the code which will talk to Meta sends and reads what was documented on the fixtures' date | That nothing outside `channel-whatsapp` knows about WhatsApp |
+| Used by | The tests in `apps/mock-whatsapp`, which run `channel-whatsapp` against it over HTTP and feed its webhooks to the webhook guard; a developer, through its test page; the end-to-end tests, when they exist (U10) | The contract tests, as the second channel that must pass them; tests of the worker and of the webhook path that are not about WhatsApp, when those exist (U7, U8) |
+| What it shows | That the code which will talk to Meta sends and reads what was documented on the fixtures' date | That the interface is enough for a channel with another format. That nothing outside `channel-whatsapp` knows about WhatsApp is not shown by it; the test on imports that would is not written yet (#285) |
 
 Neither proves that Meta behaves as documented. Only the supervised live
 test before v1.0.0 does (risk R-T3).

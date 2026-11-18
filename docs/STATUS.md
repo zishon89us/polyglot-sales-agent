@@ -192,8 +192,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
   guard in `apps/api`. Contract tests run on dated, synthetic fixtures
   written from Meta's documentation as read that day. A bad signature is
   answered 401 and nothing is handed on; a body over 3 MiB is refused
-  before it is sent; ten bad signatures a minute block a source for a
-  minute. What each mock is for is decided and written in the architecture
+  before it is read; ten refused requests within a minute block a source
+  for a minute. What each mock is for is decided and written in the architecture
   (#202). Reading the documentation turned up a fact the design did not
   assume: **a WhatsApp customer may arrive with no phone number** (#284).
   Not built: the sink that stores, which is U7's; templates and credential
@@ -261,6 +261,11 @@ v1.1.
   maintainer decides to have the audit pass over this one advisory. The
   agent did not make that decision: it would switch off part of a check.
 
+- **NFR-S2 was reworded by the agent** in unit U6. It said every request
+  with a missing or invalid signature is "answered 401"; with the size
+  limit and the limit on refused requests of #154, some are refused with
+  413, 429 or 400 before the signature can be read. "Not stored" is
+  unchanged. Confirm, or say which answers are acceptable.
 - **NFR-O1 was reworded by the agent** in unit U5. It said health and
   readiness endpoints are "present on API and worker"; the worker accepts
   no HTTP, so it now says the worker is probed by a command that reads its

@@ -136,18 +136,41 @@ The request does four things and nothing else (NFR-P1):
 | A duplicate of an event already stored | 200 | The channel must stop redelivering it; the unique constraint makes it harmless |
 | A valid signature, but the receiving number belongs to no tenant | 200 | Metadata only is stored (data model, decision 1). An error would make the channel retry |
 | A valid signature, but a payload this version cannot parse, including a body that is not valid JSON | 200 | Metadata only is stored (`unparsed_events`: a hash, the size and an error code, kept 30 days), and the operator is alerted. The raw event is not kept, because it would hold a stranger's number and text outside tenant scoping |
-| A bad or missing signature | 401 | |
+| A bad or missing signature | 401 | Unless the request was refused before its signature could be read: 413 for a body over the size limit, 429 from a blocked source, 400 for a request that is not well-formed HTTP. In every case nothing is stored |
+| A valid signature, and one message or status in the payload that does not have the expected form | 200 | That item is left out and counted; the others in the same payload are read. The count is handed on so that it can be recorded and looked at. The item itself is lost: the channel will not send it again after a 200 |
 | The database is unavailable | 503 | The channel redelivers later |
 
 The webhook never answers 400 or 429 to a validly signed request: the first
 would be pointless, since the channel cannot repair its own payload, and the
-second would throttle the channel's deliveries, with one exception that
-follows from the limit on bad signatures (#154). A source that sends 10
-requests with a bad signature within a minute is refused for the next
-minute with 429, before its body is read; while it lasts, a validly signed
-request from that same source is refused too. Only bad signatures count, so
-the channel's own traffic never starts it. A source is the address the
-server sees, which behind a proxy must be configured to be the caller's.
+second would throttle the channel's deliveries. There is one exception, and
+it follows from the limit on refused requests (#154):
+
+- **What counts.** A request with a bad or missing signature, a body over
+  the size limit, and a registration check with a wrong token. A validly
+  signed request never counts, so the channel's own traffic never starts
+  the limit.
+- **The limit.** Ten of those from one source within any 60 seconds, and
+  that source is refused for the next 60 seconds with 429, before its body
+  is read. While that lasts, a validly signed request from the same source
+  is refused too. The channel sends it again later.
+- **What a source is.** The address the server sees. Behind a proxy, the
+  server must be told the proxy's address (`createApiServer`,
+  `trustedProxies`), and then the source is the address the proxy reports.
+  If it is not told, every caller looks like the proxy, and ten refused
+  requests from anyone get the channel's webhooks answered 429 for a minute
+  at a time. If it is told to trust any proxy, a caller can name any
+  address as its own: it can get the channel's address blocked, and avoid
+  the limit itself by naming a new one each time. So the setting is a list
+  of addresses, never "all".
+- **What the limit does not do.** It does not bound requests that arrive
+  together: the check comes before a body is read and the count after, so
+  sixty connections that each send a 3 MiB body at the same moment are all
+  read. Bounding that takes a limit on connections, which is the
+  platform's. An IPv6 caller with a whole network can use a new address
+  each time. The count is kept in each API process's memory.
+
+A request must arrive in full within 10 seconds or its connection is
+closed, and the sink must finish within 5 seconds or the answer is 503.
 
 What is trusted from a signed event: that the channel sent it, the sender's
 number and the receiving number (threat-model assumption A1). What is never
@@ -287,8 +310,10 @@ dashboard shows "no data".
 | --- | --- | --- |
 | Failed sign-ins per account | 5 in 15 minutes, then refused for 15 minutes | NFR-S6 |
 | Sign-in and reset requests per source | Not set | #156 |
-| Webhook requests with a bad signature, per source | 10 in a minute, then refused for a minute. Counted in each API process's memory | #154; the agent's proposal |
-| Webhook body size | 3 MiB. Meta says a payload can be up to 3 MB (read 2026-11-18) | #154 |
+| Refused webhook requests, per source | 10 within any 60 seconds, then refused for 60 seconds. Counted in each API process's memory | #154; the agent's proposal |
+| Time for a request to arrive in full | 10 seconds | The agent's proposal |
+| Time for the webhook's sink to finish | 5 seconds, then 503 | The agent's proposal |
+| Webhook body size | The channel's own figure. For WhatsApp 3 MiB: Meta says a payload can be up to 3 MB (read 2026-11-18) | #154 |
 | Contact exports per tenant | Not set | #164 |
 | Any signed-in session | Not set; a general ceiling is added with the code in M4 | — |
 
