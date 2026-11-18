@@ -126,8 +126,9 @@ The request does four things and nothing else (NFR-P1):
    (#154).
 2. Compute the signature over the **raw** body and compare it in constant
    time. If it is missing or wrong: 401, and nothing is stored (NFR-S2).
-3. In one transaction: store each event, with the channel's message
-   identifier under a unique constraint, and enqueue its job (ADR 0004).
+3. In one transaction for each receiving number: store each event, with
+   the channel's message identifier under a unique constraint, and enqueue
+   its job (ADR 0004).
 4. Answer 200.
 
 | Case | Answer | Why |
@@ -135,7 +136,7 @@ The request does four things and nothing else (NFR-P1):
 | A valid event | 200 | |
 | A duplicate of an event already stored | 200 | The channel must stop redelivering it; the unique constraint makes it harmless |
 | A valid signature, but the receiving number belongs to no tenant | 200 | Metadata only is stored (data model, decision 1). An error would make the channel retry |
-| A valid signature, but a payload this version cannot parse, including a body that is not valid JSON | 200 | Metadata only is stored (`unparsed_events`: a hash, the size and an error code, kept 30 days), and the operator is alerted. The raw event is not kept, because it would hold a stranger's number and text outside tenant scoping |
+| A valid signature, but a payload this version cannot parse, including a body that is not valid JSON | 200 | Metadata only is stored (`unparsed_events`: a hash, the size and an error code; to be kept 30 days, though nothing deletes them yet, #288), and the operator is alerted. The raw event is not kept, because it would hold a stranger's number and text outside tenant scoping |
 | A bad or missing signature | 401 | Unless the request was refused before its signature could be read: 413 for a body over the size limit, 429 from a blocked source, 400 for a request that is not well-formed HTTP. In every case nothing is stored |
 | A valid signature, and one message or status in the payload that does not have the expected form | 200 | That item is left out and counted; the others in the same payload are read. A group of messages without its receiving number, or an entry that cannot be walked, counts as one however much it held. The count is handed on so that it can be recorded and looked at. What was left out is lost: the channel will not send it again after a 200 |
 | The database is unavailable | 503 | The channel redelivers later |
@@ -180,8 +181,12 @@ the same time as one that stops. The sink must finish within 5 seconds, or
 the answer is 503 and the sink is told to stop. **A 503 does not mean that
 nothing was stored**: a sink that was slow may still have committed. The
 channel sends the webhook again either way, so storing must be safe to
-repeat. For events the unique message identifier makes it so; for the
-record of an unreadable body, unit U7 must make it so.
+repeat. It is: a message is unique by its channel identifier, and the
+records of unreadable and unroutable events are unique by what they
+describe.
+
+What each kind of event writes and queues is one table, in
+`architecture.md`, "What the webhook does with each kind of event".
 
 What is trusted from a signed event: that the channel sent it, the sender's
 number and the receiving number (threat-model assumption A1). What is never
@@ -190,6 +195,20 @@ trusted: the message text, the profile name, and any media.
 The shape of the payload is the channel's and is not restated in the OpenAPI
 file. Statements about it come from `docs/compliance.md`; no live event has
 been seen. Contract tests in M2 use dated, synthetic fixtures (R-T3).
+
+### Health — `GET /healthz`, `GET /readyz`
+
+`/healthz` answers 200 while the process runs, and checks nothing.
+`/readyz` answers 200 if each of the two database roles the API uses
+answers a query, within 2.5 seconds, as the role it is meant to be; 503
+otherwise. A connection string that reaches the database as the wrong role
+is therefore not ready. Neither endpoint says anything of the worker, which
+is probed on its own (ADR 0004, amendment), and neither shows a cause.
+
+At start the API makes the same check and exits, naming the setting, if
+either role fails it. Each webhook answered 503 writes one line of JSON to
+standard error: the time, `webhook-unavailable` and a short code such as
+`ECONNREFUSED`, `57014` or `sink-too-slow`. Nothing of the request is in it.
 
 ## 4. Signing in
 
@@ -324,6 +343,10 @@ dashboard shows "no data".
 | Refused webhook requests, per source | 10 within any 60 seconds, then refused for 60 seconds. Counted in each API process's memory | #154; the agent's proposal |
 | Time for a request to arrive in full | 10 seconds | The agent's proposal |
 | Time for the webhook's sink to finish | 5 seconds, then 503 | The agent's proposal |
+| Time to open a database connection | 2 seconds | The agent's proposal |
+| Time for one database statement | 4 seconds, under the sink's 5 | The agent's proposal |
+| Time waiting for a row lock | 3 seconds | The agent's proposal |
+| Time a database transaction may sit idle | 10 seconds | The agent's proposal |
 | Webhook body size | The channel's own figure. For WhatsApp 3 MiB: Meta says a payload can be up to 3 MB (read 2026-11-18) | #154 |
 | Contact exports per tenant | Not set | #164 |
 | Any signed-in session | Not set; a general ceiling is added with the code in M4 | — |

@@ -204,11 +204,61 @@ M0 Inception met its exit criteria on 2026-11-16; see
   rewrote every route's client error to 400; a slow sink was never told to
   stop) is fixed in a second pull request, #287.
 
+- 2026-11-18 — U6's fixes merged as #287. M2 unit U7 (#268): the webhook
+  stores what it receives. One transaction per receiving number makes the
+  contact and the conversation if they are new, stores each message once,
+  and queues one job for the conversation. The same message delivered five
+  times, one after another or all at once, is one row and one job. A
+  refused request (bad signature, oversized body) leaves no row in any
+  table. An event for a number no tenant has, and a body that cannot be
+  read, are recorded by identifiers or by a hash only, never with a number
+  or text. With the database unreachable the answer is 503. The health
+  endpoints exist, and the API and the mock were run together by hand: a
+  message typed into the mock was stored with its job. What each kind of
+  event writes and queues is one table in the architecture (#177).
+  **Decided by the agent:** a contact is matched on the channel's own
+  identifier first, then on the number (#284); and no query builder for
+  now, with SQL kept in one package and a test that keeps it there (ADR
+  0003). NFR-P1 measured here, not gated: 300 webhooks, ten at a time,
+  median about 34 ms, 99th percentile about 105 ms.
+- 2026-11-18 — U7's code review: two High findings and thirteen others
+  (`docs/reviews/2026-11-18-gate4-u7-webhook.md`). **W1:** the contact
+  rules could put one person's message in another's conversation; they
+  are rewritten so that the identifier is the person and a number never
+  moves a conversation, and every case is a table in the data model with
+  a test each. **W2:** the test said to keep SQL out of the apps caught
+  one planted case in six; it is replaced by a rule that can be checked:
+  only `packages/db` imports the database driver, and the rest of the code
+  gets a handle that cannot run a query. Also fixed: database time limits
+  (a held lock no longer holds the API); start-up and `/readyz` check that
+  each connection is the role it should be; one log line per webhook
+  answered 503; the channel's sent time, a failed status's code and the
+  type of an unread message are stored; a large webhook sent again is
+  recognised in one query; uniqueness of a channel identifier is per
+  direction. Not fixed, in #288: the catalogue check does not pin the
+  columns of the unscoped tables (W14); a first delivery too large to
+  store in 5 seconds is answered 503 until its first run has committed,
+  and 200 after (measured at 12,000 messages: 7.6 s to store, then 32 ms);
+  the hash of an unreadable body is not keyed (W10, now stated).
+- 2026-11-18 — The fixes were checked by a second agent
+  (`docs/reviews/2026-11-18-gate4-u7-verification.md`): no High, nine
+  findings. It confirmed the contact rules in code and the time limits,
+  and found that the driver boundary still claimed more than its test
+  showed (eight of sixteen planted files got through), that a contact
+  could be left showing a number that had become someone else's, and that
+  a blank `PSA_API_HOST` listened on every interface. All three are fixed:
+  the test now covers the eight ways and the decision record says it is a
+  guard against accident, not against intent; a number now leaves a
+  contact when the channel sends it with another person's identifier; a
+  blank host is this machine only. Not fixed, in #288: two webhooks with
+  the same two new customers in opposite order deadlock, and the loser is
+  answered 503 and succeeds when sent again (X7).
+
 ## Next
 
-1. Maintainer reviews and merges the U6 fixes (#287), which close #267.
-2. M2 unit U7: the webhook stores and queues (#268). Before a contact is
-   stored, #284 must be decided.
+1. Maintainer reviews and merges U7 (#268), **after its code review and
+   the verification of its fixes are both in**.
+2. M2 unit U8: the worker, an echo reply and the send policy (#269).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
@@ -257,6 +307,10 @@ criteria, run against a mock channel. The `cod-confirm` pack is deferred to
 v1.1.
 
 ## Blocked on the maintainer
+
+- **How a customer is identified** (#284). The agent decided, so as not to
+  stop: a contact is matched on the channel's own identifier first, then on
+  the phone number. Confirm, or say otherwise before M3 builds on it.
 
 - **The dependency audit fails, on `main` too, since 2026-11-18.** An
   advisory was published for `picomatch` up to 4.0.7 (GHSA-fc5q-39xc-vjpf,

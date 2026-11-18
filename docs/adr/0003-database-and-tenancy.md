@@ -206,7 +206,8 @@ reach is visible in the migrations.
   that tenant is decided before it, by the session or the webhook route.
 - The typed query builder named in "Specifics" is not chosen yet.
   `withTenant` hands out a plain query function; the builder is chosen in
-  the first unit that writes real queries (#279).
+  the first unit that writes real queries (#279). Settled, for M2, by the
+  amendment of 2026-11-18 below.
 - Of "Confirmation", the three M2 tests exist. The concurrency test for
   invariant B1 is M5's.
 
@@ -225,3 +226,52 @@ postgres-interval, split2 and xtend. Their maintenance was not looked at
 one by one.
 
 The tests ran against PostgreSQL 16.15. No other version was tried.
+
+## Amendment, 2026-11-18: no query builder for now
+
+Made in M2 unit U7. "Specifics" says access goes through a typed SQL query
+builder, the choice to be verified in M2. Two units deferred it. This
+settles it for M2, and it is the agent's decision, open to the maintainer.
+
+**Decision.** No query builder is added now. SQL is written as fixed text
+with parameters, and only in `packages/db`. The database driver is imported
+only there. What `packages/db` gives the API is a handle with a role's name
+on it and nothing else; it cannot run a query. The function that turns a
+handle back into a connection is not in the package's main entry. It is in
+the testing entry, `@polyglot-sales-agent/db/testing`, which tests need.
+
+A test scans every source file (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+`.jsx`, `.mjs`, `.cjs`) of every app and package outside `packages/db`
+that is not a test, and fails if one:
+
+- names the driver in a string (`pg`, `pg-…`, `postgres`);
+- imports the package's testing entry or any file inside `packages/db`;
+- uses `createRequire` or `import.meta.resolve`, or a dynamic `import()` or
+  `require()` whose argument is anything but one plain string;
+- has a backslash escape in an import's module name.
+
+Reworded twice. The first wording said a test fails if an app's source file
+"holds a statement or runs a query of its own"; that test searched text for
+SQL and caught one planted case in six (Gate 4 review of U7, finding W2).
+The second said the connection function "is not exported"; it was, at the
+testing entry, and eight of sixteen planted files still reached the
+database (verification, X1). All eight are now cases in the test.
+
+**What the test does not show.** It is a guard against a shortcut taken by
+accident, not against an author set on getting round it: source text can
+be made to hide a module name in ways no pattern reads. Nor does it show
+that the statements inside `packages/db` are fixed text. That is by
+reading: none builds its text from a value.
+
+**Why.** What the builder was for is two things. One is that query text is
+never built from outside input (threat T33): keeping every statement in one
+package, where it can be read in one sitting, serves that. The other
+is type safety between the code and the schema: that is not served, and
+the tests against a real database are what catches a wrong column today.
+
+**What it costs.** A column renamed in a migration is found by a failing
+test, not by the compiler. Results are typed by hand where they are read.
+
+**When to look again.** At the start of M3, with the count of statements
+as evidence. On 2026-11-18 `packages/db` holds about forty.
+

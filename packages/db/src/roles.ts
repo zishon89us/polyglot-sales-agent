@@ -15,6 +15,8 @@ export type Role = (typeof ROLES)[number];
 export const UNSCOPED_TABLES: Readonly<Record<string, string>> = {
   channel_routes: "read to find the tenant of a webhook, before a tenant is known",
   schema_migrations: "the migration runner's own record",
+  unparsed_events: "a webhook that could not be read has no tenant; metadata only",
+  unroutable_events: "an event for a receiving number no tenant has; metadata only",
   worker_heartbeats: "one row per worker process; belongs to no tenant",
 };
 

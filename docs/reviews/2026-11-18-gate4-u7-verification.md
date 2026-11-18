@@ -1,0 +1,94 @@
+# Gate 4 verification: U7 review fixes
+
+A second agent, which had not seen the fixes made, was asked to check the
+fixes to `2026-11-18-gate4-u7-webhook.md` and try to break them: findings
+W1 and W2 first, then spot checks and mutants. Its report follows, as
+received. It checked the branch `feat/268-webhook-store-queue` at `a72e153`.
+
+| ID | Sev | Location | Finding (with the reproduction I ran) | Fix |
+|---|---|---|---|---|
+| X1 | Medium | ADR 0003 amendment; `packages/db/package.json` (`"./testing"`); `test/harness.ts:178`; `app.test.ts:605-664`; `data-model.md:392-396` | **W2: the ADR still claims more than the test shows.** I planted 16 files in a /tmp copy. The test caught 5: `import pg from "pg"` in `.ts`, `.mts`, a `.cjs` `require` in `packages/channel`, a `packages/db-extra` file, and `pg-pool`. Two were blocked for other reasons: a deep import of `@polyglot-sales-agent/db/src/connect.ts` (exports map), and reaching through the handle at run time (own keys `["role"]`, frozen, `withTenant(handle)` and `enqueueJob(handle)` throw). One test-named file (`plant_k.test.ts`) is skipped by the scan and failed outside vitest. **Eight ran `select current_user` as `psa_app` from `apps/api/src` with the test green and `tsc` clean:** `import { poolOf } from "@polyglot-sales-agent/db/testing"`; relative import of `packages/db/src/connect.ts`; relative import of `packages/db/test/harness.ts`; `await import("p" + "g")`; `createRequire(import.meta.url)(["p","g"].join(""))`; `createRequire(import.meta.resolve("@polyglot-sales-agent/db"))`; `import pg from "\x70g"`; a plain `import pg from "pg"` under `apps/api/src/node_modules_shim/` (the scan skips any path containing `node_modules`). The ADR sentence "the function that turns it back into a connection is not exported" is false: `poolOf` and `adopt` are exported at the package's `./testing` subpath, and the test only inspects the main entry. `data-model.md` says the exported functions "each" take a handle; `withTenant`, the job, lease and migration functions take a pool, client or `Queryable`. | Drop `./testing` from `exports` (tests import the harness by path), or move `adopt`/`poolOf` out of it. Also scan for imports of `packages/db/(src\|test)/` and `db/testing` from non-test files. Match `node_modules/` as a path segment. Reword the ADR: it catches a literal driver name, not built strings |
+| X2 | Medium | `data-model.md:147-157`; `inbound.ts:86-92` | **W1: one stated consequence is untrue and one is missing.** (a) Bullet 3 says the old holder's row shows a passed-on number "until that person writes from another number". Counter-sequence (P1,U1),(P2,–),(P2,U1),(P1,U2),(P1,U2): U1's row keeps P1 after writing from P2 with its identifier, because the number-only contact holds P2; U2 never gets a number. Swap (P1,U1),(P2,U2),(P2,U1),(P1,U2): both rows hold the other person's number for good. Fuzz, 1,500 steps: 44 contacts ended holding a number that is now someone else's. (b) Not stated: anything later sent to `contacts.phone` for such a row goes to the other person. (c) Bullet 1 says two contacts "until a message carries both"; (P1,–),(–,U1),(P1,U1) stays two (the repo's own test). (d) Row 2: a number-only contact is taken by whichever identifier first arrives with that number. (P1,–) from A, then (P1,U2) from B, puts B in A's conversation. Only half-covered by bullet 2 | Correct bullets 1 and 3; state (b) and (d). Consider clearing the stale number from the old holder when a different identifier arrives with it |
+| X3 | Medium | `inbound.test.ts:211-221` | **W3's test does not test the fix.** With the pre-check result unused (`if (seen.size < 0)`), the suite passed, twice. The 1,500-duplicate second pass then took 1,118 and 1,135 ms run alone, against the test's 1,000 ms bound, so it passes or fails by machine load. As written: 6 to 12 ms | Assert a bound well under the slow path (e.g. under 200 ms at 1,500), or a size where the slow path takes seconds |
+| X4 | Low | `STATUS.md:239-241`; author's W3 response | "Answered 503 once before its 200" depends on the channel waiting. 11,999 messages (1.81 MB) through `main.ts`, resent immediately: 503 (5.06 s, `sink-too-slow`), 503 (3.08 s, `55P03`), 503 (3.06 s, `55P03`), 503 (5.06 s), then 200 in 108 ms. All 11,999 stored once, 100 jobs | Say "once, if the redelivery comes after the first run commits" |
+| X5 | Medium | `config.ts:36` | **A blank `PSA_API_HOST=` listens on every interface.** The W12 response says a blank setting counts as not set; the host is read with `??`. Ran `main.ts` with it blank: log `api: listening on , port 39423`, connection accepted on 192.0.2.2 (the machine's non-loopback address). Unset: ECONNREFUSED there | Treat blank as unset, as `need()` does; test it |
+| X6 | Low | `inbound.ts:107-116`; tests | The mutant that drops `AND channel_user_id IS NULL` from the identifier fill survives the whole db suite. Under it, two identifiers racing for one number-only contact can overwrite. The code as written is right: my race, 100 runs, always two contacts, no errors | Add the two-identifier race as a test |
+| X7 | Low | `inbound.ts:122-126` | W9 is fixed only for existing customers. Two webhooks with the same two **new** customers in opposite order: deadlock (40P01, about 1 s) in 30 of 30 runs. Existing customers: 0 of 30 in 189 ms | Sort a batch's new contacts, or state it |
+| X8 | Low | tests | **W8: 11 of 47 mutants survive.** Matter: X3 and X6; no `statement_timeout`; no idle-in-transaction timeout; `databaseReady` time-box set to 10 minutes; the `stopIfAborted` before the malformed record removed (the test only covers a signal aborted from the start); `error_code` CHECK removed; sink sends `errorCode: null` for a status (the stored code is tested only below the sink). Declared untested: two `main.ts` mutants. Equivalent: `error_code = $3` | A test each; the response's "a test for each item listed" is not true of the second `stopIfAborted` |
+| X9 | Low | `data-model.md:238,244` | The `messages` table lists `error_code` twice | Remove the second |
+
+**Confirmed fixed:**
+
+- **W1 (code):** `contactFor` matches all six table rows. Over the reviewer's sequence, 7 sequences of mine and a 60-round fuzz with ground truth, no identifier was overwritten and no identifier-carrying message landed in another identifier's contact. The reviewer's sequence ends (P2,U1) with 3 messages and (P1,U2) with 1. Five races of 100 runs each gave only transient 23505s (1, 0, 25, 0, 100), all stored on retry. The three named mutants (overwrite, stop following, use the other identifier's contact) are killed.
+- **W3 (behaviour):** 12,000 messages via `storeInbound`: 10.5 s first, then 14 and 21 ms. Over HTTP: 503 at 5.09 s, then 200 in 123, 100 and 73 ms after a 12 s wait.
+- **W4:** a handle from `openDatabase` shows `statement_timeout` 4s, `lock_timeout` 3s, idle-in-transaction 10s, connect 2000 ms. `pg_sleep(8)` gave 57014 at 4,003 ms. Locked contact row gave 503 in 3,074 ms with log code `55P03`, while another tenant got 200 in 61 ms and `/readyz` 200 in 4 ms. A listener that accepts and says nothing: start-up exits 1 in 2,284 ms.
+- **W5:** `main.ts` exits 1 naming the setting for swapped roles (220 ms), app-as-cross, cross-as-app, the migrate role, wrong password, garbage URL, closed port and missing database. Correct settings: `/readyz` 200. Each 503 wrote one JSON line (time, level, event, code); no number or text in the log (grep count 0).
+- **W6:** `channel_sent_at` set on 24,002 of 24,002 rows, all with distinct `created_at`. The failed-status fixture stored `failed` / `131026` end to end.
+- **W12:** `0x9a1a` refused; blank verify token refused; SIGTERM exits within 300 ms. Host: see X5.
+- **W15:** the direction mutant is killed. Down then `pg_dump -s` equals a database that never had 0003 (259 lines). Down with a clashing inbound/outbound pair fails with 23505 and rolls back, as its comment says.
+- **W11, W7:** the cited headings exist; "What is trusted" sits above "Health"; "nothing deletes them yet" and "one row … for each event" are in place; the three cross-role uses are listed.
+- No webhook that can never be accepted: 12 odd-shaped messages all got 200.
+- Whole suite in a pristine copy: 671 of 671; lint, typecheck and `check:docs` clean.
+
+**Ran:** scratch scripts against `rv_one` to `rv_four`; `main.ts` on ports 39421 to 39425 (39429 for a silent listener); 16 planted files and 47 mutants in /tmp copies; `pnpm run test`, `lint`, `typecheck`, `check:docs` in a copy. Everything is removed: `git status --short` is empty at `a72e153`, no `rv_` or `psa_test_` database, no process left, the three roles still log in.
+
+**Could not check:**
+
+- `make check` as a whole: `selftest` and `commitlint` not run (the copy has no `.git`, and the self-test plants files, so I did not run it in the repository).
+- Issue #288's text (no network); `2026-11-18-gate4-u7-verification.md` (not read).
+- A server that stops answering after the handshake; SIGTERM drain under load; the by-hand run with the mock; any PostgreSQL other than the local 16.
+- W10, W13, W14: not checked.
+
+## Author's response
+
+| ID | Response |
+|---|---|
+| X1 | **Fixed, and the claim cut down to what the test shows.** The testing entry stays, because the API's own tests need it; the scan now fails a non-test file that imports it or any file inside `packages/db`, that uses `createRequire` or `import.meta.resolve`, that has a dynamic `import()` or `require()` of anything but one plain string, or that has a backslash escape in a module name. `node_modules` is matched as a folder, not as part of a name. Each of the eight planted ways is a case in the test. The ADR lists what the scan fails on, says the connection function is in the testing entry, and says what this is: a guard against a shortcut taken by accident, not against an author set on getting round it. The data model no longer says every exported function takes a handle |
+| X2 | **Fixed by a change of rule, which is the agent's decision (#284).** The suggestion was taken: a number belongs to the identifier the channel last sent it with, so when a number arrives with an identifier, a contact with a different identifier that holds it loses it. That removes (a) and (b): the swap ends with each person holding the number they use, and the verifier's sequence leaves no contact showing another person's number; both are tests. (c) and (d) are behaviour that stays, and the bullets now say so plainly. **This rule was written after this verification and was checked again, narrowly; see the note at the end** |
+| X3 | **Fixed.** The bound is 250 ms, against 6 to 12 ms measured as written and over a second without the fix |
+| X4 | **Fixed.** STATUS and #288 say 503 until the first run has committed |
+| X5 | **Fixed.** A blank host is 127.0.0.1, with a test |
+| X6 | **Fixed.** The race is a test, 15 rounds. It is a race, so the mutant is killed with high likelihood, not with certainty |
+| X7 | **Stated, not fixed.** In #288 |
+| X8 | **Mostly fixed.** Tests added: the three limits as the connection reports them, and a statement stopped at its limit; the record of left-out items not written after the deadline; the `error_code` CHECK; a failed status's code from the webhook to the row. Not added: a test that would fail if the readiness check's own time limit were removed, since the connection limit still bounds it; and `main.ts` (#288). The W8 response's "a test for each item listed" was wrong about the second `stopIfAborted`, as the verifier says |
+| X9 | **Fixed** |
+
+## Second check, of the changed contact rule
+
+The rule of X2 was written after the verification above, so a third agent
+was asked to check it and the reworded decision record, briefly. Its
+report follows, as received. It checked `942849f`.
+
+| ID | Sev | Location | Finding (with the reproduction I ran) | Fix |
+| --- | --- | --- | --- | --- |
+| Y1 | Medium | `docs/design/data-model.md`, "Which contact a message belongs to", bullet 4; `packages/db/src/inbound.ts` second UPDATE (`NOT EXISTS`) | **Bullet 4 is untrue.** It says a contact's number is the one the channel last sent with its identifier, or none. Sequence (+15550101,U1), (+15550102,–), (+15550102,U1), (+15550101,–) ends `+15550101/U1` with 3 messages and `+15550102/–` with 1: U1 still holds 0101 after the channel last paired it with 0102, and a later number-only message from 0101 joins U1's conversation. Fuzz (40 rounds x 40 steps, 4 numbers, 4 identifiers): 425 contact observations broke the bullet. The code does match table row 1 ("if a contact with no identifier holds it, nothing changes"); only the bullet and its "anything sent later goes to a number the channel paired with that person" overstate (the pairing can be stale). | Reword bullet 4 to add the exception, or clear the contact's old number when it arrives with a number a number-only contact holds. |
+| Y2 | Low | same section; `inbound.ts` | **Unstated consequences.** (a) Swap interrupted by a number-only message: (0101,U1), (0102,U2), (0102,U1), (0101,–), (0101,U2), (0101,U2) ends `0102/U1`, `null/U2` (3 messages), `0101/–`: U2 never gets a number however often it writes with one. Bullet 1 covers only "first seen by number alone". (b) Transient errors on concurrent arrivals are stated nowhere in the design docs for these cases (STATUS.md line 254 mentions only the new-customers deadlock): two existing number-less identifiers arriving at once with one number gave 23505 in 40 of 40 rounds; two people swapping at once gave 40P01 in 36 of 40; four new identifiers with one number gave 74 `contact-conflict` over 40 rounds. All stored on retry. | State (a) under bullet 1 and (b) beside the STATUS note; optionally lock by number first to avoid the certain 23505. |
+| Y3 | Low | `packages/db/test/inbound.test.ts`; `inbound.ts` first UPDATE | Mutants of the clearing UPDATE: "remove it" is killed (6 tests fail); "drop both conditions" is killed (4 fail). "Drop only `channel_user_id IS NOT NULL`" and "drop only `<> $2`" each survive, 71 of 71. Both look equivalent in outcome: `NULL <> $2` is never true, and without `<> $2` the contact's own number is cleared and retaken in the same transaction. So `IS NOT NULL` is redundant text. | None needed; drop `IS NOT NULL` or note it is for the reader. |
+| Y4 | Low | `apps/api/src/app.test.ts` `sources()`; ADR 0003 amendment | By reading only: the ADR says "every source file"; the scan's extensions are ts, tsx, mts, cts, js, mjs, cjs, so `.jsx` is not scanned. No planted file tried. | Add `jsx` or name the extensions in the ADR. |
+
+**Confirmed:**
+
+- 1(a): `contactFor` does what the table's five rows and the leading rule say; the named sequences ended as the table predicts (plain swap ends `0102/U1`, `0101/U2`, two messages each).
+- 1(b): sequential fuzz with ground truth, 1,600 steps: 0 identifier-carrying messages in another identifier's contact, 0 identifiers changed, 0 contacts holding a number the channel last sent with a different identifier, 0 failures. Six races of 40 rounds each (two new identifiers with one number; two existing; swap at once; holder against newcomer; three identifiers against a number-only holder; four new identifiers): 0 messages in the wrong contact, 0 calls that never stored within 6 retries, exactly one holder of the number at the end of every round.
+- 1(c): bullets 1, 2 and 3 held in my sequences; bullet 4 did not (Y1).
+- 2: the boundary test passes on the clean copy (7 of 7), so no product file is wrongly failed. With the eight X1 bypasses planted in `apps/api/src` of the copy, all eight files were named as offenders (seven by "goes round it", the `node_modules_shim` one by the driver-name test). The ADR's four bullets match the test's patterns, and it says the testing entry holds the connection function and that this is a guard against accident only; apart from Y4 it claims nothing the test does not show.
+
+**Ran:** a scratch vitest file (sequences, fuzz, races) and four mutants in `/tmp/rv_copy`, using the repo's own harness (its `psa_test_…` database, dropped after); `pnpm exec vitest run packages/db/test/inbound.test.ts` (baseline 71 of 71, then per mutant); `apps/api/src/app.test.ts -t "only packages/db"` clean and planted. `/tmp/rv_copy` is removed; no `rv_` or `psa_test_` database remains; `git status --short` is empty at `942849f`. PostgreSQL was running and was not touched.
+
+**Could not check:**
+
+- Whether the planted files actually reach the database at run time (only that the scan catches them); `tsc` on them.
+- How the API answers the transient errors over HTTP (read `sink.ts` only for its 503 mention); races with more than four parties; any isolation level other than the default.
+- My first fuzz run used a faulty random generator and was discarded; the figures above are from the corrected run.
+
+### Author's response to the second check
+
+No behaviour was changed in answer to it; these four changes were not
+checked by another agent.
+
+| ID | Response |
+|---|---|
+| Y1 | **The bullet is corrected; the code is left.** It now says what holds (a contact with an identifier never holds a number the channel has since sent with a different identifier) and what does not (it can hold an old number of its own). Taking the number from a contact with no identifier would move it away from what may be the same person's earlier conversation, and nothing merges contacts yet (#288) |
+| Y2 | **Stated.** Both are bullets in the data model, with the error codes seen |
+| Y3 | **Noted in a comment.** The condition stays, for the reader |
+| Y4 | **Fixed.** `.jsx` is scanned, and the ADR names the extensions |

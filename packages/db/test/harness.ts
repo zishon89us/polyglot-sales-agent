@@ -252,3 +252,6 @@ export async function schemaFingerprint(client: pg.Client): Promise<string> {
     )::text AS fingerprint`);
   return result.rows[0]?.fingerprint as string;
 }
+
+// For tests only: wrap a pool a test made, and reach the pool behind a handle.
+export { adopt, poolOf } from "../src/connect.ts";

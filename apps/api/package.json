@@ -6,11 +6,15 @@
   "type": "module",
   "dependencies": {
     "@polyglot-sales-agent/channel": "workspace:*",
+    "@polyglot-sales-agent/channel-whatsapp": "workspace:*",
+    "@polyglot-sales-agent/core": "workspace:*",
+    "@polyglot-sales-agent/db": "workspace:*",
     "fastify": "5.12.8"
   },
   "devDependencies": {
     "@polyglot-sales-agent/channel-mock": "workspace:*",
-    "@polyglot-sales-agent/channel-whatsapp": "workspace:*"
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1"
   },
   "exports": {
     ".": "./src/index.ts"

@@ -67,7 +67,12 @@ async function server(
     }),
     registration: (query) => registrationChallenge(query, "synthetic-verify-token"),
     sink: {
-      events: async (batches, counts) => void recorded.events.push({ batches, ...counts }),
+      events: async (batches, info) =>
+        void recorded.events.push({
+          batches,
+          skipped: info.skipped,
+          malformed: info.malformed,
+        }),
       unparsed: async (info) => void recorded.unparsed.push(info),
       ...overrides.sink,
     },

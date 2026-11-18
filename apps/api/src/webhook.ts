@@ -25,11 +25,12 @@ export interface WebhookSink {
   /**
    * `skipped` counts parts this version does not handle; `malformed` counts
    * messages or statuses that were left out because they did not have the
-   * expected form.
+   * expected form. The hash and size of the body come with them, so that
+   * what was left out can be recorded without keeping the body.
    */
   events(
     batches: readonly EventBatch[],
-    counts: { skipped: number; malformed: number },
+    info: { skipped: number; malformed: number; sha256: string; size: number },
     signal: AbortSignal,
   ): Promise<void>;
   /**
@@ -61,6 +62,8 @@ export interface WebhookOptions {
   /** Defaults to the largest body the channel says it sends. */
   readonly bodyLimit?: number;
   readonly sinkDeadlineMs?: number;
+  /** Called with the cause each time a request is answered 503. For a log; it must not throw. */
+  readonly onUnavailable?: (error: unknown) => void;
   /** For tests. Milliseconds. */
   readonly now?: () => number;
 }
@@ -77,7 +80,9 @@ export function problem(
     .send({ type: "about:blank", title, status, code });
 }
 
-class SinkTooSlow extends Error {}
+class SinkTooSlow extends Error {
+  readonly code = "sink-too-slow";
+}
 
 /** Runs the sink with a signal that aborts at the deadline, when the wait ends too. */
 function within(work: (signal: AbortSignal) => Promise<void>, ms: number): Promise<void> {
@@ -127,6 +132,7 @@ export async function registerWebhook(
         return problem(reply, 400, "malformed", "The request could not be read");
       }
       // Nothing of the error is sent: it can describe the request.
+      options.onUnavailable?.(error);
       return problem(reply, 503, "unavailable", "The request could not be handled; send it again");
     });
 
@@ -160,22 +166,17 @@ export async function registerWebhook(
         return problem(reply, 401, "bad-signature", "The signature is missing or wrong");
       }
       const parsed = options.channel.parseWebhook(rawBody);
+      const sha256 = createHash("sha256").update(rawBody).digest("hex");
+      const size = rawBody.length;
       await within(
         (signal) =>
           parsed.ok
             ? options.sink.events(
                 parsed.batches,
-                { skipped: parsed.skipped, malformed: parsed.malformed },
+                { skipped: parsed.skipped, malformed: parsed.malformed, sha256, size },
                 signal,
               )
-            : options.sink.unparsed(
-                {
-                  code: parsed.code,
-                  sha256: createHash("sha256").update(rawBody).digest("hex"),
-                  size: rawBody.length,
-                },
-                signal,
-              ),
+            : options.sink.unparsed({ code: parsed.code, sha256, size }, signal),
         deadline,
       );
       return reply.code(200).type("text/plain").send("");

@@ -10,9 +10,10 @@ The database is PostgreSQL with row-level security (ADR 0003). Jobs and login
 sessions are tables here too (ADRs 0004 and 0008). Column types are indicative;
 the migrations in milestone M2 are the definition.
 
-**Built so far** (M2 units U4 and U5, `packages/db/migrations/`): `tenants`,
-`channel_accounts`, `channel_routes`, `contacts`, `conversations`,
-`messages`, `audit_log`, `jobs` and `worker_heartbeats`, each with only the
+**Built so far** (M2 units U4, U5 and U7, `packages/db/migrations/`):
+`tenants`, `channel_accounts`, `channel_routes`, `contacts`,
+`conversations`, `messages`, `audit_log`, `jobs`, `worker_heartbeats`,
+`unparsed_events` and `unroutable_events`, each with only the
 columns the walking skeleton uses. A column described below may not exist yet; the migrations are the
 record of what does.
 
@@ -117,7 +118,8 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 
 | Column | Notes |
 | --- | --- |
-| `phone` ⚑ | E.164. Unique per tenant. Null after deletion or retention |
+| `phone` ⚑ | E.164. Unique per tenant. Null after deletion or retention, and for a customer the channel gave no number for |
+| `channel_user_id` ⚑ | The channel's own identifier for the person: for WhatsApp, the business-scoped user ID. Unique per tenant, whatever number stands beside it. 1 to 128 characters with no space |
 | `phone_hash`, `phone_hash_key_version` | Keyed one-way hash of the number, made as described under `suppressed_numbers`. Kept after deletion only if opted out |
 | `profile_name` ⚑ | As sent by the channel. Never given to the model (NFR-V7) |
 | `last_language` | A language code. Not treated as personal on its own |
@@ -125,6 +127,61 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 | `last_inbound_at` | The reply window is open while this is under 24 hours ago |
 | `rate_paused_until` | |
 | `anonymised_at` | Set when personal fields were removed |
+
+#### Which contact a message belongs to
+
+Decision 16. The channel gives a number, an identifier, or both. "Holds"
+means a contact of this tenant has that value now. Two things never
+happen: an identifier is never changed, and a contact is never given
+another contact's conversation.
+
+A number belongs to the identifier the channel last sent it with. So the
+first thing done with a message that carries both is this: **any contact
+with a different identifier that holds the number loses it.** Its row keeps
+its identifier and its conversation, and has no number until its person
+writes again from one. Then:
+
+| The message carries | What exists, after that | The contact used | What changes |
+| --- | --- | --- | --- |
+| An identifier, with or without a number | A contact holds the identifier | That contact | If a number came and nobody holds it now, the contact takes it: a changed number is followed. If a contact with no identifier holds it, nothing changes |
+| An identifier and a number | Nobody holds the identifier; a contact with no identifier holds the number | That contact | It takes the identifier |
+| An identifier, with or without a number | Nobody holds either | A new contact with what came | |
+| A number only | A contact holds the number | That contact, with or without an identifier | Nothing |
+| A number only | Nobody holds it | A new contact with the number | |
+
+What follows from the table and is accepted:
+
+- A person first seen by number alone and later by identifier alone is two
+  contacts, and stays two even when a message then carries both: the
+  message goes to the contact with the identifier, and the other keeps the
+  number. Nothing merges contacts (#288).
+- A contact known by number alone is taken by whichever identifier first
+  arrives with that number. If the number had passed to a new person
+  before any identifier was seen, that person joins the old holder's
+  conversation. Without an identifier the two cannot be told apart.
+  `compliance.md` records that every message webhook carries the identifier
+  since April 2026, so this needs a contact made before then, or a channel
+  that sends none.
+- A number alone reaches whoever holds it now. After it has passed on with
+  an identifier, that is the new person.
+- A contact with an identifier never holds a number that the channel has
+  since sent with a different identifier. It can hold an old number of its
+  own: when its person writes from a new number that a contact with no
+  identifier already holds, it keeps the number it had (table, row 1).
+  A later message from that old number alone then joins its conversation.
+  So a contact's number is one the channel paired with that person at
+  some time, not always the latest.
+- For the same reason a person can go without a number however often they
+  write with one, while a contact with no identifier holds it.
+- Arrivals at the same moment can fail once and succeed when sent again:
+  two contacts taking one number (23505), two people swapping numbers or
+  two webhooks with the same new customers in opposite order (40P01), and
+  several new identifiers with one number (`contact-conflict`). Each is
+  answered 503, and the channel sends the webhook again. None was seen to
+  fail for good, or to store a message in the wrong contact.
+
+Each row of the table is a test in `packages/db/test/inbound.test.ts`, as
+are the sequences of the review's finding W1 and the verification's X2.
 
 ### `consent_records` — tenant-owned
 
@@ -200,13 +257,15 @@ null when no worker holds it).
 | `conversation_id`, `session_id` | |
 | `direction` | `inbound` or `outbound` |
 | `class` | For outbound: one of the five message classes |
-| `kind` | `text`, `button`, `template`, or an unsupported type name |
-| `channel_message_id` | Unique per tenant when not null. This constraint is the deduplication of US-C1 |
+| `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on) |
+| `channel_sent_at` | For a message from a customer, the time the channel says it was sent. `created_at` is when the row was stored, taken per row, so the messages of one webhook keep their order |
+| `error_code` | The channel's code for a `failed` status. Letters, digits, `_` and `-`, at most 40 |
+| `channel_message_id` | Unique per tenant and direction when not null. This constraint is the deduplication of US-C1. Per direction, so that a customer's message can never be dropped for sharing an identifier with one that was sent |
 | `body` ⚑ | The text. Null for unsupported types, whose content is never stored, and null after retention or deletion |
 | `button_payload` | Opaque to the core: the pack that registered the button reads it (for the booking pack's Confirm: the booking and the start time it was sent for). **The handler must check that the booking belongs to the sending contact** |
 | `template_id`, `template_variables` ⚑ | Variables can hold a service name and a time; treated as personal with the message |
 | `status` | `pending`, `held`, `discarded`, `withheld`, `sending`, `sent`, `delivered`, `read`, `failed` |
-| `withheld_reason`, `error_code` | |
+| `withheld_reason` | |
 | `sent_by_user_id` | For staff messages |
 | `fee_amount`, `fee_currency` | As reported by the channel; null if not reported |
 | `received_while_not_answering` | |
@@ -328,8 +387,8 @@ known or belong to no tenant. Each is listed with what it can reveal.
 | --- | --- | --- | --- |
 | `channel_routes` | `receiving_number_id`, `tenant_id` | The webhook must find the tenant from the receiving number | Which tenant owns a business number. No customer data |
 | `jobs` | `type`, `tenant_id` (nullable), `payload`, `run_at`, `attempts`, `state`, `locked_until`, `last_error`, `dedupe_key` | A worker claims a job before it knows the tenant. Unlike the other tables here it does have row-level security, of its own kind (decision 13). As built, `subject_id` stands in place of `dedupe_key` (decision 15) | Identifiers only. **A job payload never holds message text, a phone number or a name**; a test checks this. `last_error` is a sanitised code |
-| `unparsed_events` | `receiving_number_id` (if it could be read), `payload_hash`, `size_bytes`, `error_code`, `received_at` | A validly signed event that could not be parsed has no tenant yet | Metadata only. **The raw event, the sender's number and any text are not stored.** Rows are deleted after 30 days (Gate 2 finding S6) |
-| `unroutable_events` | `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
+| `unparsed_events` | `channel`, `payload_hash`, `size_bytes`, `error_code`, `items_left_out`, `received_at`. As built there is no `receiving_number_id`: a body that cannot be read has none to give | A validly signed event that could not be parsed has no tenant yet | Metadata only. **The raw event, the sender's number and any text are not stored.** The hash is a plain SHA-256, not keyed: a body short enough to guess, a few bytes, could be found from it by trying. A body with a person's number in it is a whole webhook and is not short, and a guessable body tells nothing of anyone. Rows are to be deleted after 30 days (Gate 2 finding S6); the job that does it is not built (#288) |
+| `unroutable_events` | `channel`, `receiving_number_id`, `channel_message_id`, `kind`, `received_at` | No tenant exists for them | Metadata only. The sender's number and the message body are **not stored**, because they belong to people the system has no relationship with |
 | `worker_heartbeats` | `worker_id`, `started_at`, `last_seen_at` | One row per worker process, so that something outside the worker can tell whether one is alive (ADR 0004, amendment) | Nothing personal |
 | `service_state` | One row: `normal` or `degraded`, since when, and whether the operator is holding it in `degraded` | Service-wide | Nothing personal |
 | `operator_log` | `command`, `arguments`, `operator_name`, `phase` (`started` or `finished`), `outcome`, `at` | Operator actions belong to no tenant | Insert-only for every role. Arguments never hold an email address, a phone number or a name; a created row is recorded by its identifier (ADR 0011) |
@@ -349,15 +408,25 @@ with the cross-tenant role, and returns only what the next step needs.
 Work that crosses tenants by design: creating a tenant and the other
 operator commands of ADR 0011, the daily credential check, the retention
 job, claiming and running jobs, and the worker's heartbeat with its
-readiness probe. Nothing else may use
-the cross-tenant role; the import-boundary test enforces which modules can
-reach it.
+readiness probe. In the request path, as built in M2: recording an event
+for a number no tenant has (`unroutable_events`), recording a body that
+could not be read (`unparsed_events`) with its `operator-alert` job, and
+the API's readiness check. Nothing else may use the cross-tenant role.
+
+What enforces it today is narrower than "which modules": a test fails if
+any source file outside `packages/db` names the database driver, imports
+that package's inner files or its testing entry, or builds a module name
+at run time. The API therefore reaches the database only through the
+functions it is given for the webhook, each of which takes a handle that
+cannot run a query. (The package's job, lease and migration functions take
+a connection; nothing outside the package and its tests can make one.) A test of which *modules*
+may hold the cross-tenant handle is not built (#162).
 
 ## Constraints that carry invariants
 
 | Invariant or rule | Enforced by |
 | --- | --- |
-| A message is processed once (US-C1) | Unique `channel_message_id` per tenant |
+| A message is processed once (US-C1) | Unique `channel_message_id` per tenant and direction |
 | One open handover per contact (H1) | Partial unique index on `handovers` |
 | A handover is attached exactly in `waiting` and `in-progress` (H3, data side) | Check constraint on `handovers` |
 | One active session per conversation | Partial unique index on `sessions` |
@@ -434,7 +503,7 @@ question for a lawyer (open question OQ-4).
 | 5 | A removed user is soft-removed | So audit entries keep their actor |
 | 6 | The content of unsupported message types is never stored, only the type | US-C12 says it is not sent to the model; this also keeps voice notes and images out of the database |
 | 7 | The phone hash is HMAC-SHA-256 over tenant and number, with a key outside the database and a key version on each row | A plain hash of a phone number can be reversed by trying every number (T36, #160). The choice of HMAC-SHA-256 is the agent's and has not been reviewed by anyone with security training |
-| 8 | A signed event that cannot be parsed is recorded as metadata only, kept 30 days | The raw event would hold a stranger's number and text outside tenant scoping (Gate 2 finding S6). It replaces what `api.md` first said |
+| 8 | A signed event that cannot be parsed is recorded as metadata only, to be kept 30 days (nothing deletes the rows yet, #288) | The raw event would hold a stranger's number and text outside tenant scoping (Gate 2 finding S6). It replaces what `api.md` first said |
 | 9 | Booking tables and columns are owned by the booking pack | ADR 0012 |
 | 10 | Foreign keys between tenant-owned tables include `tenant_id`, and uniqueness rules are per tenant where they can be | A foreign-key or uniqueness check is not subject to row-level security. Found while building M2 unit U4 |
 | 11 | `channel_routes` is written only by a trigger on `channel_accounts` | So the two cannot disagree (Gate 2 finding S22) |
@@ -442,6 +511,8 @@ question for a lawyer (open question OQ-4).
 | 13 | `jobs` is not outside tenant scoping. The application role, in one tenant's transaction, may add a job for that tenant, see which of its jobs exist (not what they hold) and delete a queued one. The cross-tenant role claims them | The webhook queues a job in the tenant's transaction, and a timer is cancelled in the transaction that moves its state; with no policy the application role could read and change every tenant's jobs. Found while building M2 unit U5 |
 | 14 | A finished job is deleted; job states are `queued`, `running` and `dead` | Nothing to archive (ADR 0004, amendment) |
 | 15 | `jobs.subject_id`, a UUID, replaces `dedupe_key` | A timer has to be found again to be cancelled; an identifier cannot carry text. There is no uniqueness on it (ADR 0004, amendment) |
+| 16 | A contact has the channel's own identifier as well as a number, either of which may be missing. The identifier is the person; the number is something a person holds for a time. Every case is in the table under `contacts`, "Which contact a message belongs to" | Since April 2026 a WhatsApp customer who uses a username arrives with no number (#284). **The agent's decision, awaiting the maintainer.** Reworked after the Gate 4 review of unit U7 (finding W1): the first version let a number carry one person's conversation to another. What is still not done: nothing merges two contacts that turn out to be one person (#288) |
+| 17 | `unparsed_events` and `unroutable_events` each have the channel's name and a uniqueness rule | The channel sends an unanswered webhook again, and a slow request can commit after it was answered 503; the same event must be one row |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
 noted for the Gate 2 review and are not yet reflected in the stories.
