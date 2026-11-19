@@ -5,6 +5,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as dbMain from "@polyglot-sales-agent/db";
 import { APP_ROLE, CROSS_ROLE, type Database, MIGRATE_ROLE } from "@polyglot-sales-agent/db";
+import * as dbOperator from "@polyglot-sales-agent/db/operator";
 import { recorded } from "@polyglot-sales-agent/db/operator";
 import {
   adopt,
@@ -14,7 +15,8 @@ import {
 } from "@polyglot-sales-agent/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
-import { PACKS, parse, run, USAGE, UsageError } from "./commands.ts";
+import * as opsCommands from "./commands.ts";
+import { PACKS, parse, RecordIncomplete, run, shown, USAGE, UsageError } from "./commands.ts";
 
 let database: TestDatabase;
 let crossPool: pg.Pool;
@@ -82,7 +84,7 @@ const CREATE = [
 async function deadJob(type = "send-messages"): Promise<string> {
   const made = await administrator.query<{ id: string }>(
     `INSERT INTO jobs (type, payload, run_at, attempts, state, last_error)
-     VALUES ($1, '{}', clock_timestamp() - interval '1 hour', 6, 'dead', 'ECONNREFUSED') RETURNING id`,
+     VALUES ($1, '{}', clock_timestamp() + interval '1 hour', 6, 'dead', 'ECONNREFUSED') RETURNING id`,
     [type],
   );
   return made.rows[0]?.id as string;
@@ -140,26 +142,37 @@ describe("each command writes its two rows", () => {
       "tenant",
       "create",
       "--name",
-      'Second "Clinic"\n',
+      'Second "Clinic"',
       "--pack",
       "faq-only",
       "--time-zone",
-      "Asia/Karachi",
+      "asia/karachi",
       "--language",
       "en-GB",
       "--as",
       "Zeeshan",
     );
+    // Oldest first, whatever order their identifiers happen to have.
+    await administrator.query(
+      `UPDATE tenants SET created_at = CASE WHEN id = (SELECT max(id::text)::uuid FROM tenants)
+         THEN timestamptz '2026-01-01' ELSE timestamptz '2026-02-01' END`,
+    );
+    const first = (
+      await administrator.query<{ name: string }>("SELECT name FROM tenants ORDER BY created_at")
+    ).rows[0]?.name as string;
     await added();
     lines = [];
     await ops("tenant", "list", "--as", "Zeeshan");
     expect(lines[0]).toBe("2 tenants");
-    expect(lines[1]).toMatch(
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain(shown(first));
+    const noor = lines.find((line) => line.includes("Noor")) as string;
+    expect(noor).toMatch(
       /^[0-9a-f-]{36} {2}\S+Z {2}booking {2}Asia\/Riyadh {2}ar {2}"Noor Dental"$/,
     );
-    // A name is printed in quotes, so that an odd one cannot pass for a line of its own.
-    expect(lines[2]).toMatch(/faq-only {2}Asia\/Karachi {2}en-GB {2}"Second \\"Clinic\\""$/);
-    expect(lines).toHaveLength(3);
+    // A name is printed in quotes; the zone is stored as the platform writes it, not as it was typed.
+    const second = lines.find((line) => line.includes("Second")) as string;
+    expect(second).toMatch(/faq-only {2}Asia\/Karachi {2}en-GB {2}"Second \\"Clinic\\""$/);
     expect(
       (await added()).map((row) => [
         row.phase,
@@ -172,6 +185,17 @@ describe("each command writes its two rows", () => {
       ["started", "tenant list", {}, null, null],
       ["finished", "tenant list", {}, "ok", null],
     ]);
+  });
+
+  test("a name from the database is printed so that no character in it can move the cursor or reorder the line", async () => {
+    await administrator.query(
+      "INSERT INTO tenants (name, pack, time_zone, default_language) VALUES ($1, 'booking', 'UTC', 'en')",
+      ["a\u001b[2Jb\u009bc‮d\ne\u0007"],
+    );
+    await ops("tenant", "list", "--as", "Zeeshan");
+    expect(lines[1]?.endsWith('"a\\u001b[2Jb\\u{9b}c\\u{202e}d\\ne\\u0007"')).toBe(true);
+    expect(/\p{C}/u.test(lines.join(""))).toBe(false);
+    expect(shown("Noor نور")).toBe('"Noor نور"');
   });
 
   test("jobs list-dead: shows the jobs that were given up, without what they hold", async () => {
@@ -217,12 +241,18 @@ describe("each command writes its two rows", () => {
     expect(lines[0]).toMatch(/^the newest \d+ rows of the record$/);
     // Its own first row is there; its second is written after it has read.
     expect(lines[1]).toMatch(
-      / {2}started {2}"log show" {2}as "Second Operator" {2}\{\} {2}- {2}-$/,
+      / {2}started {2}"log show" {2}as "Second Operator" {2}\{"limit":"50"\} {2}- {2}-$/,
     );
     expect(lines[2]).toMatch(
       / {2}finished {2}"tenant create" {2}as "Zeeshan" {2}\{.*\} {2}ok {2}[0-9a-f-]{36}$/,
     );
     expect(lines.join("\n")).not.toContain("Noor");
+    // With a limit, that many and no more; the limit is recorded.
+    lines = [];
+    await added();
+    await ops("log", "show", "--limit", "3", "--as", "Zeeshan");
+    expect(lines).toHaveLength(4);
+    expect((await added()).map((row) => row.arguments)).toEqual([{ limit: "3" }, { limit: "3" }]);
   });
 });
 
@@ -293,7 +323,7 @@ describe("a command that fails, or is written wrongly", () => {
     ],
     [
       [...CREATE.slice(0, 6), "--time-zone", "Mars/Olympus", "--language", "ar", "--as", "a"],
-      "--time-zone is an IANA time zone",
+      "--time-zone is a named IANA time zone",
     ],
     [[...CREATE.slice(0, 8), "--language", "Arabic", "--as", "a"], "--language is a language tag"],
     [
@@ -303,6 +333,25 @@ describe("a command that fails, or is written wrongly", () => {
     [["jobs", "retry", "--as", "a"], "too many or too few words"],
     [["jobs", "retry", "1; DROP TABLE jobs", "--as", "a"], "the job's identifier is not one"],
     [["tenant", "list", "--AS", "a"], "an option is not written as --name"],
+    [["tenant", "list", "--as", "--name"], "--as needs a value"],
+    [["tenant", "list", "--as", "Zee\u015fan"], "--as takes a name"],
+    [["log", "show", "extra", "--as", "a"], "too many or too few words"],
+    [["log", "show", "--name", "x", "--as", "a"], "--name is not an option of this command"],
+    [["log", "show", "--limit", "0", "--as", "a"], "--limit is a whole number from 1 to 1000"],
+    [["log", "show", "--limit", "1001", "--as", "a"], "--limit is a whole number from 1 to 1000"],
+    [["log", "show", "--limit", "5.5", "--as", "a"], "--limit is a whole number from 1 to 1000"],
+    [
+      [...CREATE.slice(0, 6), "--time-zone", "Etc/GMT+5", "--language", "ar", "--as", "a"],
+      "--time-zone is a named IANA time zone",
+    ],
+    [
+      ["tenant", "create", "--name", "a\u009bb", ...CREATE.slice(4), "--as", "a"],
+      "--name has a character that cannot be printed",
+    ],
+    [
+      ["tenant", "create", "--name", "a\u202eb", ...CREATE.slice(4), "--as", "a"],
+      "--name has a character that cannot be printed",
+    ],
   ])("%j is refused before anything is recorded or done", async (argv, message) => {
     const attempt = ops(...argv);
     await expect(attempt).rejects.toBeInstanceOf(UsageError);
@@ -336,6 +385,8 @@ describe("a command that fails, or is written wrongly", () => {
       expect(USAGE).toContain(`ops ${command}`);
     }
     expect(USAGE).toContain(PACKS.join("|"));
+    expect(USAGE).toContain("letters without accents");
+    expect(USAGE).toContain("waited over 15 minutes");
     expect(parse(["a", "--b", "c", "d"])).toEqual({ words: ["a", "d"], options: { b: "c" } });
   });
 });
@@ -354,6 +405,39 @@ describe("the record", () => {
       ),
     ).rejects.toMatchObject({ code: "23514" });
     expect(ran).toBe(false);
+  });
+
+  test("a command that was done but whose second row could not be written says so, prints its result, and is not a failure to repeat", async () => {
+    await administrator.query(`
+      CREATE FUNCTION refuse_finished() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'refused for the test'; END $$;
+      CREATE TRIGGER refuse_finished BEFORE INSERT ON operator_log
+        FOR EACH ROW WHEN (NEW.phase = 'finished') EXECUTE FUNCTION refuse_finished();`);
+    await added();
+    try {
+      await expect(ops(...CREATE, "--as", "Zeeshan")).rejects.toBeInstanceOf(RecordIncomplete);
+    } finally {
+      await administrator.query(
+        "DROP TRIGGER refuse_finished ON operator_log; DROP FUNCTION refuse_finished()",
+      );
+    }
+    const made = await administrator.query<{ id: string }>("SELECT id FROM tenants");
+    expect(made.rows).toHaveLength(1);
+    expect(lines).toEqual([`tenant created: ${made.rows[0]?.id}`]);
+    expect((await added()).map((row) => row.phase)).toEqual(["started"]);
+  });
+
+  test("the operator's role cannot choose a row's time or identifier, so a row cannot be dated back", async () => {
+    const insert = (columns: string, values: string) =>
+      sqlState(
+        crossPool.query(
+          `INSERT INTO operator_log (invocation_id, phase, command, operator_name${columns})
+           VALUES (gen_random_uuid(), 'started', 'tenant list', 'x'${values})`,
+        ),
+      );
+    expect(await insert(", at", ", '2001-01-01'")).toBe(REFUSED);
+    expect(await insert(", id", ", gen_random_uuid()")).toBe(REFUSED);
+    expect(await insert("", "")).toBe("none");
   });
 
   test("the first row is there while the action runs, so it stands if the process then stops", async () => {
@@ -499,6 +583,15 @@ describe("the program itself", () => {
       stdout: "",
       stderr: "ops: PSA_DB_CROSS_URL does not reach the database as psa_cross\n",
     });
+    // A command written wrongly is refused before the database is looked for at all.
+    const wrong = await program(["tenant", "remove", "--as", "Zeeshan"], {});
+    expect(wrong.status).toBe(2);
+    expect(wrong.stderr).toContain("ops: there is no such command");
+    const down = await program(["tenant", "list", "--as", "Zeeshan"], {
+      PSA_DB_CROSS_URL: "postgres://psa_cross:secret-word@127.0.0.1:9/none",
+    });
+    expect(down.status).toBe(1);
+    expect(down.stderr).not.toMatch(/secret-word|127\.0\.0\.1/);
     const help = await program(["--help"], {});
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("ops jobs retry");
@@ -535,17 +628,43 @@ describe("nothing but ops can reach the operator's functions (ADR 0011, rule 2)"
     expect(OPERATOR.test('import { storeInbound } from "@polyglot-sales-agent/db";')).toBe(false);
   });
 
-  test("the package's main entry, which the API and the worker import, has none of them", () => {
-    const names = Object.keys(dbMain);
-    for (const name of [
-      "recorded",
-      "createTenant",
-      "listTenants",
-      "listDeadJobs",
-      "retryDeadJob",
-      "readOperatorLog",
-    ]) {
-      expect(names, name).not.toContain(name);
+  test("inside the database package nothing but the module itself names it, so nothing passes it on", () => {
+    const NAMED = /operator(\.ts)?["'`]/;
+    const inside = sources()
+      .filter(
+        (path) => path.startsWith("packages/db/src/") && path !== "packages/db/src/operator.ts",
+      )
+      .filter((path) => NAMED.test(readFileSync(`${root}${path}`, "utf8")));
+    expect(inside).toEqual([]);
+    expect(NAMED.test('export * as things from "./operator.ts";')).toBe(true);
+    expect(NAMED.test('export { createTenant as makeTenant } from "./operator";')).toBe(true);
+  });
+
+  test("the package's main entry, which the API and the worker import, gives out none of them under any name", () => {
+    const main = new Set<unknown>(Object.values(dbMain));
+    const operator = Object.entries(dbOperator);
+    expect(operator.length).toBeGreaterThan(5);
+    for (const [name, value] of operator) {
+      expect(main.has(value), name).toBe(false);
     }
+    // Nor wrapped in an object.
+    for (const value of main) {
+      if (typeof value === "object" && value !== null) {
+        for (const inner of Object.values(value)) {
+          expect(operator.some(([, theirs]) => theirs === inner)).toBe(false);
+        }
+      }
+    }
+  });
+
+  test("nothing outside apps/ops imports from apps/ops, so its commands cannot be run from a route", () => {
+    const FROM_OPS = /["'`]@polyglot-sales-agent\/ops["'`/]|["'`][^"'`]*\/ops\/src\/[^"'`]*["'`]/;
+    const importers = sources()
+      .filter((path) => !path.startsWith("apps/ops/"))
+      .filter((path) => FROM_OPS.test(readFileSync(`${root}${path}`, "utf8")));
+    expect(importers).toEqual([]);
+    expect(FROM_OPS.test('import { run } from "../../ops/src/commands.ts";')).toBe(true);
+    expect(FROM_OPS.test('import { run } from "@polyglot-sales-agent/ops";')).toBe(true);
+    expect(Object.keys(opsCommands)).toContain("run");
   });
 });

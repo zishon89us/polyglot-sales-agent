@@ -5,7 +5,7 @@
 -- True for an object of at most ten entries whose keys are plain words and
 -- whose values are short strings of letters, digits, `_`, `-`, `/` and `.`.
 -- That admits an identifier, a pack's name, a time zone and a language
--- tag, and nothing with a space or an `@` in it.
+-- tag, and nothing with a space, an `@` or a `+` in it.
 CREATE FUNCTION operator_arguments_ok(arguments jsonb) RETURNS boolean
   LANGUAGE sql IMMUTABLE AS $$
   SELECT jsonb_typeof(arguments) = 'object'
@@ -30,8 +30,11 @@ CREATE TABLE operator_log (
   command text NOT NULL CHECK (command ~ '^[a-z][a-z-]{0,19}( [a-z][a-z-]{0,19}){0,2}$'),
   -- The name the operator gave with `--as`. A claim, not proof.
   operator_name text NOT NULL CHECK (operator_name ~ '^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$'),
-  -- Identifiers and short settings only: never a name, an address or a
-  -- number of anyone. At most ten keys, each value a short plain word.
+  -- Meant for identifiers and short settings. At most ten keys, each value
+  -- a short word with no space, `@` or `+`. That shuts out an address and
+  -- a number written with a plus sign, not everything personal: `ops`
+  -- decides what it records, and records only a pack, a time zone, a
+  -- language, a limit and a job's identifier.
   arguments jsonb NOT NULL DEFAULT '{}' CHECK (operator_arguments_ok(arguments)),
   -- For a finished row: `ok`, or a short code of what went wrong.
   outcome text CHECK (outcome ~ '^[A-Za-z0-9_-]{1,40}$'),
@@ -47,10 +50,17 @@ CREATE INDEX operator_log_at ON operator_log (at);
 -- cross-tenant role, which `ops` connects as, may add to it and read it.
 -- The application role, which serves requests from the internet, gets
 -- nothing: it has no reason to write an operator's record.
-GRANT SELECT, INSERT ON operator_log TO psa_cross;
+-- It may not choose a row's identifier or its time: those are the
+-- database's, so a row cannot be dated back to hide it.
+GRANT SELECT ON operator_log TO psa_cross;
+GRANT INSERT (invocation_id, phase, command, operator_name, arguments, outcome, subject_id)
+  ON operator_log TO psa_cross;
 
--- Insert-only for every role, the owner included: a privilege can be
--- granted by mistake, a trigger says no all the same.
+-- No UPDATE, DELETE or TRUNCATE by any role's plain statement, the owner's
+-- included: a privilege can be granted by mistake, a trigger says no all
+-- the same. This does not bind the owner, the migration role: it can
+-- disable or drop the trigger, or drop the table. What it guards against
+-- is a mistake, not the owner.
 CREATE FUNCTION operator_log_is_insert_only() RETURNS trigger
   LANGUAGE plpgsql AS $$
 BEGIN

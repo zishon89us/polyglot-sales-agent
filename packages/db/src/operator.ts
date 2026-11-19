@@ -32,14 +32,16 @@ export interface ActionResult<T> {
  * first row cannot be written the action does not run.
  *
  * The second row is written even when the action fails, and the action's
- * error is then thrown on. If the second row itself cannot be written, the
- * record shows a command that started and never finished, which is the
- * truth as far as anyone can tell.
+ * error is then thrown on. If the action was done and the second row
+ * cannot be written, the result is still returned, since the work is done
+ * and must not be done again, and `incomplete` is called: the record then
+ * shows a command that started and never finished.
  */
 export async function recorded<T>(
   cross: Database,
   command: OperatorCommand,
   action: () => Promise<ActionResult<T>>,
+  incomplete: () => void = () => undefined,
 ): Promise<T> {
   const pool = poolOf(cross);
   const invocationId = randomUUID();
@@ -68,7 +70,7 @@ export async function recorded<T>(
     await finish(errorCode(error), undefined).catch(() => undefined);
     throw error;
   }
-  await finish("ok", result.subjectId);
+  await finish("ok", result.subjectId).catch(incomplete);
   return result.value;
 }
 
