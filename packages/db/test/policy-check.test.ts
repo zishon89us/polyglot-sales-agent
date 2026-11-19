@@ -50,6 +50,7 @@ describe("findIsolationProblems", () => {
   test("the two lists of exceptions hold exactly what this change needs", () => {
     expect(Object.keys(UNSCOPED_TABLES)).toEqual([
       "channel_routes",
+      "operator_log",
       "schema_migrations",
       "unparsed_events",
       "unroutable_events",
