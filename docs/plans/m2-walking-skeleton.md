@@ -27,7 +27,7 @@ isolation, exactly-once handling, the lease and the send policy.
 | U6 | #267 | Channel interface and the mock channel | U1 | Contract tests against dated synthetic fixtures; a bad signature stores nothing; an oversized body is refused. |
 | U7 | #268 | Webhook: verify, store, queue | U4, U5, U6 | The same message five times gives one row (NFR-R2); answers are 200, 401, 413 and 503 as specified; the request does nothing else (NFR-P1 measured, not yet gated). |
 | U8 | #269 | Worker: echo reply and the send policy | U7 | The restart test stops the worker before the call, after the call, and between the two, and shows the three outcomes NFR-R2 allows. |
-| U9 | #270 | Operator commands | U4 | Each command writes its two log rows; the application role cannot update or delete them; no route reaches the cross-tenant role. |
+| U9 | #270 | Operator commands | U4 | Each command writes its two log rows; the application role cannot update or delete them; there is no operator route. (First written as "no route reaches the cross-tenant role", which the webhook does by design: data model, "Access before the tenant is known".) |
 | U10 | #271 | End to end, production guard and the pack boundary | U2, U3, U8, U9 | The M2 exit criteria of `AGENTS.md` section 9. |
 
 ```mermaid

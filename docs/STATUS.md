@@ -305,16 +305,28 @@ M0 Inception met its exit criteria on 2026-11-16; see
   operator's commands. `ops tenant create`, `tenant list`, `jobs
   list-dead`, `jobs retry` and `log show`, run on the server with the
   cross-tenant role. Each writes two rows to `operator_log`, one before it
-  acts and one with how it ended; no role can change or remove a row, and
-  the application role cannot even read it. The record holds identifiers
-  and short settings only, and the database refuses anything that could be
-  a name, an address or a number. A test fails if any file outside
+  acts and one with how it ended; no role can change or remove a row by a
+  plain statement, and the application role cannot even read it. `ops`
+  records identifiers and short settings only. A test fails if any file outside
   `apps/ops` imports the operator's functions, and another lists the API's
   routes: there is no operator route. Each command was also run by hand.
   **Decided by the agent:** no privilege at all for the application role
   (ADR 0011 allowed insert and read), the tenant's name not recorded,
   `log show` added. **Not built:** the owner's invitation (M4), a command
   to connect a number to a tenant, tenant state (#293).
+
+- 2026-11-19 — U9's code review: no High finding, five Medium, six Low
+  (`docs/reviews/2026-11-19-gate4-u9-ops.md`). Fixed: three ways the
+  operator's functions could still be passed to the API unnoticed; the
+  operator's role could date a row back, and now cannot set a row's time
+  or identifier; a valid time zone written with a plus sign failed with a
+  bare database code, and is now refused with a reason; a tenant's name
+  could carry characters that reorder a terminal line; a command is now
+  checked in full before any connection is made. Stated, not changed: the
+  migration role, which owns the log, can remove its guard with a schema
+  change, and the pattern on recorded values does not by itself keep
+  every personal value out. Two sentences that said more than that are
+  corrected.
 
 ## Next
 
