@@ -328,6 +328,12 @@ M0 Inception met its exit criteria on 2026-11-16; see
   every personal value out. Two sentences that said more than that are
   corrected.
 
+- 2026-11-19 — The fixes were checked by a second agent
+  (`docs/reviews/2026-11-19-gate4-u9-verification.md`): five findings,
+  all Low, all fixed. It confirmed every fix from the review, and ran the
+  one path that had no test (a command done but half recorded exits 3),
+  which now has one.
+
 ## Next
 
 1. Maintainer reviews and merges U9 (#270), **after its code review and

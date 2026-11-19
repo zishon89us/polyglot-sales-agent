@@ -167,9 +167,9 @@ Each point is the agent's and awaits the maintainer.
   serves requests from the internet, so it is granted no privilege on the
   table. Only the cross-tenant role, which `ops` connects as, may insert
   and read, and it may not choose a row's identifier or its time, so a row
-  cannot be dated back. No role has the privilege to update, delete or
-  truncate, and a trigger refuses all three besides, for the owner's plain
-  statements too.
+  cannot be dated back. No role but the table's owner holds the privilege
+  to update, delete or truncate, and a trigger refuses all three, the
+  owner's plain statements included.
 - **What that does not stop.** The owner of the table, which is the
   migration role, can disable or drop the trigger, replace its function,
   add a rule, or drop the table; the trigger guards against a privilege
@@ -212,7 +212,9 @@ Each point is the agent's and awaits the maintainer.
   their own in the database package, and tests fail if any file outside
   `apps/ops` imports it, if any other file of the database package names
   it, if the package's main entry gives out any of its functions under any
-  name, or if any file outside `apps/ops` imports from `apps/ops`. This is the same kind of guard as the
+  name, or if any file outside `apps/ops` imports from `apps/ops`. The
+  type check is part of the guard: a module address made to load a second
+  copy of the functions is refused by it. This is the same kind of guard as the
   driver boundary of ADR 0003: against a shortcut taken by accident.
 - **The route inventory** is a test: the API answers on `/healthz`,
   `/readyz` and `/webhooks/whatsapp`, and on nothing else.
