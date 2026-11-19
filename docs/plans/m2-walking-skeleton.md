@@ -90,6 +90,8 @@ Steps 1 to 4 of the order of checks and an echo reply in place of the model. The
 
 `ops tenant create` (the tenant only; the owner's invitation arrives in M4, #201), `ops tenant list`, `ops jobs list-dead` and `retry`. The insert-only `operator_log` (ADR 0011).
 
+**As built:** those four commands and `ops log show`. The application role has no privilege on the log at all. No command connects a number to a tenant yet. The rest is in #293.
+
 ### U10: End to end, production guard and the pack boundary (#271)
 
 `docker compose up` gives a working stack. An end-to-end test sends a message through `mock-whatsapp` and receives the echo. Start-up refuses development components in production (#165). The places where the core still names bookings are removed and the boundary test of ADR 0012 is switched on (#237, #253). M2 retro and tag.

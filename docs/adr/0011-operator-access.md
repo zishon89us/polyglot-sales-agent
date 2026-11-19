@@ -155,3 +155,45 @@ dead-letter commands in M2.
 - Issue #162 covers the separation of database roles this relies on.
 - Issue #161, which this closes, also asked whether an owner can switch the
   assistant off; that part moves to OQ-12.
+
+## Amendment, 2026-11-19: as built in M2 unit U9
+
+Made while building the commands (issue #270). The decision is unchanged.
+Each point is the agent's and awaits the maintainer.
+
+- **The application role gets nothing on `operator_log`.** Rule 3 said the
+  application and cross-tenant roles "may insert into it and read it".
+  Nothing the application role does needs either, and it is the role that
+  serves requests from the internet, so it is granted no privilege on the
+  table. Only the cross-tenant role, which `ops` connects as, may insert
+  and read. No role may update, delete or truncate: besides the missing
+  privileges, a trigger refuses all three, the owner's included.
+- **What a row holds.** `invocation_id` ties a command's two rows.
+  `arguments` holds identifiers and short settings only, and the database
+  refuses anything else: a value with a space, an `@` or a `+` in it does
+  not fit. A tenant's name is therefore not recorded, since a business's
+  name can be a person's; the finished row has the tenant's identifier in
+  `subject_id`. `outcome` is `ok` or a short code.
+- **The first row is committed before the action**, on its own. If it
+  cannot be written the action does not run. If the process stops after
+  the action and before the second row, the record shows a command that
+  started and never finished.
+- **Commands built:** `tenant create` (the tenant only: name, pack, time
+  zone, default language; no owner and no invitation until M4, #201),
+  `tenant list`, `jobs list-dead`, `jobs retry`, and `log show`, which was
+  added so that the record can be read without SQL. Commands that only
+  read are recorded too. `service degraded` and `events list-unparsed` are
+  not built.
+- **Rule 2, the one module.** The operator's functions are an entry of
+  their own in the database package, and a test fails if any file outside
+  `apps/ops` imports it. The package's main entry, which the API and the
+  worker import, has none of them. This is the same kind of guard as the
+  driver boundary of ADR 0003: against a shortcut taken by accident.
+- **The route inventory** is a test: the API answers on `/healthz`,
+  `/readyz` and `/webhooks/whatsapp`, and on nothing else.
+- **"The only way a tenant is created outside tests"** holds in that no
+  other code path creates one. Nothing stops a person with the database
+  doing it by hand, as the decision already says of the record.
+
+What is not built is listed in #293.
+
