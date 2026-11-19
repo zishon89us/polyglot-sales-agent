@@ -97,8 +97,9 @@ const OPERATOR_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 const LANGUAGE = /^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2})?$/;
 // What the record takes as an argument's value (`operator_arguments_ok`).
 const RECORDABLE = /^[A-Za-z0-9_./-]{1,64}$/;
-// Control and format characters, unassigned and private-use ones: nothing a name is written with.
-const UNPRINTABLE = /\p{C}/u;
+// Control and format characters, unassigned and private-use ones, and the line and paragraph
+// separators: nothing a name is written with.
+const UNPRINTABLE = /[\p{C}\p{Zl}\p{Zp}]/u;
 
 /** The zone's name as the platform writes it, or undefined if it is not a zone the record can hold. */
 function timeZone(zone: string): string | undefined {
@@ -116,7 +117,7 @@ function timeZone(zone: string): string | undefined {
 /** A name for the screen: in quotes, with every character that could move the cursor or reorder the line written as a code. */
 export function shown(name: string): string {
   return JSON.stringify(name).replace(
-    /\p{C}/gu,
+    /[\p{C}\p{Zl}\p{Zp}]/gu,
     (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16)}}`,
   );
 }

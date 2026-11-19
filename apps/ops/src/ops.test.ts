@@ -190,11 +190,13 @@ describe("each command writes its two rows", () => {
   test("a name from the database is printed so that no character in it can move the cursor or reorder the line", async () => {
     await administrator.query(
       "INSERT INTO tenants (name, pack, time_zone, default_language) VALUES ($1, 'booking', 'UTC', 'en')",
-      ["a\u001b[2Jb\u009bc‮d\ne\u0007"],
+      ["a\u001b[2Jb\u009bc\u202ed\ne\u0007\u2028f\u2029"],
     );
     await ops("tenant", "list", "--as", "Zeeshan");
-    expect(lines[1]?.endsWith('"a\\u001b[2Jb\\u{9b}c\\u{202e}d\\ne\\u0007"')).toBe(true);
-    expect(/\p{C}/u.test(lines.join(""))).toBe(false);
+    expect(
+      lines[1]?.endsWith('"a\\u001b[2Jb\\u{9b}c\\u{202e}d\\ne\\u0007\\u{2028}f\\u{2029}"'),
+    ).toBe(true);
+    expect(/[\p{C}\p{Zl}\p{Zp}]/u.test(lines.join(""))).toBe(false);
     expect(shown("Noor نور")).toBe('"Noor نور"');
   });
 
@@ -352,6 +354,11 @@ describe("a command that fails, or is written wrongly", () => {
       ["tenant", "create", "--name", "a\u202eb", ...CREATE.slice(4), "--as", "a"],
       "--name has a character that cannot be printed",
     ],
+    [
+      ["tenant", "create", "--name", "a\u2028b", ...CREATE.slice(4), "--as", "a"],
+      "--name has a character that cannot be printed",
+    ],
+    [["log", "show", "--limit", "01", "--as", "a"], "--limit is a whole number from 1 to 1000"],
   ])("%j is refused before anything is recorded or done", async (argv, message) => {
     const attempt = ops(...argv);
     await expect(attempt).rejects.toBeInstanceOf(UsageError);
@@ -572,6 +579,29 @@ describe("the program itself", () => {
     });
   }, 30_000);
 
+  test("done, but the second row could not be written: the result, a warning not to repeat it, and exit 3", async () => {
+    await administrator.query(`
+      CREATE FUNCTION refuse_finished() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'refused for the test'; END $$;
+      CREATE TRIGGER refuse_finished BEFORE INSERT ON operator_log
+        FOR EACH ROW WHEN (NEW.phase = 'finished') EXECUTE FUNCTION refuse_finished();`);
+    try {
+      const listed = await program(["tenant", "list", "--as", "Zeeshan"], {
+        PSA_DB_CROSS_URL: database.url(CROSS_ROLE),
+      });
+      expect(listed).toEqual({
+        status: 3,
+        stdout: "0 tenants\n",
+        stderr:
+          "ops: the command was done, but its second row could not be recorded; do not run it again\n",
+      });
+    } finally {
+      await administrator.query(
+        "DROP TRIGGER refuse_finished ON operator_log; DROP FUNCTION refuse_finished()",
+      );
+    }
+  }, 30_000);
+
   test("without its setting, or with the wrong role's, it does nothing and shows no address", async () => {
     const none = await program(["tenant", "list", "--as", "Zeeshan"], {});
     expect(none).toEqual({ status: 1, stdout: "", stderr: "ops: PSA_DB_CROSS_URL is not set\n" });
@@ -629,7 +659,8 @@ describe("nothing but ops can reach the operator's functions (ADR 0011, rule 2)"
   });
 
   test("inside the database package nothing but the module itself names it, so nothing passes it on", () => {
-    const NAMED = /operator(\.ts)?["'`]/;
+    // A quote, or the `?` or `#` that would load the module a second time under another address.
+    const NAMED = /operator(\.ts)?[?#"'`]/;
     const inside = sources()
       .filter(
         (path) => path.startsWith("packages/db/src/") && path !== "packages/db/src/operator.ts",
@@ -638,6 +669,7 @@ describe("nothing but ops can reach the operator's functions (ADR 0011, rule 2)"
     expect(inside).toEqual([]);
     expect(NAMED.test('export * as things from "./operator.ts";')).toBe(true);
     expect(NAMED.test('export { createTenant as makeTenant } from "./operator";')).toBe(true);
+    expect(NAMED.test('export { createTenant as makeTenant } from "./operator.ts?v";')).toBe(true);
   });
 
   test("the package's main entry, which the API and the worker import, gives out none of them under any name", () => {
