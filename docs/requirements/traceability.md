@@ -48,9 +48,10 @@ Behaviour required by `nfr.md` that no story carries. Each gets an issue when it
 | Work | Requirement | Milestone | Issue | Tests |
 | --- | --- | --- | --- | --- |
 | Daily retention job | NFR-V4 | M5 |  |  |
-| Dead-letter queue and operator alert | NFR-R5 | M2 | #266 | `packages/db/test/jobs.test.ts`: retries, dead-letter, alert queued. Nothing delivers the alert yet (#282) |
+| Dead-letter queue and operator alert | NFR-R5 | M2 | #266, #294 | `packages/db/test/jobs.test.ts`: retries, dead-letter, alert queued. `apps/ops/src/ops.test.ts`: the operator lists dead jobs and retries one. Nothing delivers the alert yet (#282) |
 | Trial second pack `faq-only` | NFR-M1 | M5 |  |  |
 | Health and readiness endpoints, structured logs | NFR-O1, NFR-O2 | M2 | #266, #289, #291 | `packages/db/test/jobs.test.ts`: the heartbeat. `apps/api/src/app.test.ts`: `/healthz`, `/readyz`. `apps/worker/src/worker.test.ts`: the worker records it. Logs are one line per fault, not yet structured throughout (#288, #290) |
+| Operator commands and their record; no operator route | ADR 0011, T39, NFR-S8 (in part) | M2 | #294 | `apps/ops/src/ops.test.ts`: two rows for each command, no role can change one, only `apps/ops` imports the operator's functions. `apps/api/src/app.test.ts`: the route inventory |
 | No duplicate replies; the send policy | NFR-R2 | M2 | #289, #291 | `packages/core/src/send-policy.test.ts`: every sequence of outcomes, by class. `apps/worker/src/worker.test.ts`: the restart test at four points |
 | Replies of one conversation in order | NFR-R6, NFR-R7 | M2 | #291 (R6 in part) | `apps/worker/src/worker.test.ts`: two workers in one process, bursts of five. The delivery wait of NFR-R7 is not built (#290) |
 | Webhook authenticity and unauthenticated load | NFR-S2, #154 | M2 | #267 | `apps/api/src/webhook.test.ts`: 401 and nothing handed on, the size limit, the limit on bad signatures. That nothing is stored needs the sink of #268 |
