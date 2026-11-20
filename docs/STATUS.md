@@ -350,6 +350,22 @@ M0 Inception met its exit criteria on 2026-11-16; see
   exception, and import no pack. The README says what runs and how to try
   it. The M2 retro is `docs/retros/m2-walking-skeleton.md`.
 
+- 2026-11-20 — U10's code review: one High finding, four Medium, four Low
+  (`docs/reviews/2026-11-20-gate4-u10-end-to-end.md`). **High: the stack
+  worked once per database.** The stand-in for WhatsApp numbered its
+  messages from 1 at every start, so after a restart with the database
+  kept, the product took new messages for old ones and answered nothing.
+  CI had not seen it because CI always starts empty. Fixed: every start of
+  the stand-in has its own part in its identifiers, and the end-to-end
+  test now stops and starts it against a used database. Also fixed: the
+  placeholder mark is found however it is written; the channel address
+  must be Meta's origin exactly; the set-up script runs only in
+  development and can be run again after it half-finished; `ops channel
+  connect` no longer offers a channel the worker cannot send on; the
+  boundary test ignores case and punctuation, has more words, and scans
+  every folder but four named ones. Documents that said "every password is
+  refused" now say what is true: marked ones are.
+
 ## Next
 
 1. Maintainer reviews and merges U10 (#271), **after its code review and

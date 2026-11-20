@@ -167,8 +167,8 @@ flowchart TB
         mock["channel-mock"]
         ai["ai<br/>LlmClient, prompt loader,<br/>profile builder, claim checker, traces"]
         pack["pack<br/>interface"]
-        booking["pack-booking"]
-        faq["pack-faq-only"]
+        booking["packs/booking"]
+        faq["packs/faq-only"]
     end
     api --> core
     api --> db
@@ -196,8 +196,8 @@ flowchart TB
 | `channel-mock` | A second implementation that lives in memory, with a format of its own. It imitates nothing; it is what a test uses when the test is not about WhatsApp, and it is the second implementation that shows the interface fits more than one channel (NFR-M2) |
 | `ai` | `LlmClient` and its adapters; loading versioned prompts; building the business profile; validating structured output; checking claims; writing traces. |
 | `pack` | The interface a pack implements (below). |
-| `pack-booking` | Everything about appointments: the booking and reminder state machines, the reminder timing rule, slots and capacity, its tables and migrations, its tools, templates, buttons, timers, API routes, settings and metrics (ADR 0012). As built in M2 it holds only the list of its names, which a test keeps out of the core; the pack itself is M5's |
-| `pack-faq-only` | The trial pack: a prompt fragment and evals. It uses the core business profile and adds no code. |
+| `packs/booking` | Everything about appointments: the booking and reminder state machines, the reminder timing rule, slots and capacity, its tables and migrations, its tools, templates, buttons, timers, API routes, settings and metrics (ADR 0012). As built in M2 it holds only the list of its names, which a test keeps out of the core; the pack itself is M5's |
+| `packs/faq-only` | The trial pack: a prompt fragment and evals. It uses the core business profile and adds no code. |
 | `integrations` | Reserved for v1.1. Empty in v1.0. |
 
 **The two mocks** (Gate 2 finding S34, decided in M2 unit U6). They are not

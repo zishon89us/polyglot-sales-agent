@@ -225,7 +225,7 @@ written.
 ## 4. Booking
 
 This machine and the reminder machine of section 5 are implemented in
-`packages/pack-booking`, not in `packages/core` (ADR 0012).
+`packages/packs/booking`, not in `packages/core` (ADR 0012).
 
 | State | Meaning |
 | --- | --- |

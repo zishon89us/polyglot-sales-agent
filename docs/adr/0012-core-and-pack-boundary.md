@@ -191,19 +191,31 @@ before the test is switched on.
 
 Made while switching the test on (issue #271). The decision is unchanged.
 
-- **The test.** `packages/pack-booking/src/boundary.test.ts` runs in
+- **The test.** `packages/packs/booking/src/boundary.test.ts` runs in
   `make check` and in CI. It fails if any line of the core's code or
   migrations holds one of the pack's words, if the core imports a pack, or
   if a core package depends on one. The words are kept by the pack, in
-  `packages/pack-booking/src/names.ts`: its tables, routes and settings,
-  and the things it deals in. They are matched as parts of longer names.
-- **What "the core" is for the test:** `packages/core`, `packages/db` and
-  its migrations, `packages/channel`, `packages/channel-whatsapp`,
-  `apps/api` and `apps/worker`. Tests are not scanned for words, since a
-  test may speak of an appointment; they are scanned for imports.
-- **The pack so far** is that list and that test. Its folder is
-  `packages/pack-booking`, not `packages/packs/booking` as earlier
-  documents wrote it: the workspace takes one level of folders.
+  `packages/packs/booking/src/names.ts`.
+- **How a word is matched.** Each line and each word is compared in lower
+  case with `_` and `-` taken out, so `blocked_periods`, `blockedPeriod`
+  and `blocked-periods` are one word, and a word is found inside a longer
+  name. The list holds the pack's tables, routes and settings, and the
+  things it deals in: bookings, reminders, blocked periods, slots,
+  capacity, the booking horizon, minimum notice, the change cut-off,
+  rescheduling, appointments, no-shows.
+- **What the list does not hold,** because the words are everyone's: the
+  Confirm and Cancel buttons, calendar dates. A core that named those for
+  a booking's sake would pass.
+- **What "the core" is for the test:** every folder under `apps` and
+  `packages` but four that are named with their reasons: `packages/packs`
+  (the packs), `apps/ops` (the operator's tool, which must name the packs
+  a tenant can be created on), `apps/mock-whatsapp` and
+  `packages/channel-mock` (stand-ins, in no deployment). A new app or
+  package is scanned without anyone having to add it. Files named as tests
+  are not scanned for words, since a test may speak of an appointment;
+  they are scanned for imports. A file can therefore escape the word scan
+  by being named a test.
+- **The pack so far** is that list and that test.
 - **Accepted lines, four of them,** each pinned by its text so that a fifth
   fails: three comments in `packages/core/src/names.ts` that explain the
   exception below, and one comment in migration 0002, which is applied and
@@ -215,12 +227,11 @@ Made while switching the test on (issue #271). The decision is unchanged.
   machine, are in documents only: the steps that would hold them are not
   built. They were to be routed through pack hooks before this test was
   switched on. They were not, because there is nothing yet to route; the
-  test will fail the unit that builds those steps if it names them, which
-  is when the hooks are due (M3 and M5).
+  test will fail the unit that builds those steps if it names rescheduling
+  or a booking, which is when the hooks are due (M3 and M5).
 - **Import test, in part.** "`apps/api` and `apps/worker` reach packs only
   through the registry" is, until a registry exists, "reach no pack at
   all", and that is what is tested.
 - **Honest limit.** A word list catches a name, not an idea: core code
   could still be shaped around appointments without using any of these
   words. The trial pack at the end of M5 remains the real check.
-

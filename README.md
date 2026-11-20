@@ -116,8 +116,8 @@ no dashboard yet; the diagram above is the design, and the worker's two
 boxes are still to be built (M3).
 
 There are no eval scores or benchmarks, because no model is called yet.
-None will appear here until they are real. The tests, 891 of them at the
-end of M2, run on every pull request.
+None will appear here until they are real. The tests, over 900 of them at
+the end of M2, run on every pull request.
 
 ## Try it
 
@@ -130,9 +130,9 @@ docker compose up --build
 Then open <http://127.0.0.1:4010>, the page of the stand-in for WhatsApp,
 and send a message as a customer to the number `100000000000002`. The reply
 that appears is the product's echo. `make e2e` does the same from the
-command line. Everything listens on your machine only, and every password
-in the files is a placeholder: the product refuses to start with them when
-told it is in production.
+command line. Everything is published to your machine only. The secrets in
+the files are placeholders, each marked `local-only`, and the product
+refuses to start with a marked one when told it is in production.
 
 ## How this project is built
 
