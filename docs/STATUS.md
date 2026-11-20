@@ -301,11 +301,45 @@ M0 Inception met its exit criteria on 2026-11-16; see
   15 minutes with no worker running the waiting replies are not sent and
   those customers get no answer; each is reported in the worker's log.
 
+- 2026-11-19 — U8's fixes merged as #292. M2 unit U9 (#270): the
+  operator's commands. `ops tenant create`, `tenant list`, `jobs
+  list-dead`, `jobs retry` and `log show`, run on the server with the
+  cross-tenant role. Each writes two rows to `operator_log`, one before it
+  acts and one with how it ended; no role can change or remove a row by a
+  plain statement, and the application role cannot even read it. `ops`
+  records identifiers and short settings only. A test fails if any file outside
+  `apps/ops` imports the operator's functions, and another lists the API's
+  routes: there is no operator route. Each command was also run by hand.
+  **Decided by the agent:** no privilege at all for the application role
+  (ADR 0011 allowed insert and read), the tenant's name not recorded,
+  `log show` added. **Not built:** the owner's invitation (M4), a command
+  to connect a number to a tenant, tenant state (#293).
+
+- 2026-11-19 — U9's code review: no High finding, five Medium, six Low
+  (`docs/reviews/2026-11-19-gate4-u9-ops.md`). Fixed: three ways the
+  operator's functions could still be passed to the API unnoticed; the
+  operator's role could date a row back, and now cannot set a row's time
+  or identifier; a valid time zone written with a plus sign failed with a
+  bare database code, and is now refused with a reason; a tenant's name
+  could carry characters that reorder a terminal line; a command is now
+  checked in full before any connection is made. Stated, not changed: the
+  migration role, which owns the log, can remove its guard with a schema
+  change, and the pattern on recorded values does not by itself keep
+  every personal value out. Two sentences that said more than that are
+  corrected.
+
+- 2026-11-19 — The fixes were checked by a second agent
+  (`docs/reviews/2026-11-19-gate4-u9-verification.md`): five findings,
+  all Low, all fixed. It confirmed every fix from the review, and ran the
+  one path that had no test (a command done but half recorded exits 3),
+  which now has one.
+
 ## Next
 
-1. Maintainer merges the fixes to U8's review (second pull request for
-   #269), **after the verification of those fixes is in**.
-2. M2 unit U9: operator commands (#270).
+1. Maintainer reviews and merges U9 (#270), **after its code review and
+   the verification of its fixes are both in**.
+2. M2 unit U10: end to end, the production guard and the pack boundary
+   (#271), then the M2 retro and tag.
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);

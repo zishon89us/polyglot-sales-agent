@@ -1,0 +1,14 @@
+{
+  "name": "@polyglot-sales-agent/ops",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The operator's commands, run on the server (ADR 0011).",
+  "type": "module",
+  "dependencies": {
+    "@polyglot-sales-agent/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1"
+  }
+}

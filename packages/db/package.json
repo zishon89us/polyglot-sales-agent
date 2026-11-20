@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./operator": "./src/operator.ts",
     "./testing": "./test/harness.ts"
   },
   "dependencies": {

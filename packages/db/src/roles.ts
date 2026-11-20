@@ -14,6 +14,7 @@ export type Role = (typeof ROLES)[number];
 /** Tables in the public schema that deliberately have no tenant policy, each with the reason. */
 export const UNSCOPED_TABLES: Readonly<Record<string, string>> = {
   channel_routes: "read to find the tenant of a webhook, before a tenant is known",
+  operator_log: "what the operator did through ops; belongs to no tenant; insert-only",
   schema_migrations: "the migration runner's own record",
   unparsed_events: "a webhook that could not be read has no tenant; metadata only",
   unroutable_events: "an event for a receiving number no tenant has; metadata only",

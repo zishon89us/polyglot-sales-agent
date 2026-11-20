@@ -513,6 +513,17 @@ describe("the sink stops between steps once its deadline has passed", () => {
   });
 });
 
+describe("the route inventory (NFR-S8; ADR 0011: there is no operator route)", () => {
+  test("the API answers on these paths and methods and on no other", () => {
+    const routes = api
+      .printRoutes({ commonPrefix: false })
+      .split("\n")
+      .map((line) => line.replace(/^[^/]*/, "").trim())
+      .filter((line) => line !== "");
+    expect(routes).toEqual(["/healthz (GET)", "/readyz (GET)", "/webhooks/whatsapp (GET, POST)"]);
+  });
+});
+
 describe("health", () => {
   test("alive and ready when both database roles answer", async () => {
     const alive = await api.inject({ method: "GET", url: "/healthz" });
@@ -669,7 +680,9 @@ describe("only packages/db can reach the database (ADR 0003, amendment of 2026-1
   // entry, which do give a connection; and a module name that is built,
   // escaped or resolved at run time, which no pattern can read.
   const WAYS_ROUND = [
-    /["'`]@polyglot-sales-agent\/db\/[^"'`]*["'`]/,
+    // Any entry of the package but its main one, and the operator's, which a test in
+    // `apps/ops` keeps to that app and which gives no connection either.
+    /["'`]@polyglot-sales-agent\/db\/(?!operator["'`])[^"'`]*["'`]/,
     /["'`][^"'`]*\/db\/(src|test)\/[^"'`]*["'`]/,
     /\bcreateRequire\b/,
     /\bimport\.meta\.resolve\b/,

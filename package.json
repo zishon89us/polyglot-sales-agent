@@ -18,7 +18,8 @@
     "commitlint": "commitlint --from origin/main --to HEAD --verbose",
     "lint:openapi": "redocly lint docs/design/openapi.yaml",
     "check:docs": "node tools/check-docs.ts",
-    "audit": "pnpm audit --audit-level high"
+    "audit": "pnpm audit --audit-level high",
+    "ops": "node --env-file-if-exists=.env apps/ops/src/main.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",

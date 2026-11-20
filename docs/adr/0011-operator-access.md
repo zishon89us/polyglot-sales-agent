@@ -155,3 +155,72 @@ dead-letter commands in M2.
 - Issue #162 covers the separation of database roles this relies on.
 - Issue #161, which this closes, also asked whether an owner can switch the
   assistant off; that part moves to OQ-12.
+
+## Amendment, 2026-11-19: as built in M2 unit U9
+
+Made while building the commands (issue #270). The decision is unchanged.
+Each point is the agent's and awaits the maintainer.
+
+- **The application role gets nothing on `operator_log`.** Rule 3 said the
+  application and cross-tenant roles "may insert into it and read it".
+  Nothing the application role does needs either, and it is the role that
+  serves requests from the internet, so it is granted no privilege on the
+  table. Only the cross-tenant role, which `ops` connects as, may insert
+  and read, and it may not choose a row's identifier or its time, so a row
+  cannot be dated back. No role but the table's owner holds the privilege
+  to update, delete or truncate, and a trigger refuses all three, the
+  owner's plain statements included.
+- **What that does not stop.** The owner of the table, which is the
+  migration role, can disable or drop the trigger, replace its function,
+  add a rule, or drop the table; the trigger guards against a privilege
+  granted by mistake, not against the owner. The cross-tenant role can
+  insert a row for a command that never ran, under any name, or a
+  `finished` row with no `started` row: the record shows what was written
+  through that role, and `ops` is the only code that writes to it.
+- **What a row holds.** `invocation_id` ties a command's two rows.
+  `arguments` is meant for identifiers and short settings. The database
+  refuses a value with a space, an `@` or a `+` in it, which shuts out an
+  address and a number written with a plus sign, not everything personal:
+  a row of digits or a name joined with dots would fit. What keeps
+  personal data out is that `ops` records only a pack, a time zone, a
+  language, a limit and a job's identifier. A tenant's name is not
+  recorded, since a business's name can be a person's; the finished row
+  has the tenant's identifier in `subject_id`. `outcome` is `ok` or a
+  short code.
+- **The first row is committed before the action**, on its own. If it
+  cannot be written the action does not run. If the process stops after
+  the action and before the second row, or the second row cannot be
+  written, the record shows a command that started and never finished. In
+  the second case `ops` prints the result all the same, says the record is
+  incomplete, and exits with status 3, so that the operator does not run
+  the command again.
+- **A command is checked in full before any connection is made.** One that
+  is written wrongly is refused with status 2 and nothing recorded. A
+  tenant's name may hold no control or format character; a time zone is
+  stored as the platform writes it and may hold no plus sign, so the zones
+  named `Etc/GMT+5` and the like are not taken.
+- **Commands built:** `tenant create` (the tenant only: name, pack, time
+  zone, default language; no owner and no invitation until M4, #201),
+  `tenant list`, `jobs list-dead`, `jobs retry`, and `log show`, which was
+  added so that the record can be read without SQL: the newest 50 rows, or
+  up to 1,000 with `--limit`; older rows need SQL. A retried job that
+  sends messages does not send those that have waited more than 15
+  minutes (architecture, "Sending a message once"). Commands that only
+  read are recorded too. `service degraded` and `events list-unparsed` are
+  not built.
+- **Rule 2, the one module.** The operator's functions are an entry of
+  their own in the database package, and tests fail if any file outside
+  `apps/ops` imports it, if any other file of the database package names
+  it, if the package's main entry gives out any of its functions under any
+  name, or if any file outside `apps/ops` imports from `apps/ops`. The
+  type check is part of the guard: a module address made to load a second
+  copy of the functions is refused by it. This is the same kind of guard as the
+  driver boundary of ADR 0003: against a shortcut taken by accident.
+- **The route inventory** is a test: the API answers on `/healthz`,
+  `/readyz` and `/webhooks/whatsapp`, and on nothing else.
+- **"The only way a tenant is created outside tests"** holds in that no
+  other code path creates one. Nothing stops a person with the database
+  doing it by hand, as the decision already says of the record.
+
+What is not built is listed in #293.
+

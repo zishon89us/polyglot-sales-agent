@@ -40,6 +40,8 @@ const PRIVILEGES = {
     channel_accounts: "INSERT,SELECT",
     channel_routes: "SELECT",
     jobs: "DELETE,INSERT,SELECT,UPDATE",
+    // To read; what it may insert is by column, below.
+    operator_log: "SELECT",
     tenants: "INSERT,SELECT",
     unparsed_events: "INSERT,SELECT",
     unroutable_events: "INSERT,SELECT",
@@ -425,10 +427,30 @@ describe("privileges", () => {
        WHERE attacl IS NOT NULL AND attrelid IN
          (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)`,
     );
-    // The one table with privileges by column (ADR 0004, amendment).
-    expect([...new Set(columns.rows.map((row) => row.table))]).toEqual(["jobs"]);
-    expect(columns.rows.map((row) => row.attname).sort()).toEqual(
+    // The two tables with privileges by column: `jobs` (ADR 0004, amendment) and
+    // `operator_log`, where the cross-tenant role may not choose a row's identifier or time.
+    const of = (table: string) =>
+      columns.rows
+        .filter((row) => row.table === table)
+        .map((row) => row.attname)
+        .sort();
+    expect([...new Set(columns.rows.map((row) => row.table))].sort()).toEqual([
+      "jobs",
+      "operator_log",
+    ]);
+    expect(of("jobs")).toEqual(
       ["id", "payload", "run_at", "state", "subject_id", "tenant_id", "type"].sort(),
+    );
+    expect(of("operator_log")).toEqual(
+      [
+        "arguments",
+        "command",
+        "invocation_id",
+        "operator_name",
+        "outcome",
+        "phase",
+        "subject_id",
+      ].sort(),
     );
   });
 
@@ -463,6 +485,22 @@ describe("privileges", () => {
         settings: null,
         app: true,
         cross: true,
+        everyone: false,
+      },
+      {
+        name: "operator_arguments_ok",
+        definer: false,
+        settings: null,
+        app: false,
+        cross: true,
+        everyone: false,
+      },
+      {
+        name: "operator_log_is_insert_only",
+        definer: false,
+        settings: null,
+        app: false,
+        cross: false,
         everyone: false,
       },
     ]);
