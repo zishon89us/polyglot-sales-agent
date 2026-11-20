@@ -34,7 +34,7 @@ async function listening(app: FastifyInstance): Promise<string> {
 }
 
 async function mock(options: Partial<MockOptions> = {}) {
-  const app = createMockWhatsApp({ appSecret: SECRET, accessToken: TOKEN, ...options });
+  const app = createMockWhatsApp({ appSecret: SECRET, accessToken: TOKEN, run: "", ...options });
   const baseUrl = await listening(app);
   const channel = createWhatsAppChannel({
     appSecrets: [SECRET],
@@ -364,11 +364,50 @@ describe("the mock's own controls", () => {
     expect(await (await fetch(`${baseUrl}/mock/sent`)).text()).not.toContain(TOKEN);
   });
 
-  test("it listens on this machine only", () => {
+  test("it listens on this machine only, unless told to serve a container, and never in production", () => {
     expect(MOCK_HOST).toBe("127.0.0.1");
     const main = readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
-    expect(main).toContain("host: MOCK_HOST");
-    expect(main).not.toMatch(/0\.0\.0\.0|::/);
+    // This machine unless the setting says otherwise, and the setting has one other value.
+    expect(main).toContain('(process.env["PSA_MOCK_HOST"] ?? "").trim() || MOCK_HOST');
+    expect(main).toContain('if (host !== MOCK_HOST && host !== "0.0.0.0") {');
+    expect(main).not.toContain("::");
+    // The refusal comes before anything listens. `tools/e2e.test.ts` runs the program and sees both.
+    expect(main.indexOf("refuseInProduction(")).toBeGreaterThan(0);
+    expect(main.indexOf("refuseInProduction(")).toBeLessThan(main.indexOf("app.listen("));
+  });
+
+  test("two starts of the mock never give the same identifier, to a message in or a message out", async () => {
+    const ids: string[] = [];
+    for (let start = 0; start < 2; start += 1) {
+      const app = createMockWhatsApp({
+        appSecret: SECRET,
+        accessToken: TOKEN,
+        webhookUrl: "http://127.0.0.1:9/none",
+        fetch: async () => new Response(null, { status: 200 }),
+      });
+      const inbound = await app.inject({
+        method: "POST",
+        url: "/mock/inbound",
+        payload: { phoneNumberId: "100000000000002", from: "+15550142", text: "hello" },
+      });
+      const sent = await app.inject({
+        method: "POST",
+        url: "/v27.0/100000000000002/messages",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: {
+          messaging_product: "whatsapp",
+          to: "+15550142",
+          type: "text",
+          text: { body: "x" },
+        },
+      });
+      ids.push(inbound.json().id, sent.json().messages[0].id);
+      await app.close();
+    }
+    expect(new Set(ids).size).toBe(4);
+    for (const id of ids) {
+      expect(id).toMatch(/^wamid\.MOCK(IN)?[A-Z0-9]{9,}[0-9]{6}$/);
+    }
   });
 
   test("a redirect from the channel's address is not followed: the token goes nowhere else", async () => {

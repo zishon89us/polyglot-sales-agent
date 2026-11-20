@@ -1,0 +1,10 @@
+{
+  "name": "@polyglot-sales-agent/pack-booking",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The booking pack (ADR 0012). So far only the names the core must not use; the pack itself is M5's.",
+  "type": "module",
+  "exports": {
+    ".": "./src/names.ts"
+  }
+}

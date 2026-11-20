@@ -10,6 +10,7 @@
 
 import type { Database } from "@polyglot-sales-agent/db";
 import {
+  connectChannel,
   createTenant,
   listDeadJobs,
   listTenants,
@@ -20,6 +21,13 @@ import {
 
 /** The packs a tenant can be created on (data model, `tenants.pack`). */
 export const PACKS = ["booking", "faq-only"] as const;
+
+/**
+ * The channels a number can be connected on: those the worker can send on.
+ * The data model's other value, `mock`, is the in-memory channel of the
+ * tests; a number connected on it would receive and never be answered.
+ */
+export const CHANNELS = ["whatsapp"] as const;
 
 /** The most rows `log show` reads at once. */
 export const LOG_LIMIT_MAX = 1_000;
@@ -41,6 +49,7 @@ export const USAGE = `ops: the operator's commands. Each needs --as <your name>.
 
   ops tenant create --name <name> --pack <${PACKS.join("|")}> --time-zone <zone> --language <tag> --as <name>
   ops tenant list --as <name>
+  ops channel connect --tenant <tenant id> --channel <${CHANNELS.join("|")}> --number-id <the channel's id of the number> --as <name>
   ops jobs list-dead --as <name>
   ops jobs retry <job id> --as <name>
   ops log show [--limit <1 to ${LOG_LIMIT_MAX}>] --as <name>
@@ -49,6 +58,11 @@ export const USAGE = `ops: the operator's commands. Each needs --as <your name>.
             and underscores, at most 64. It is a claim, not proof.
 --time-zone a named IANA zone, such as Asia/Riyadh. Zones written with a
             plus sign, such as Etc/GMT+5, are not taken.
+channel connect
+            connects a receiving number to a tenant, so that messages to it
+            reach that tenant. --number-id is
+            the channel's identifier for the number, digits only, not the
+            phone number itself.
 jobs retry  queues the job again with its retries restored. A job that sends
             messages will not send those that have waited over 15 minutes:
             they are marked as expired.
@@ -241,6 +255,31 @@ export function prepare(argv: readonly string[]): Prepared {
           );
         }
       },
+    );
+  }
+
+  if (command === "channel connect") {
+    only(parsed, ["as", "tenant", "channel", "number-id"], 2);
+    const tenantId = need(parsed, "tenant");
+    const channel = need(parsed, "channel");
+    const receivingNumberId = need(parsed, "number-id");
+    if (!UUID.test(tenantId)) {
+      throw new UsageError("--tenant is a tenant's identifier, as tenant list shows it");
+    }
+    if (!(CHANNELS as readonly string[]).includes(channel)) {
+      throw new UsageError(`--channel is one of: ${CHANNELS.join(", ")}`);
+    }
+    // The channel's own identifier of the number: digits, and never written with a plus sign.
+    if (!/^[0-9]{5,20}$/.test(receivingNumberId)) {
+      throw new UsageError("--number-id is the channel's identifier of the number: 5 to 20 digits");
+    }
+    return ready(
+      { tenantId, channel, receivingNumberId },
+      async (cross) => {
+        const id = await connectChannel(cross, { tenantId, channel, receivingNumberId });
+        return { value: id, subjectId: id };
+      },
+      (id, output) => output.out(`channel connected: ${id}`),
     );
   }
 

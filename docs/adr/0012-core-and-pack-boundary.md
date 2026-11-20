@@ -186,3 +186,56 @@ before the test is switched on.
 - Gate 2 structure review, finding S4:
   `docs/reviews/2026-11-16-gate2-design-structure.md`.
 - NFR-M1; ADR 0001; `architecture.md` sections 5 and 8.
+
+## Amendment, 2026-11-20: the boundary test is on (M2 unit U10)
+
+Made while switching the test on (issue #271). The decision is unchanged.
+
+- **The test.** `packages/packs/booking/src/boundary.test.ts` runs in
+  `make check` and in CI. It fails if any line of the core's code or
+  migrations holds one of the pack's words, if the core imports a pack, or
+  if a core package depends on one. The words are kept by the pack, in
+  `packages/packs/booking/src/names.ts`.
+- **How a word is matched.** Each line, each file's name and each word is
+  compared in lower case with everything but letters and digits taken out,
+  so `blocked_periods`, `blockedPeriod`, `blocked-periods` and "blocked
+  period" are one word, and a word is found inside a longer name. The list holds the pack's tables, routes and settings, and the
+  things it deals in: bookings, reminders, blocked periods, slots,
+  capacity, the booking horizon, minimum notice, the change cut-off,
+  rescheduling, appointments, no-shows.
+- **What the list does not hold,** because the words are everyone's: the
+  Confirm and Cancel buttons, calendar dates. A core that named those for
+  a booking's sake would pass.
+- **What "the core" is for the test:** every folder under `apps` and
+  `packages` but four that are named with their reasons: `packages/packs`
+  (the packs), `apps/ops` (the operator's tool, which must name the packs
+  a tenant can be created on), `apps/mock-whatsapp` and
+  `packages/channel-mock` (stand-ins, in no deployment). A new app or
+  package is scanned without anyone having to add it. Files named as tests
+  are not scanned for words, since a test may speak of an appointment;
+  they are scanned for imports. A file can therefore escape the word scan
+  by being named a test.
+- **What is not scanned at all:** files that are not code or SQL (a JSON
+  or YAML file), and anything outside `apps` and `packages` (`tools`, the
+  root). A name put together at run time from pieces, and another word for
+  the same thing ("reservation", "availability"), pass.
+- **The pack so far** is that list and that test.
+- **Accepted lines, four of them,** each pinned by its text so that a fifth
+  fails: three comments in `packages/core/src/names.ts` that explain the
+  exception below, and one comment in migration 0002, which is applied and
+  cannot be reworded.
+- **The known exceptions, as they stand.** `late-change` is in code, in the
+  core's closed list of handover reasons, and the test allows that name in
+  that one file (#278). The other two, the Reschedule and Cancel buttons in
+  the order of checks and "contact books in chat" in the permission
+  machine, are in documents only: the steps that would hold them are not
+  built. They were to be routed through pack hooks before this test was
+  switched on. They were not, because there is nothing yet to route; the
+  test will fail the unit that builds those steps if it names rescheduling
+  or a booking, which is when the hooks are due (M3 and M5).
+- **Import test, in part.** "`apps/api` and `apps/worker` reach packs only
+  through the registry" is, until a registry exists, "reach no pack at
+  all", and that is what is tested.
+- **Honest limit.** A word list catches a name, not an idea: core code
+  could still be shaped around appointments without using any of these
+  words. The trial pack at the end of M5 remains the real check.

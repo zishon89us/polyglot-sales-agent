@@ -66,6 +66,9 @@ importers:
       '@polyglot-sales-agent/channel-whatsapp':
         specifier: workspace:*
         version: link:../../packages/channel-whatsapp
+      '@polyglot-sales-agent/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       fastify:
         specifier: 5.12.8
         version: 5.12.8
@@ -151,6 +154,8 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+
+  packages/packs/booking: {}
 
 packages:
 

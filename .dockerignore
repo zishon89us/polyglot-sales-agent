@@ -1,0 +1,12 @@
+# Nothing of the working copy's own state goes into the image.
+.git
+.github
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+docs
+**/*.test.ts
+**/fixtures
+coverage

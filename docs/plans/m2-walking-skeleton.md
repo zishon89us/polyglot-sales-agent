@@ -96,6 +96,8 @@ Steps 1 to 4 of the order of checks and an echo reply in place of the model. The
 
 `docker compose up` gives a working stack. An end-to-end test sends a message through `mock-whatsapp` and receives the echo. Start-up refuses development components in production (#165). The places where the core still names bookings are removed and the boundary test of ADR 0012 is switched on (#237, #253). M2 retro and tag.
 
+**As built:** one image, a compose file with the database, a set-up step, the API, the worker and the mock; `tools/e2e.ts` sends a message and waits for the echo, run by a test against the real programs and by CI against `docker compose up`. `PSA_ENV` and the production guard, with `ops channel connect` so that a number can be given to a tenant without SQL. The boundary test is on; the core named bookings in code in one place only, which stays as the stated exception. The rest is in #295.
+
 ## The loop for every unit
 
 1. **Confirm the design.** Read the passages the unit implements. If they

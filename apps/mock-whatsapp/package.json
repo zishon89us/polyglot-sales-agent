@@ -6,6 +6,7 @@
   "type": "module",
   "dependencies": {
     "@polyglot-sales-agent/channel-whatsapp": "workspace:*",
+    "@polyglot-sales-agent/core": "workspace:*",
     "fastify": "5.12.8"
   },
   "devDependencies": {

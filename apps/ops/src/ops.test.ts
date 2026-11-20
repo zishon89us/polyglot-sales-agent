@@ -16,7 +16,16 @@ import {
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import * as opsCommands from "./commands.ts";
-import { PACKS, parse, RecordIncomplete, run, shown, USAGE, UsageError } from "./commands.ts";
+import {
+  CHANNELS,
+  PACKS,
+  parse,
+  RecordIncomplete,
+  run,
+  shown,
+  USAGE,
+  UsageError,
+} from "./commands.ts";
 
 let database: TestDatabase;
 let crossPool: pg.Pool;
@@ -200,6 +209,78 @@ describe("each command writes its two rows", () => {
     expect(shown("Noor نور")).toBe('"Noor نور"');
   });
 
+  test("channel connect: a message to that number now reaches that tenant; recorded by identifiers", async () => {
+    await ops(...CREATE, "--as", "Zeeshan");
+    const tenantId = lines[0]?.replace("tenant created: ", "") as string;
+    await added();
+    lines = [];
+    await ops(
+      "channel",
+      "connect",
+      "--tenant",
+      tenantId,
+      "--channel",
+      "whatsapp",
+      "--number-id",
+      "100000000000002",
+      "--as",
+      "Zeeshan",
+    );
+    const routes = await administrator.query(
+      "SELECT tenant_id, receiving_number_id FROM channel_routes",
+    );
+    expect(routes.rows).toEqual([{ tenant_id: tenantId, receiving_number_id: "100000000000002" }]);
+    const account = await administrator.query<{ id: string; channel: string }>(
+      "SELECT id, channel FROM channel_accounts",
+    );
+    expect(account.rows[0]?.channel).toBe("whatsapp");
+    expect(lines).toEqual([`channel connected: ${account.rows[0]?.id}`]);
+    const settings = { tenantId, channel: "whatsapp", receivingNumberId: "100000000000002" };
+    expect(
+      (await added()).map((row) => [
+        row.phase,
+        row.command,
+        row.arguments,
+        row.outcome,
+        row.subject_id,
+      ]),
+    ).toEqual([
+      ["started", "channel connect", settings, null, null],
+      ["finished", "channel connect", settings, "ok", account.rows[0]?.id],
+    ]);
+    // The same number again, for this tenant or another, is refused by the database and recorded.
+    await expect(
+      ops(
+        "channel",
+        "connect",
+        "--tenant",
+        tenantId,
+        "--channel",
+        "whatsapp",
+        "--number-id",
+        "100000000000002",
+        "--as",
+        "Zeeshan",
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+    // A tenant that does not exist.
+    const nobody = await ops(
+      "channel",
+      "connect",
+      "--tenant",
+      "00000000-0000-4000-8000-000000000009",
+      "--channel",
+      "whatsapp",
+      "--number-id",
+      "100000000000003",
+      "--as",
+      "Zeeshan",
+    ).catch((error) => error);
+    expect(nobody.code).toBe("23503");
+    expect((await added()).map((row) => row.outcome)).toEqual([null, "23505", null, nobody.code]);
+    expect((await administrator.query("SELECT 1 FROM channel_accounts")).rowCount).toBe(1);
+  });
+
   test("jobs list-dead: shows the jobs that were given up, without what they hold", async () => {
     const id = await deadJob();
     await administrator.query(
@@ -335,6 +416,82 @@ describe("a command that fails, or is written wrongly", () => {
     [["jobs", "retry", "--as", "a"], "too many or too few words"],
     [["jobs", "retry", "1; DROP TABLE jobs", "--as", "a"], "the job's identifier is not one"],
     [["tenant", "list", "--AS", "a"], "an option is not written as --name"],
+    [["channel", "connect", "--as", "a"], "--tenant is needed"],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "x",
+        "--channel",
+        "mock",
+        "--number-id",
+        "12345",
+        "--as",
+        "a",
+      ],
+      "--tenant is a tenant's identifier",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
+        "sms",
+        "--number-id",
+        "12345",
+        "--as",
+        "a",
+      ],
+      "--channel is one of: whatsapp",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
+        "mock",
+        "--number-id",
+        "12345",
+        "--as",
+        "a",
+      ],
+      "--channel is one of: whatsapp",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
+        "whatsapp",
+        "--number-id",
+        "+15550100",
+        "--as",
+        "a",
+      ],
+      "--number-id is the channel's identifier",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
+        "whatsapp",
+        "--number-id",
+        "1234",
+        "--as",
+        "a",
+      ],
+      "--number-id is the channel's identifier",
+    ],
     [["tenant", "list", "--as", "--name"], "--as needs a value"],
     [["tenant", "list", "--as", "Zee\u015fan"], "--as takes a name"],
     [["log", "show", "extra", "--as", "a"], "too many or too few words"],
@@ -385,6 +542,7 @@ describe("a command that fails, or is written wrongly", () => {
     for (const command of [
       "tenant create",
       "tenant list",
+      "channel connect",
       "jobs list-dead",
       "jobs retry",
       "log show",
@@ -392,6 +550,8 @@ describe("a command that fails, or is written wrongly", () => {
       expect(USAGE).toContain(`ops ${command}`);
     }
     expect(USAGE).toContain(PACKS.join("|"));
+    // The one channel the worker can send on, and no other.
+    expect(CHANNELS).toEqual(["whatsapp"]);
     expect(USAGE).toContain("letters without accents");
     expect(USAGE).toContain("waited over 15 minutes");
     expect(parse(["a", "--b", "c", "d"])).toEqual({ words: ["a", "d"], options: { b: "c" } });

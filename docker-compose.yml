@@ -1,5 +1,27 @@
-# Local development only. The password below is for a database that listens
-# on this machine alone; never reuse it anywhere else.
+# Local development only: `docker compose up --build`, then open
+# http://127.0.0.1:4010 and send a message as a customer. Every secret
+# below is a placeholder for a stack whose ports are published to this
+# machine alone. Those marked `local-only` are refused by the product when
+# PSA_ENV is production; the database administrator's is not marked, and
+# nothing checks it. Inside the compose network every container can reach
+# every other, the mock included.
+# This file is not a deployment definition, and `mock` belongs in none.
+
+x-product: &product
+  build: .
+  image: polyglot-sales-agent:dev
+  restart: "no"
+
+x-settings: &settings
+  PSA_ENV: development
+  PSA_DB_APP_URL: postgres://psa_app:local-only-app@db:5432/psa
+  PSA_DB_CROSS_URL: postgres://psa_cross:local-only-cross@db:5432/psa
+  PSA_WHATSAPP_APP_SECRET: local-only-app-signing-value
+  PSA_WHATSAPP_VERIFY_TOKEN: local-only-verify-value
+  PSA_WHATSAPP_BASE_URL: http://mock:4010
+  PSA_WHATSAPP_API_VERSION: v27.0
+  PSA_WHATSAPP_ACCESS_TOKEN: local-only-mock-token
+
 services:
   db:
     image: postgres:16
@@ -16,6 +38,67 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  # Runs once and exits: roles, migrations, and a demo tenant with a number.
+  setup:
+    <<: *product
+    command: ["sh", "tools/dev-setup.sh"]
+    environment:
+      <<: *settings
+      PSA_DB_ADMIN_URL: postgres://postgres:postgres@db:5432/psa
+      PSA_DB_MIGRATE_URL: postgres://psa_migrate:local-only-migrate@db:5432/psa
+      PSA_DB_MIGRATE_PASSWORD: local-only-migrate
+      PSA_DB_APP_PASSWORD: local-only-app
+      PSA_DB_CROSS_PASSWORD: local-only-cross
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *product
+    command: ["node", "apps/api/src/main.ts"]
+    environment:
+      <<: *settings
+      # Every interface of the container; the port is published to this machine only.
+      PSA_API_HOST: 0.0.0.0
+      PSA_API_PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    <<: *product
+    command: ["node", "apps/worker/src/main.ts"]
+    environment:
+      <<: *settings
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  # The stand-in for WhatsApp, with a page to send a message as a customer.
+  mock:
+    <<: *product
+    command: ["node", "apps/mock-whatsapp/src/main.ts"]
+    environment:
+      PSA_ENV: development
+      PSA_WHATSAPP_APP_SECRET: local-only-app-signing-value
+      PSA_MOCK_ACCESS_TOKEN: local-only-mock-token
+      PSA_MOCK_HOST: 0.0.0.0
+      PSA_MOCK_PORT: "4010"
+      PSA_MOCK_WEBHOOK_URL: http://api:3000/webhooks/whatsapp
+    ports:
+      - "127.0.0.1:4010:4010"
 
 volumes:
   db-data:

@@ -1,7 +1,10 @@
 // The API's settings, read from the environment once, at start. Everything
 // that is wrong is reported together, by name and never by value.
 
+import { type Environment, productionProblems, readEnvironment } from "@polyglot-sales-agent/core";
+
 export interface ApiConfig {
+  readonly environment: Environment;
   readonly host: string;
   readonly port: number;
   readonly appDatabaseUrl: string;
@@ -32,7 +35,15 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): A
   const portText = env["PSA_API_PORT"] ?? "3000";
   const port = /^[0-9]{1,5}$/.test(portText) ? Number(portText) : Number.NaN;
   const proxies = list(env["PSA_TRUSTED_PROXIES"] ?? "");
+  let environment: Environment = "development";
+  let environmentProblem: string | undefined;
+  try {
+    environment = readEnvironment(env);
+  } catch (error) {
+    environmentProblem = (error as Error).message;
+  }
   const config: ApiConfig = {
+    environment,
     // A blank host would make Node listen on every interface.
     host: (env["PSA_API_HOST"] ?? "").trim() || "127.0.0.1",
     port,
@@ -46,11 +57,27 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): A
     trustedProxies: proxies.length === 0 ? false : proxies,
   };
   const problems = missing.map((name) => `${name} is not set`);
+  if (environmentProblem !== undefined) {
+    problems.unshift(environmentProblem);
+  }
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     problems.push("PSA_API_PORT is not a port number");
   }
   if (problems.length > 0) {
     throw new Error(`api: ${problems.join("; ")}`);
+  }
+  // Development components and placeholder secrets have no place in production (#165).
+  const refused = productionProblems(environment, {
+    whatsappBaseUrl: config.whatsappBaseUrl,
+    secrets: {
+      PSA_DB_APP_URL: config.appDatabaseUrl,
+      PSA_DB_CROSS_URL: config.crossDatabaseUrl,
+      PSA_WHATSAPP_APP_SECRET: config.whatsappAppSecrets.join(","),
+      PSA_WHATSAPP_VERIFY_TOKEN: config.whatsappVerifyToken,
+    },
+  });
+  if (refused.length > 0) {
+    throw new Error(`api: will not start in production: ${refused.join("; ")}`);
   }
   return config;
 }

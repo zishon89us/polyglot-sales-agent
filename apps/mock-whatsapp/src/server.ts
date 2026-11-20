@@ -1,13 +1,15 @@
 // A stand-in for Meta's servers, for development and CI (R-T3). It does two
 // things: it accepts the "send a message" call the WhatsApp channel makes
 // and records it, and it sends webhooks, signed as Meta signs them, to the
-// product's webhook address. It is not part of any deployment, and it
-// listens on this machine only.
+// product's webhook address. It is not part of any deployment. Its own
+// program (`main.ts`) listens on this machine only unless told to serve a
+// container, and refuses to start in production.
 //
 // What it imitates was read from Meta's documentation on 2026-11-18; see
 // `packages/channel-whatsapp/fixtures/2026-11-18/README.md`. It imitates
 // only what the product uses.
 
+import { randomBytes } from "node:crypto";
 import { SIGNATURE_HEADER, sign } from "@polyglot-sales-agent/channel-whatsapp";
 import Fastify, { type FastifyInstance } from "fastify";
 import { TEST_PAGE } from "./page.ts";
@@ -26,6 +28,14 @@ export interface MockOptions {
   readonly fetch?: typeof fetch;
   /** For tests. Seconds since 1970. */
   readonly now?: () => number;
+  /**
+   * A part of every message identifier that differs from one start of the
+   * mock to the next. Without it a restarted mock would count from 1 again,
+   * and the product, which keeps its database, would take its first
+   * messages for ones it has seen (and refuse the identifiers of its own
+   * replies as already used). Random by default; a test may fix it.
+   */
+  readonly run?: string;
 }
 
 export interface RecordedSend {
@@ -95,6 +105,9 @@ export function inboundTextPayload(input: {
 }
 
 export function createMockWhatsApp(options: MockOptions): FastifyInstance {
+  // Letters and digits only: it goes into identifiers the product stores and matches.
+  const run =
+    options.run ?? `${Date.now().toString(36)}${randomBytes(4).toString("hex")}`.toUpperCase();
   const app = Fastify({ logger: false });
   const sent: RecordedSend[] = [];
   const failures: Failure[] = [];
@@ -133,7 +146,7 @@ export function createMockWhatsApp(options: MockOptions): FastifyInstance {
       ) {
         return reply.code(400).send(graphError(100, "Invalid parameter"));
       }
-      const id = `wamid.MOCK${String(sent.length + 1).padStart(6, "0")}`;
+      const id = `wamid.MOCK${run}${String(sent.length + 1).padStart(6, "0")}`;
       sent.push({
         id,
         phoneNumberId: request.params.phoneNumberId,
@@ -196,7 +209,7 @@ export function createMockWhatsApp(options: MockOptions): FastifyInstance {
       return reply.code(409).send({ error: "no webhook address is configured" });
     }
     inbound += 1;
-    const id = `wamid.MOCKIN${String(inbound).padStart(6, "0")}`;
+    const id = `wamid.MOCKIN${run}${String(inbound).padStart(6, "0")}`;
     const rawBody = Buffer.from(
       JSON.stringify(
         inboundTextPayload({

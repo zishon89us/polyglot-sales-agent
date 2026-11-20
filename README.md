@@ -106,11 +106,34 @@ vector database in version 1.0. Each choice has a decision record.
 | 1. Requirements | Done, reviewed | [Vision](docs/requirements/vision.md) · [36 user stories with 224 acceptance criteria](docs/requirements/user-stories.md) · [51 non-functional requirements](docs/requirements/nfr.md) · [37 risks](docs/requirements/risks.md) · [glossary](docs/requirements/glossary.md) |
 | 2. Design | Done, reviewed | [Architecture](docs/design/architecture.md) · [state machines](docs/design/state-machines.md) · [data model](docs/design/data-model.md) · [API](docs/design/api.md) and [OpenAPI file](docs/design/openapi.yaml) · [threat model](docs/design/threat-model.md) · [12 decision records](docs/adr/README.md) |
 | AI lifecycle | Planned, reviewed | [Guardrail policy](docs/ai/guardrail-policy.md) · [eval plan](docs/ai/eval-plan.md) · [compliance notes](docs/compliance.md) |
-| 3. Build | Not started | Milestones M2 to M5 in [`AGENTS.md`](AGENTS.md), section 9 |
+| 3. Build | **M2 of M2 to M5 done: the walking skeleton.** A message in, an echo out; no AI yet | [Plan](docs/plans/m2-walking-skeleton.md) · [retro](docs/retros/m2-walking-skeleton.md) · [what is built and what is not](docs/STATUS.md) |
 | 4 to 6. Verify, release, operate | Not started | |
 
-There are no test results, eval scores or benchmarks, because nothing has
-been built or run. None will appear here until they are real.
+What runs today is a skeleton: a message sent to a business's WhatsApp
+number is verified, stored once, and answered with an echo of its own
+text, through a stand-in for WhatsApp. There is no model, no booking and
+no dashboard yet; the diagram above is the design, and the worker's two
+boxes are still to be built (M3).
+
+There are no eval scores or benchmarks, because no model is called yet.
+None will appear here until they are real. The tests, over 900 of them at
+the end of M2, run on every pull request.
+
+## Try it
+
+With Docker:
+
+```sh
+docker compose up --build
+```
+
+Then open <http://127.0.0.1:4010>, the page of the stand-in for WhatsApp,
+and send a message as a customer to the number `100000000000002`. The reply
+that appears is the product's echo. `make e2e` does the same from the
+command line. Everything is published to your machine only. The secrets in
+the files are placeholders. Each but the database administrator's is
+marked `local-only`, and the product refuses to start with a marked one
+when told it is in production.
 
 ## How this project is built
 
@@ -123,8 +146,9 @@ follows is [`AGENTS.md`](AGENTS.md).
 
 At each phase gate the work is reviewed by a separate AI agent that has no
 knowledge of the session that wrote it. Its report is committed unedited,
-with the author's answer to every finding below it. The ten reports so far
-are in [`docs/reviews/`](docs/reviews/). They are worth reading for what
+with the author's answer to every finding below it. The 27 reports so far
+are in [`docs/reviews/`](docs/reviews/). From M2 on, every pull request with
+code is reviewed this way, and the fixes are then checked by a second agent. They are worth reading for what
 they found: the design review reported 20 serious defects, including a
 guardrail claim that was simply false, and two more rounds were needed
 before none remained open.
