@@ -95,6 +95,30 @@ export async function createTenant(cross: Database, tenant: NewTenant): Promise<
   return id;
 }
 
+/**
+ * Connects a channel's receiving number to a tenant and returns the new
+ * account's identifier. Creating a tenant and connecting its number are
+ * the cross-tenant role's (migration 0001).
+ *
+ * Fails with the database's code if the tenant does not exist (23503) or
+ * the number is already connected, to this tenant or another (23505).
+ */
+export async function connectChannel(
+  cross: Database,
+  account: { tenantId: string; channel: string; receivingNumberId: string },
+): Promise<string> {
+  const made = await poolOf(cross).query<{ id: string }>(
+    `INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id)
+     VALUES ($1, $2, $3) RETURNING id`,
+    [account.tenantId, account.channel, account.receivingNumberId],
+  );
+  const id = made.rows[0]?.id;
+  if (id === undefined) {
+    throw Object.assign(new Error("connectChannel: no row was made"), { code: "not-created" });
+  }
+  return id;
+}
+
 export interface TenantSummary {
   readonly id: string;
   readonly name: string;

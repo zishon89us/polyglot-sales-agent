@@ -200,6 +200,75 @@ describe("each command writes its two rows", () => {
     expect(shown("Noor نور")).toBe('"Noor نور"');
   });
 
+  test("channel connect: a message to that number now reaches that tenant; recorded by identifiers", async () => {
+    await ops(...CREATE, "--as", "Zeeshan");
+    const tenantId = lines[0]?.replace("tenant created: ", "") as string;
+    await added();
+    lines = [];
+    await ops(
+      "channel",
+      "connect",
+      "--tenant",
+      tenantId,
+      "--channel",
+      "whatsapp",
+      "--number-id",
+      "100000000000002",
+      "--as",
+      "Zeeshan",
+    );
+    const routes = await administrator.query(
+      "SELECT tenant_id, receiving_number_id FROM channel_routes",
+    );
+    expect(routes.rows).toEqual([{ tenant_id: tenantId, receiving_number_id: "100000000000002" }]);
+    const account = await administrator.query<{ id: string }>("SELECT id FROM channel_accounts");
+    expect(lines).toEqual([`channel connected: ${account.rows[0]?.id}`]);
+    const settings = { tenantId, channel: "whatsapp", receivingNumberId: "100000000000002" };
+    expect(
+      (await added()).map((row) => [
+        row.phase,
+        row.command,
+        row.arguments,
+        row.outcome,
+        row.subject_id,
+      ]),
+    ).toEqual([
+      ["started", "channel connect", settings, null, null],
+      ["finished", "channel connect", settings, "ok", account.rows[0]?.id],
+    ]);
+    // The same number again, for this tenant or another, is refused by the database and recorded.
+    await expect(
+      ops(
+        "channel",
+        "connect",
+        "--tenant",
+        tenantId,
+        "--channel",
+        "whatsapp",
+        "--number-id",
+        "100000000000002",
+        "--as",
+        "Zeeshan",
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+    // A tenant that does not exist.
+    const nobody = await ops(
+      "channel",
+      "connect",
+      "--tenant",
+      "00000000-0000-4000-8000-000000000009",
+      "--channel",
+      "mock",
+      "--number-id",
+      "100000000000003",
+      "--as",
+      "Zeeshan",
+    ).catch((error) => error);
+    expect(nobody.code).toBe("23503");
+    expect((await added()).map((row) => row.outcome)).toEqual([null, "23505", null, nobody.code]);
+    expect((await administrator.query("SELECT 1 FROM channel_accounts")).rowCount).toBe(1);
+  });
+
   test("jobs list-dead: shows the jobs that were given up, without what they hold", async () => {
     const id = await deadJob();
     await administrator.query(
@@ -335,6 +404,67 @@ describe("a command that fails, or is written wrongly", () => {
     [["jobs", "retry", "--as", "a"], "too many or too few words"],
     [["jobs", "retry", "1; DROP TABLE jobs", "--as", "a"], "the job's identifier is not one"],
     [["tenant", "list", "--AS", "a"], "an option is not written as --name"],
+    [["channel", "connect", "--as", "a"], "--tenant is needed"],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "x",
+        "--channel",
+        "mock",
+        "--number-id",
+        "12345",
+        "--as",
+        "a",
+      ],
+      "--tenant is a tenant's identifier",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
+        "sms",
+        "--number-id",
+        "12345",
+        "--as",
+        "a",
+      ],
+      "--channel is one of: whatsapp, mock",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
+        "mock",
+        "--number-id",
+        "+15550100",
+        "--as",
+        "a",
+      ],
+      "--number-id is the channel's identifier",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
+        "mock",
+        "--number-id",
+        "1234",
+        "--as",
+        "a",
+      ],
+      "--number-id is the channel's identifier",
+    ],
     [["tenant", "list", "--as", "--name"], "--as needs a value"],
     [["tenant", "list", "--as", "Zee\u015fan"], "--as takes a name"],
     [["log", "show", "extra", "--as", "a"], "too many or too few words"],
@@ -385,6 +515,7 @@ describe("a command that fails, or is written wrongly", () => {
     for (const command of [
       "tenant create",
       "tenant list",
+      "channel connect",
       "jobs list-dead",
       "jobs retry",
       "log show",
