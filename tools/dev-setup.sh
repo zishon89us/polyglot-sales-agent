@@ -28,6 +28,10 @@ tenant=$(ops tenant list | sed -n '2s/ .*//p')
 if [ -z "$tenant" ]; then
   tenant=$(ops tenant create --name "Demo Clinic" --pack booking \
     --time-zone Asia/Karachi --language en | sed -n 's/^tenant created: //p')
+  if [ -z "$tenant" ]; then
+    echo "dev-setup: the demo tenant could not be made" >&2
+    exit 1
+  fi
   echo "dev-setup: made the demo tenant $tenant"
 fi
 
@@ -37,7 +41,7 @@ number="${PSA_DEV_NUMBER_ID:-100000000000002}"
 if result=$(ops channel connect --tenant "$tenant" --channel whatsapp --number-id "$number" 2>&1); then
   echo "dev-setup: connected the number $number to the tenant $tenant"
 elif echo "$result" | grep -q '(23505)'; then
-  echo "dev-setup: the number $number is connected already"
+  echo "dev-setup: the number $number is connected already, to this tenant or another"
 else
   echo "$result" >&2
   exit 1

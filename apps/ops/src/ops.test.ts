@@ -16,7 +16,16 @@ import {
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import * as opsCommands from "./commands.ts";
-import { PACKS, parse, RecordIncomplete, run, shown, USAGE, UsageError } from "./commands.ts";
+import {
+  CHANNELS,
+  PACKS,
+  parse,
+  RecordIncomplete,
+  run,
+  shown,
+  USAGE,
+  UsageError,
+} from "./commands.ts";
 
 let database: TestDatabase;
 let crossPool: pg.Pool;
@@ -445,6 +454,21 @@ describe("a command that fails, or is written wrongly", () => {
         "--tenant",
         "00000000-0000-4000-8000-000000000001",
         "--channel",
+        "mock",
+        "--number-id",
+        "12345",
+        "--as",
+        "a",
+      ],
+      "--channel is one of: whatsapp",
+    ],
+    [
+      [
+        "channel",
+        "connect",
+        "--tenant",
+        "00000000-0000-4000-8000-000000000001",
+        "--channel",
         "whatsapp",
         "--number-id",
         "+15550100",
@@ -526,6 +550,8 @@ describe("a command that fails, or is written wrongly", () => {
       expect(USAGE).toContain(`ops ${command}`);
     }
     expect(USAGE).toContain(PACKS.join("|"));
+    // The one channel the worker can send on, and no other.
+    expect(CHANNELS).toEqual(["whatsapp"]);
     expect(USAGE).toContain("letters without accents");
     expect(USAGE).toContain("waited over 15 minutes");
     expect(parse(["a", "--b", "c", "d"])).toEqual({ words: ["a", "d"], options: { b: "c" } });

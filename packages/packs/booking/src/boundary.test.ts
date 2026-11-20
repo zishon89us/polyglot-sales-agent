@@ -95,6 +95,10 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
   test("no line of the core holds one of the pack's words, but the accepted ones", () => {
     const found: string[] = [];
     for (const file of files()) {
+      // A file's own name is looked at like a line of it.
+      if (BOOKING_WORDS.some((word) => comparable(file.path).includes(word))) {
+        found.push(`${file.path}: (the file's name)`);
+      }
       for (const line of file.lines) {
         const plain = comparable(line);
         if (BOOKING_WORDS.some((word) => plain.includes(word))) {
@@ -125,6 +129,9 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
       'buttons: ["Confirm", "Reschedule", "Cancel"]',
       "noShowRate: sessions.noShow / sessions.total",
       "no_show boolean",
+      "-- marks a no show",
+      "blocked period",
+      "apps/api/src/bookings.ts",
     ]) {
       const plain = comparable(line);
       expect(
@@ -136,6 +143,13 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
     for (const word of BOOKING_WORDS) {
       expect(comparable(word)).toBe(word);
     }
+  });
+
+  test("a migration is a migration whatever the case of its extension", () => {
+    const SOURCE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sql)$/i;
+    expect(SOURCE.test("0009_x.up.SQL")).toBe(true);
+    // The pattern used by the scan is this one.
+    expect(files.toString()).toContain(`/${SOURCE.source}/i`);
   });
 
   test("the one name the core does hold is the handover reason, and only in its list of names", () => {

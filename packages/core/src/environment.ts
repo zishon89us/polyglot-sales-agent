@@ -19,14 +19,15 @@ export const ENVIRONMENT_SETTING = "PSA_ENV";
  */
 export const PLACEHOLDER_MARK = "local-only";
 
-/** A value as it is compared with the mark: percent-decoded, lower-case, letters and digits only. */
+/**
+ * A value as it is compared with the mark: percent-decoded, lower-case,
+ * letters and digits only. Each `%XX` is decoded on its own, so that one
+ * malformed `%` elsewhere in the value does not leave the rest undecoded.
+ */
 function plain(value: string): string {
-  let decoded = value;
-  try {
-    decoded = decodeURIComponent(value);
-  } catch {
-    // Not percent-encoded text: compared as it is.
-  }
+  const decoded = value.replace(/%([0-9a-fA-F]{2})/g, (_match, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
   return decoded.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 

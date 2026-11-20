@@ -62,6 +62,8 @@ describe("what production refuses (issue #165)", () => {
     "https://graph.facebook.com.example.test",
     "https://example.test/graph.facebook.com",
     "https://user:word@graph.facebook.com",
+    "https://user@graph.facebook.com",
+    "https://:word@graph.facebook.com",
     "https://graph.facebook.com:8443",
     "https://graph.facebook.com.",
     "not a url",
@@ -97,6 +99,9 @@ describe("what production refuses (issue #165)", () => {
 
   test.each([
     "postgres://psa_app:local%2Donly-app@db/psa",
+    // A stray percent sign elsewhere must not leave the rest undecoded.
+    "postgres://psa_app:local%2Donly-app@db/psa?application_name=a%",
+    "l%6Fcal%2donly%",
     "local_only-app-signing-value",
     "LocalOnly",
     "LOCAL ONLY",

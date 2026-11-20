@@ -7,11 +7,13 @@
 // this list and that test are all there is of it.
 
 /**
- * Words the core's code and migrations may not contain. Each is compared in
- * lower case with `_` and `-` taken out, against lines treated the same
- * way, so `blocked_periods`, `blockedPeriod` and `/blocked-periods` are one
- * word here, and a word is found inside a longer name: `booking` also
- * catches `bookings`, `bookingId` and `booking_service_settings`.
+ * Words the core's code and migrations may not contain, in their text or
+ * in the names of their files. Each is compared in lower case with
+ * everything but letters and digits taken out, against lines treated the
+ * same way, so `blocked_periods`, `blockedPeriod`, `/blocked-periods` and
+ * `blocked period` are one word here, and a word is found inside a longer
+ * name: `booking` also catches `bookings`, `bookingId` and
+ * `booking_service_settings`.
  */
 export const BOOKING_WORDS = [
   // The pack's tables and routes.
@@ -30,9 +32,9 @@ export const BOOKING_WORDS = [
   "noshow",
 ] as const;
 
-/** A line or a word as it is compared: lower case, with `_` and `-` taken out. */
+/** A line or a word as it is compared: lower case, letters and digits only. */
 export function comparable(text: string): string {
-  return text.toLowerCase().replace(/[_-]/g, "");
+  return text.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 /**
