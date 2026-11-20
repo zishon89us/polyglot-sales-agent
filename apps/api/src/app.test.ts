@@ -575,6 +575,7 @@ describe("NFR-P1, measured and not yet gated", () => {
 
 describe("settings", () => {
   const complete = {
+    PSA_ENV: "development",
     PSA_DB_APP_URL: "postgres://a",
     PSA_DB_CROSS_URL: "postgres://c",
     PSA_WHATSAPP_APP_SECRET: "new, old",
@@ -585,6 +586,7 @@ describe("settings", () => {
 
   test("are read once, with this machine and no proxy as defaults", () => {
     expect(readConfig(complete)).toEqual({
+      environment: "development",
       host: "127.0.0.1",
       port: 3000,
       appDatabaseUrl: "postgres://a",
@@ -604,7 +606,7 @@ describe("settings", () => {
     const attempt = () =>
       readConfig({ PSA_DB_APP_URL: "postgres://user:secret@host/db", PSA_API_PORT: "http" });
     expect(attempt).toThrow(
-      "api: PSA_DB_CROSS_URL is not set; PSA_WHATSAPP_APP_SECRET is not set; PSA_WHATSAPP_VERIFY_TOKEN is not set; PSA_WHATSAPP_BASE_URL is not set; PSA_WHATSAPP_API_VERSION is not set; PSA_API_PORT is not a port number",
+      "api: PSA_ENV must be set to development or production; PSA_DB_CROSS_URL is not set; PSA_WHATSAPP_APP_SECRET is not set; PSA_WHATSAPP_VERIFY_TOKEN is not set; PSA_WHATSAPP_BASE_URL is not set; PSA_WHATSAPP_API_VERSION is not set; PSA_API_PORT is not a port number",
     );
     expect(attempt).not.toThrow("secret");
   });
@@ -635,6 +637,47 @@ describe("settings", () => {
         "PSA_WHATSAPP_VERIFY_TOKEN is not set",
       );
     }
+  });
+
+  test("in production it refuses the stand-in channel and every placeholder, by name (#165)", () => {
+    const real = {
+      PSA_ENV: "production",
+      PSA_DB_APP_URL: "postgres://psa_app:Zx81@db.internal/psa",
+      PSA_DB_CROSS_URL: "postgres://psa_cross:Qw90@db.internal/psa",
+      PSA_WHATSAPP_APP_SECRET: "c0ffee",
+      PSA_WHATSAPP_VERIFY_TOKEN: "a-real-one",
+      PSA_WHATSAPP_BASE_URL: "https://graph.facebook.com",
+      PSA_WHATSAPP_API_VERSION: "v27.0",
+    };
+    expect(readConfig(real).environment).toBe("production");
+    expect(() => readConfig({ ...complete, PSA_ENV: "production" })).toThrow(
+      "api: will not start in production: PSA_WHATSAPP_BASE_URL is not https://graph.facebook.com, so the channel is a stand-in",
+    );
+    const example = Object.fromEntries(
+      readFileSync(fileURLToPath(new URL("../../../.env.example", import.meta.url)), "utf8")
+        .split("\n")
+        .filter((line) => /^PSA_[A-Z_]+=/.test(line))
+        .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+    );
+    // The example file as it is, with only the one word changed: every secret in it is refused.
+    const attempt = () => readConfig({ ...example, PSA_ENV: "production" });
+    for (const name of [
+      "PSA_DB_APP_URL",
+      "PSA_DB_CROSS_URL",
+      "PSA_WHATSAPP_APP_SECRET",
+      "PSA_WHATSAPP_VERIFY_TOKEN",
+    ]) {
+      expect(attempt).toThrow(`${name} holds a placeholder from the example file`);
+    }
+    expect(attempt).not.toThrow("local-only");
+    for (const [name, value] of Object.entries(real)) {
+      if (name.startsWith("PSA_DB") || name.includes("SECRET") || name.includes("TOKEN")) {
+        expect(() => readConfig({ ...real, [name]: `${value}-local-only` })).toThrow(
+          `${name} holds a placeholder`,
+        );
+      }
+    }
+    expect(readConfig(example).environment).toBe("development");
   });
 
   test("the example file names every setting the API reads", () => {

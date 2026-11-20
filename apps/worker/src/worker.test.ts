@@ -1038,6 +1038,7 @@ describe("the worker's loop", () => {
 
 describe("settings", () => {
   const complete = {
+    PSA_ENV: "development",
     PSA_DB_APP_URL: "postgres://a",
     PSA_DB_CROSS_URL: "postgres://c",
     PSA_WHATSAPP_APP_SECRET: "new, old",
@@ -1048,6 +1049,7 @@ describe("settings", () => {
 
   test("are read once", () => {
     expect(readConfig(complete)).toEqual({
+      environment: "development",
       appDatabaseUrl: "postgres://a",
       crossDatabaseUrl: "postgres://c",
       whatsappAppSecrets: ["new", "old"],
@@ -1064,8 +1066,33 @@ describe("settings", () => {
         PSA_WHATSAPP_ACCESS_TOKEN: " ",
       });
     expect(attempt).toThrow(
-      "worker: PSA_DB_CROSS_URL is not set; PSA_WHATSAPP_APP_SECRET is not set; PSA_WHATSAPP_BASE_URL is not set; PSA_WHATSAPP_API_VERSION is not set; PSA_WHATSAPP_ACCESS_TOKEN is not set",
+      "worker: PSA_ENV must be set to development or production; PSA_DB_CROSS_URL is not set; PSA_WHATSAPP_APP_SECRET is not set; PSA_WHATSAPP_BASE_URL is not set; PSA_WHATSAPP_API_VERSION is not set; PSA_WHATSAPP_ACCESS_TOKEN is not set",
     );
     expect(attempt).not.toThrow("secret");
+  });
+
+  test("in production no worker starts yet: it has one credential for every tenant (#165, #290)", () => {
+    const real = {
+      PSA_ENV: "production",
+      PSA_DB_APP_URL: "postgres://psa_app:Zx81@db.internal/psa",
+      PSA_DB_CROSS_URL: "postgres://psa_cross:Qw90@db.internal/psa",
+      PSA_WHATSAPP_APP_SECRET: "c0ffee",
+      PSA_WHATSAPP_BASE_URL: "https://graph.facebook.com",
+      PSA_WHATSAPP_API_VERSION: "v27.0",
+      PSA_WHATSAPP_ACCESS_TOKEN: "a-real-one",
+    };
+    // Even with every value a real one.
+    expect(() => readConfig(real)).toThrow(
+      "worker: will not start in production: the worker sends with one channel credential for every tenant, which is for development only",
+    );
+    expect(readConfig({ ...real, PSA_ENV: "development" }).environment).toBe("development");
+    const attempt = () => readConfig({ ...complete, PSA_ENV: "production" });
+    expect(attempt).toThrow("PSA_WHATSAPP_BASE_URL is not https://graph.facebook.com");
+    expect(() =>
+      readConfig({ ...real, PSA_WHATSAPP_ACCESS_TOKEN: "local-only-mock-token" }),
+    ).toThrow("PSA_WHATSAPP_ACCESS_TOKEN holds a placeholder from the example file");
+    expect(() =>
+      readConfig({ ...real, PSA_WHATSAPP_ACCESS_TOKEN: "local-only-mock-token" }),
+    ).not.toThrow("local-only-mock");
   });
 });

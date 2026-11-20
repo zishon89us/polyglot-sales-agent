@@ -364,11 +364,16 @@ describe("the mock's own controls", () => {
     expect(await (await fetch(`${baseUrl}/mock/sent`)).text()).not.toContain(TOKEN);
   });
 
-  test("it listens on this machine only", () => {
+  test("it listens on this machine only, unless told to serve a container, and never in production", () => {
     expect(MOCK_HOST).toBe("127.0.0.1");
     const main = readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
-    expect(main).toContain("host: MOCK_HOST");
-    expect(main).not.toMatch(/0\.0\.0\.0|::/);
+    // This machine unless the setting says otherwise, and the setting has one other value.
+    expect(main).toContain('(process.env["PSA_MOCK_HOST"] ?? "").trim() || MOCK_HOST');
+    expect(main).toContain('if (host !== MOCK_HOST && host !== "0.0.0.0") {');
+    expect(main).not.toContain("::");
+    // The refusal comes before anything listens. `tools/e2e.test.ts` runs the program and sees both.
+    expect(main.indexOf("refuseInProduction(")).toBeGreaterThan(0);
+    expect(main.indexOf("refuseInProduction(")).toBeLessThan(main.indexOf("app.listen("));
   });
 
   test("a redirect from the channel's address is not followed: the token goes nowhere else", async () => {
