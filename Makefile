@@ -3,13 +3,14 @@
 # network or GitHub: the dependency audit (`make audit`), the secret scan and a
 # lint of the pull-request title.
 #
-# Not here yet: `dev`, `build` and `eval`, which AGENTS.md section 4 lists.
-# They arrive with the first app (M2) and the eval harness (M3).
+# Not here yet: `build` and `eval`, which AGENTS.md section 4 lists. There is
+# nothing to build (Node runs the sources, ADR 0002); `eval` arrives with the
+# eval harness (M3).
 # The self-test plants wrong files in the workspace while it runs, so targets
 # must not run in parallel with it.
 .NOTPARALLEL:
 .PHONY: setup identity check format lint typecheck test selftest commitlint docs audit \
-	db-up db-setup db-down
+	db-up db-setup db-down dev dev-down e2e
 
 setup:
 	pnpm install --frozen-lockfile
@@ -33,6 +34,19 @@ db-setup:
 
 db-down:
 	docker compose down
+
+# The whole product on this machine, in Docker: the database, a demo tenant,
+# the API, the worker, and the stand-in for WhatsApp with its page at
+# http://127.0.0.1:4010. `e2e` sends a message through it and waits for the
+# echo. Development only: see `docker-compose.yml`.
+dev:
+	docker compose up --build
+
+dev-down:
+	docker compose down --volumes
+
+e2e:
+	node tools/e2e.ts
 
 # lint covers formatting, lint rules (warnings fail) and import order.
 # test needs the database server (see db-up).
