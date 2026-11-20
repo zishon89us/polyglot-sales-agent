@@ -186,3 +186,41 @@ before the test is switched on.
 - Gate 2 structure review, finding S4:
   `docs/reviews/2026-11-16-gate2-design-structure.md`.
 - NFR-M1; ADR 0001; `architecture.md` sections 5 and 8.
+
+## Amendment, 2026-11-20: the boundary test is on (M2 unit U10)
+
+Made while switching the test on (issue #271). The decision is unchanged.
+
+- **The test.** `packages/pack-booking/src/boundary.test.ts` runs in
+  `make check` and in CI. It fails if any line of the core's code or
+  migrations holds one of the pack's words, if the core imports a pack, or
+  if a core package depends on one. The words are kept by the pack, in
+  `packages/pack-booking/src/names.ts`: its tables, routes and settings,
+  and the things it deals in. They are matched as parts of longer names.
+- **What "the core" is for the test:** `packages/core`, `packages/db` and
+  its migrations, `packages/channel`, `packages/channel-whatsapp`,
+  `apps/api` and `apps/worker`. Tests are not scanned for words, since a
+  test may speak of an appointment; they are scanned for imports.
+- **The pack so far** is that list and that test. Its folder is
+  `packages/pack-booking`, not `packages/packs/booking` as earlier
+  documents wrote it: the workspace takes one level of folders.
+- **Accepted lines, four of them,** each pinned by its text so that a fifth
+  fails: three comments in `packages/core/src/names.ts` that explain the
+  exception below, and one comment in migration 0002, which is applied and
+  cannot be reworded.
+- **The known exceptions, as they stand.** `late-change` is in code, in the
+  core's closed list of handover reasons, and the test allows that name in
+  that one file (#278). The other two, the Reschedule and Cancel buttons in
+  the order of checks and "contact books in chat" in the permission
+  machine, are in documents only: the steps that would hold them are not
+  built. They were to be routed through pack hooks before this test was
+  switched on. They were not, because there is nothing yet to route; the
+  test will fail the unit that builds those steps if it names them, which
+  is when the hooks are due (M3 and M5).
+- **Import test, in part.** "`apps/api` and `apps/worker` reach packs only
+  through the registry" is, until a registry exists, "reach no pack at
+  all", and that is what is tested.
+- **Honest limit.** A word list catches a name, not an idea: core code
+  could still be shaped around appointments without using any of these
+  words. The trial pack at the end of M5 remains the real check.
+

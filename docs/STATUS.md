@@ -334,12 +334,28 @@ M0 Inception met its exit criteria on 2026-11-16; see
   one path that had no test (a command done but half recorded exits 3),
   which now has one.
 
+- 2026-11-20 — U9 merged as #294. M2 unit U10 (#271), the last. One image
+  and a compose file start the database, a set-up step, the API, the
+  worker and the stand-in for WhatsApp; `tools/e2e.ts` sends a message
+  through the stand-in and waits for its echo. A test runs that against
+  the real programs as processes, and a CI job runs it against `docker
+  compose up`. **The agent's machine has no Docker, so the compose file is
+  checked by CI only.** Every process must now be told where it runs
+  (`PSA_ENV`, no default); in production the mock refuses to start, and the
+  API and the worker refuse the stand-in channel and every placeholder
+  secret, each with a test (#165). No worker starts in production until
+  each tenant has its own credential. `ops channel connect` gives a tenant
+  a number. The boundary test of ADR 0012 is on: the core's code and
+  migrations hold none of the booking pack's names but the one stated
+  exception, and import no pack. The README says what runs and how to try
+  it. The M2 retro is `docs/retros/m2-walking-skeleton.md`.
+
 ## Next
 
-1. Maintainer reviews and merges U9 (#270), **after its code review and
-   the verification of its fixes are both in**.
-2. M2 unit U10: end to end, the production guard and the pack boundary
-   (#271), then the M2 retro and tag.
+1. Maintainer reviews and merges U10 (#271), **after its code review and
+   the verification of its fixes are both in**. That ends M2.
+2. Tag M2. Then plan M3, the AI core, which needs the maintainer's choice
+   of model provider first (OQ-9, ADR 0010).
 3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
@@ -393,13 +409,15 @@ v1.1.
   stop: a contact is matched on the channel's own identifier first, then on
   the phone number. Confirm, or say otherwise before M3 builds on it.
 
-- **The dependency audit fails, on `main` too, since 2026-11-18.** An
-  advisory was published for `picomatch` up to 4.0.7 (GHSA-fc5q-39xc-vjpf,
-  a slow match on a crafted pattern). It is here only through `vitest`, the
-  test runner; no fixed version exists. The CI job "Dependency audit and
-  secret scan" is red on every pull request until a fix is released or the
-  maintainer decides to have the audit pass over this one advisory. The
-  agent did not make that decision: it would switch off part of a check.
+- **Decisions the agent made in M2 so as not to stop,** each written in
+  the follow-up issue of its unit and waiting for a yes or a no: the send
+  policy by message class and the 15-minute limit (#290); what the
+  operator's record holds and who may read it (#293); `PSA_ENV` with no
+  default and what production refuses (#295); no query builder (ADR 0003,
+  amendment); database time limits (#288).
+- **US-C1 criterion 9** allows a second copy of a reply only when a worker
+  stopped. As built a reply is also sent once more after a timeout (#290).
+  Change the criterion or the build.
 
 - **NFR-S2 was reworded by the agent** in unit U6. It said every request
   with a missing or invalid signature is "answered 401"; with the size

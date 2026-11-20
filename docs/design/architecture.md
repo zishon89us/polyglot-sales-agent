@@ -167,8 +167,8 @@ flowchart TB
         mock["channel-mock"]
         ai["ai<br/>LlmClient, prompt loader,<br/>profile builder, claim checker, traces"]
         pack["pack<br/>interface"]
-        booking["packs/booking"]
-        faq["packs/faq-only"]
+        booking["pack-booking"]
+        faq["pack-faq-only"]
     end
     api --> core
     api --> db
@@ -177,6 +177,7 @@ flowchart TB
     worker --> channel
     worker --> ai
     worker --> pack
+    api --> pack
     wa --> channel
     mock --> channel
     booking --> pack
@@ -195,8 +196,8 @@ flowchart TB
 | `channel-mock` | A second implementation that lives in memory, with a format of its own. It imitates nothing; it is what a test uses when the test is not about WhatsApp, and it is the second implementation that shows the interface fits more than one channel (NFR-M2) |
 | `ai` | `LlmClient` and its adapters; loading versioned prompts; building the business profile; validating structured output; checking claims; writing traces. |
 | `pack` | The interface a pack implements (below). |
-| `packs/booking` | Everything about appointments: the booking and reminder state machines, the reminder timing rule, slots and capacity, its tables and migrations, its tools, templates, buttons, timers, API routes, settings and metrics (ADR 0012). |
-| `packs/faq-only` | The trial pack: a prompt fragment and evals. It uses the core business profile and adds no code. |
+| `pack-booking` | Everything about appointments: the booking and reminder state machines, the reminder timing rule, slots and capacity, its tables and migrations, its tools, templates, buttons, timers, API routes, settings and metrics (ADR 0012). As built in M2 it holds only the list of its names, which a test keeps out of the core; the pack itself is M5's |
+| `pack-faq-only` | The trial pack: a prompt fragment and evals. It uses the core business profile and adds no code. |
 | `integrations` | Reserved for v1.1. Empty in v1.0. |
 
 **The two mocks** (Gate 2 finding S34, decided in M2 unit U6). They are not
@@ -546,8 +547,9 @@ where two events could enqueue the same work.
 
 **Time.** All rules take the current time as an argument. Production passes
 the clock; tests pass a fixed or stepped time. Times are stored in UTC;
-tenant-local calculations (quiet hours, opening hours, reminders) use the
-tenant's time zone and are in `core`.
+tenant-local calculations use the tenant's time zone: quiet hours and
+opening hours are in `core`, and the timing of reminders is the booking
+pack's (ADR 0012).
 
 **Fixed texts.** Disclosure, fallback, confirmations, the rate notice and
 handover messages are stored per language, added by code, and never written

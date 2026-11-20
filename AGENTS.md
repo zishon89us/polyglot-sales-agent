@@ -218,7 +218,7 @@ a lifecycle phase.
 │   └── mock-whatsapp/        # local Cloud API imitation
 ├── packages/
 │   ├── core/  ai/  channel-whatsapp/  integrations/  db/
-│   └── packs/booking/  packs/faq-only/
+│   └── pack-booking/  pack-faq-only/
 ├── prompts/                  # versioned prompt files, one folder per prompt
 ├── evals/                    # datasets, graders, runner, baseline results
 ├── infra/                    # infrastructure-as-code
