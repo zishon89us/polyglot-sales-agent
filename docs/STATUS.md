@@ -366,6 +366,14 @@ M0 Inception met its exit criteria on 2026-11-16; see
   every folder but four named ones. Documents that said "every password is
   refused" now say what is true: marked ones are.
 
+- 2026-11-20 — The fixes were checked by a second agent
+  (`docs/reviews/2026-11-20-gate4-u10-verification.md`): no High, two
+  Medium, five Low. It confirmed the restart fix with real processes: nine
+  round trips across seven restarts, none lost. It found that one stray
+  percent sign in a value switched the placeholder check's decoding off,
+  and that a test did not pin the list of channels; both are fixed. The
+  boundary test now also looks at file names.
+
 ## Next
 
 1. Maintainer reviews and merges U10 (#271), **after its code review and

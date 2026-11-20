@@ -30,7 +30,8 @@ there.
 
 In numbers, each counted from the repository or from GitHub on the day:
 16 pull requests merged since the M1 retro (#258 to #294), 5 migrations,
-891 tests, 17 review and verification reports for the code of U1 to U9,
+891 tests when this unit was first pushed (more after its review), 17
+review and verification reports for the code of U1 to U9,
 and 215 commits on `main` before this unit.
 
 ## What went well

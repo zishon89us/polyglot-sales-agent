@@ -196,10 +196,10 @@ Made while switching the test on (issue #271). The decision is unchanged.
   migrations holds one of the pack's words, if the core imports a pack, or
   if a core package depends on one. The words are kept by the pack, in
   `packages/packs/booking/src/names.ts`.
-- **How a word is matched.** Each line and each word is compared in lower
-  case with `_` and `-` taken out, so `blocked_periods`, `blockedPeriod`
-  and `blocked-periods` are one word, and a word is found inside a longer
-  name. The list holds the pack's tables, routes and settings, and the
+- **How a word is matched.** Each line, each file's name and each word is
+  compared in lower case with everything but letters and digits taken out,
+  so `blocked_periods`, `blockedPeriod`, `blocked-periods` and "blocked
+  period" are one word, and a word is found inside a longer name. The list holds the pack's tables, routes and settings, and the
   things it deals in: bookings, reminders, blocked periods, slots,
   capacity, the booking horizon, minimum notice, the change cut-off,
   rescheduling, appointments, no-shows.
@@ -215,6 +215,10 @@ Made while switching the test on (issue #271). The decision is unchanged.
   are not scanned for words, since a test may speak of an appointment;
   they are scanned for imports. A file can therefore escape the word scan
   by being named a test.
+- **What is not scanned at all:** files that are not code or SQL (a JSON
+  or YAML file), and anything outside `apps` and `packages` (`tools`, the
+  root). A name put together at run time from pieces, and another word for
+  the same thing ("reservation", "availability"), pass.
 - **The pack so far** is that list and that test.
 - **Accepted lines, four of them,** each pinned by its text so that a fifth
   fails: three comments in `packages/core/src/names.ts` that explain the

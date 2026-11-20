@@ -131,8 +131,9 @@ Then open <http://127.0.0.1:4010>, the page of the stand-in for WhatsApp,
 and send a message as a customer to the number `100000000000002`. The reply
 that appears is the product's echo. `make e2e` does the same from the
 command line. Everything is published to your machine only. The secrets in
-the files are placeholders, each marked `local-only`, and the product
-refuses to start with a marked one when told it is in production.
+the files are placeholders. Each but the database administrator's is
+marked `local-only`, and the product refuses to start with a marked one
+when told it is in production.
 
 ## How this project is built
 
