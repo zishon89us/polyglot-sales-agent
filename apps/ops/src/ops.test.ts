@@ -221,7 +221,10 @@ describe("each command writes its two rows", () => {
       "SELECT tenant_id, receiving_number_id FROM channel_routes",
     );
     expect(routes.rows).toEqual([{ tenant_id: tenantId, receiving_number_id: "100000000000002" }]);
-    const account = await administrator.query<{ id: string }>("SELECT id FROM channel_accounts");
+    const account = await administrator.query<{ id: string; channel: string }>(
+      "SELECT id, channel FROM channel_accounts",
+    );
+    expect(account.rows[0]?.channel).toBe("whatsapp");
     expect(lines).toEqual([`channel connected: ${account.rows[0]?.id}`]);
     const settings = { tenantId, channel: "whatsapp", receivingNumberId: "100000000000002" };
     expect(
@@ -258,7 +261,7 @@ describe("each command writes its two rows", () => {
       "--tenant",
       "00000000-0000-4000-8000-000000000009",
       "--channel",
-      "mock",
+      "whatsapp",
       "--number-id",
       "100000000000003",
       "--as",
@@ -433,7 +436,7 @@ describe("a command that fails, or is written wrongly", () => {
         "--as",
         "a",
       ],
-      "--channel is one of: whatsapp, mock",
+      "--channel is one of: whatsapp",
     ],
     [
       [
@@ -442,7 +445,7 @@ describe("a command that fails, or is written wrongly", () => {
         "--tenant",
         "00000000-0000-4000-8000-000000000001",
         "--channel",
-        "mock",
+        "whatsapp",
         "--number-id",
         "+15550100",
         "--as",
@@ -457,7 +460,7 @@ describe("a command that fails, or is written wrongly", () => {
         "--tenant",
         "00000000-0000-4000-8000-000000000001",
         "--channel",
-        "mock",
+        "whatsapp",
         "--number-id",
         "1234",
         "--as",

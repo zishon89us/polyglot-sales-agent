@@ -12,8 +12,23 @@ export type Environment = (typeof ENVIRONMENTS)[number];
 /** The setting that says where a process runs. It has no default: a forgotten setting must not mean "development". */
 export const ENVIRONMENT_SETTING = "PSA_ENV";
 
-/** Every placeholder secret in `.env.example` holds this, so that one can be told from a real value. */
+/**
+ * Every placeholder secret in `.env.example` holds this, so that one copied
+ * into a deployment can be told from a real value. It is a mark, not a
+ * proof: a value without it is not thereby a good secret.
+ */
 export const PLACEHOLDER_MARK = "local-only";
+
+/** A value as it is compared with the mark: percent-decoded, lower-case, letters and digits only. */
+function plain(value: string): string {
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // Not percent-encoded text: compared as it is.
+  }
+  return decoded.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
 
 /** The only host a production deployment sends WhatsApp messages to. */
 export const WHATSAPP_PRODUCTION_HOST = "graph.facebook.com";
@@ -56,23 +71,26 @@ export function productionProblems(environment: Environment, facts: DeploymentFa
     problems.push("this is a development component and has no place in production");
   }
   if (facts.whatsappBaseUrl !== undefined) {
-    let host: string | undefined;
-    let secure = false;
+    // The whole origin: https, that host, the default port, and nobody's name in front of it.
+    let real = false;
     try {
       const url = new URL(facts.whatsappBaseUrl);
-      host = url.hostname;
-      secure = url.protocol === "https:" && url.username === "" && url.password === "";
+      real =
+        url.origin === `https://${WHATSAPP_PRODUCTION_HOST}` &&
+        url.username === "" &&
+        url.password === "";
     } catch {
-      host = undefined;
+      real = false;
     }
-    if (host !== WHATSAPP_PRODUCTION_HOST || !secure) {
+    if (!real) {
       problems.push(
         `PSA_WHATSAPP_BASE_URL is not https://${WHATSAPP_PRODUCTION_HOST}, so the channel is a stand-in`,
       );
     }
   }
   for (const [name, value] of Object.entries(facts.secrets ?? {})) {
-    if (value.toLowerCase().includes(PLACEHOLDER_MARK)) {
+    // Written any way: with other punctuation, in capitals, or percent-encoded in a URL.
+    if (plain(value).includes(plain(PLACEHOLDER_MARK))) {
       problems.push(`${name} holds a placeholder from the example file`);
     }
   }

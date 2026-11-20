@@ -79,8 +79,13 @@ export async function echoRoundTrip(options: RoundTripOptions): Promise<RoundTri
         message.phoneNumberId === options.numberId,
     );
     if (echo !== undefined) {
-      // Exactly one: a second copy would be a duplicate reply.
-      const copies = sent.filter((message) => message.body === echo.body).length;
+      // Exactly one: a second copy would be a duplicate reply. Looked for again a moment
+      // later, since a second copy would not arrive in the same instant as the first.
+      await sleep(1_000);
+      const again = (await (await fetch(`${options.mockUrl}/mock/sent`)).json()) as {
+        sent: Sent[];
+      };
+      const copies = again.sent.filter((message) => message.body === echo.body).length;
       if (copies !== 1) {
         throw new Error(`e2e: the echo arrived ${copies} times`);
       }

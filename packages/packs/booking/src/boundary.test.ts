@@ -4,28 +4,39 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { BOOKING_WORDS, KNOWN_EXCEPTION } from "./names.ts";
+import { BOOKING_WORDS, comparable, KNOWN_EXCEPTION } from "./names.ts";
 
-const root = fileURLToPath(new URL("../../../", import.meta.url));
+const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
-/** What is the core: every package and app but the packs, the operator's tool and the stand-in for the channel. */
-const CORE = [
-  "packages/core/src",
-  "packages/db/src",
-  "packages/db/migrations",
-  "packages/channel/src",
-  "packages/channel-whatsapp/src",
-  "apps/api/src",
-  "apps/worker/src",
-];
+/** What is not the core, and why. Everything else under `apps` and `packages` is. */
+const NOT_CORE: Record<string, string> = {
+  "packages/packs": "the packs themselves",
+  "apps/ops": "the operator's tool, which names the packs a tenant can be created on",
+  "apps/mock-whatsapp": "a stand-in for the channel, in no deployment",
+  "packages/channel-mock": "the in-memory channel of the tests",
+};
+
+/** The core's folders, found on disk: a new app or package is scanned without being added here. */
+const CORE: string[] = ["apps", "packages"]
+  .flatMap((top) =>
+    readdirSync(`${root}${top}`, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `${top}/${entry.name}`),
+  )
+  .filter((folder) => !Object.hasOwn(NOT_CORE, folder))
+  .sort();
 
 /** Every file of the core that is not a test, with its lines. */
 function files(): { path: string; lines: string[] }[] {
   const found: { path: string; lines: string[] }[] = [];
   for (const directory of CORE) {
     for (const name of readdirSync(`${root}${directory}`, { recursive: true, encoding: "utf8" })) {
-      if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sql)$/.test(name) && !/\.test\.[a-z]+$/.test(name)) {
-        const path = `${directory}/${name}`;
+      const path = `${directory}/${name}`;
+      if (
+        /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sql)$/i.test(name) &&
+        !/\.test\.[a-z]+$/i.test(name) &&
+        !/(^|\/)(node_modules|fixtures)\//.test(path)
+      ) {
         found.push({ path, lines: readFileSync(`${root}${path}`, "utf8").split("\n") });
       }
     }
@@ -62,17 +73,31 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
     ]) {
       expect(paths).toContain(expected);
     }
-    expect(paths.some((path) => path.includes("pack-"))).toBe(false);
+    expect(paths.some((path) => path.startsWith("packages/packs/"))).toBe(false);
     expect(paths.length).toBeGreaterThan(40);
+    // The folders left out are these four and no other, and each is there.
+    expect(Object.keys(NOT_CORE).sort()).toEqual([
+      "apps/mock-whatsapp",
+      "apps/ops",
+      "packages/channel-mock",
+      "packages/packs",
+    ]);
+    expect(CORE).toEqual([
+      "apps/api",
+      "apps/worker",
+      "packages/channel",
+      "packages/channel-whatsapp",
+      "packages/core",
+      "packages/db",
+    ]);
   });
 
   test("no line of the core holds one of the pack's words, but the accepted ones", () => {
-    const words = BOOKING_WORDS.map((word) => word.toLowerCase());
     const found: string[] = [];
     for (const file of files()) {
       for (const line of file.lines) {
-        const lower = line.toLowerCase();
-        if (words.some((word) => lower.includes(word))) {
+        const plain = comparable(line);
+        if (BOOKING_WORDS.some((word) => plain.includes(word))) {
           found.push(`${file.path}: ${line.trim()}`);
         }
       }
@@ -81,22 +106,35 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
   });
 
   test("the words would be seen in the forms they take", () => {
-    const words = BOOKING_WORDS.map((word) => word.toLowerCase());
     for (const line of [
       "CREATE TABLE bookings (",
       "  REFERENCES booking_service_settings (id)",
+      "const bookingId = job.payload.bookingId;",
       'app.get("/slots", handler);',
       'app.get("/blocked-periods", handler);',
       "const REMINDER_LEAD = 24;",
       "FROM blocked_periods",
-      'buttons: ["Confirm", "Reschedule", "Cancel"]',
+      "const blockedPeriod = rows[0];",
+      "CREATE TABLE slot_holds (",
+      "slotInterval: 30,",
+      "minNotice: 120,",
       "min_notice_minutes integer",
-      "noShowRate: sessions.no_show / sessions.total",
+      "changeCutoff: 24,",
+      "booking_horizon_days integer",
+      "capacity integer NOT NULL",
+      'buttons: ["Confirm", "Reschedule", "Cancel"]',
+      "noShowRate: sessions.noShow / sessions.total",
+      "no_show boolean",
     ]) {
+      const plain = comparable(line);
       expect(
-        words.some((word) => line.toLowerCase().includes(word)),
+        BOOKING_WORDS.some((word) => plain.includes(word)),
         line,
       ).toBe(true);
+    }
+    // Every word is already in the form it is compared in.
+    for (const word of BOOKING_WORDS) {
+      expect(comparable(word)).toBe(word);
     }
   });
 
@@ -110,11 +148,11 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
 
 describe("the core imports no pack (ADR 0012)", () => {
   const PACK =
-    /["'`]@polyglot-sales-agent\/pack-[^"'`]*["'`]|["'`][^"'`]*\/pack-[a-z-]+\/[^"'`]*["'`]/;
+    /["'`]@polyglot-sales-agent\/pack-[^"'`]*["'`]|["'`][^"'`]*\/packs?(-[a-z-]+)?\/[^"'`]*["'`]/;
 
   test("no file of the core, tests included, imports one", () => {
     const importers: string[] = [];
-    for (const directory of CORE.filter((path) => !path.endsWith("migrations"))) {
+    for (const directory of CORE) {
       for (const name of readdirSync(`${root}${directory}`, {
         recursive: true,
         encoding: "utf8",
@@ -132,15 +170,16 @@ describe("the core imports no pack (ADR 0012)", () => {
     expect(PACK.test('import { BOOKING_WORDS } from "@polyglot-sales-agent/pack-booking";')).toBe(
       true,
     );
-    expect(PACK.test('import x from "../../pack-booking/src/names.ts";')).toBe(true);
+    expect(PACK.test('import x from "../../packs/booking/src/names.ts";')).toBe(true);
     expect(PACK.test('import { echoReply } from "@polyglot-sales-agent/core";')).toBe(false);
   });
 
   test("no package of the core depends on one", () => {
-    for (const directory of CORE.filter((path) => path.endsWith("/src"))) {
-      const manifest = JSON.parse(
-        readFileSync(`${root}${directory.replace(/\/src$/, "")}/package.json`, "utf8"),
-      ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    for (const directory of CORE) {
+      const manifest = JSON.parse(readFileSync(`${root}${directory}/package.json`, "utf8")) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
       const names = [
         ...Object.keys(manifest.dependencies ?? {}),
         ...Object.keys(manifest.devDependencies ?? {}),

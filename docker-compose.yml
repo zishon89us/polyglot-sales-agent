@@ -1,7 +1,10 @@
 # Local development only: `docker compose up --build`, then open
-# http://127.0.0.1:4010 and send a message as a customer. Every password
-# below is a placeholder for a database that listens on this machine alone;
-# the product refuses to start with any of them when PSA_ENV is production.
+# http://127.0.0.1:4010 and send a message as a customer. Every secret
+# below is a placeholder for a stack whose ports are published to this
+# machine alone. Those marked `local-only` are refused by the product when
+# PSA_ENV is production; the database administrator's is not marked, and
+# nothing checks it. Inside the compose network every container can reach
+# every other, the mock included.
 # This file is not a deployment definition, and `mock` belongs in none.
 
 x-product: &product

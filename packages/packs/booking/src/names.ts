@@ -7,28 +7,33 @@
 // this list and that test are all there is of it.
 
 /**
- * Words the core's code and migrations may not contain, matched without
- * regard to case and as parts of longer names too: `booking` also catches
- * `bookings`, `booking_service_settings` and `rebooking`.
+ * Words the core's code and migrations may not contain. Each is compared in
+ * lower case with `_` and `-` taken out, against lines treated the same
+ * way, so `blocked_periods`, `blockedPeriod` and `/blocked-periods` are one
+ * word here, and a word is found inside a longer name: `booking` also
+ * catches `bookings`, `bookingId` and `booking_service_settings`.
  */
 export const BOOKING_WORDS = [
-  // The pack's tables: bookings, reminders, blocked_periods, booking_service_settings.
+  // The pack's tables and routes.
   "booking",
   "reminder",
-  "blocked_period",
-  // Its routes: /bookings, /slots, /blocked-periods.
-  "blocked-period",
-  "/slots",
-  // Its settings.
-  "slot_interval",
-  "min_notice",
-  "change_cutoff",
+  "blockedperiod",
+  "slot",
+  // Its settings: slot interval, minimum notice, change cut-off, horizon, capacity.
+  "minnotice",
+  "changecutoff",
+  "horizon",
+  "capacity",
   // Its buttons and the things it deals in.
   "reschedul",
   "appointment",
-  "no-show",
-  "no_show",
+  "noshow",
 ] as const;
+
+/** A line or a word as it is compared: lower case, with `_` and `-` taken out. */
+export function comparable(text: string): string {
+  return text.toLowerCase().replace(/[_-]/g, "");
+}
 
 /**
  * The one name of the pack's that the core does hold: the handover reason

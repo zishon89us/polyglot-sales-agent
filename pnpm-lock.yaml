@@ -155,7 +155,7 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
-  packages/pack-booking: {}
+  packages/packs/booking: {}
 
 packages:
 

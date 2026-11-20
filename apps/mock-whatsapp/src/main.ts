@@ -27,6 +27,7 @@ function env(name: string): string {
   return value;
 }
 
+const port = Number(process.env["PSA_MOCK_PORT"] ?? 4010);
 const webhookUrl = process.env["PSA_MOCK_WEBHOOK_URL"];
 const app = createMockWhatsApp({
   appSecret: env("PSA_WHATSAPP_APP_SECRET"),
@@ -35,6 +36,11 @@ const app = createMockWhatsApp({
 });
 const address = await app.listen({
   host,
-  port: Number(process.env["PSA_MOCK_PORT"] ?? 4010),
+  port,
 });
-console.log(`mock-whatsapp: listening on ${address}`);
+// The address as it was asked for: on every interface, the framework names only one of them.
+console.log(
+  host === MOCK_HOST
+    ? `mock-whatsapp: listening on ${address}`
+    : `mock-whatsapp: listening on EVERY interface of this machine or container, port ${port}`,
+);

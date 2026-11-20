@@ -142,6 +142,29 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
     expect(sent.sent).toHaveLength(2);
   }, 90_000);
 
+  test("after the stand-in is stopped and started again, with the database kept, a message is still echoed", async () => {
+    // As `docker compose up` a second time without removing the volume. A stand-in that
+    // counted its messages from 1 again would have them taken for ones already seen.
+    const before = running["mock"];
+    before?.child.kill("SIGKILL");
+    await before?.exit;
+    start("mock", "apps/mock-whatsapp/src/main.ts");
+    const third = await echoRoundTrip({
+      mockUrl,
+      numberId: NUMBER,
+      from: CUSTOMER,
+      timeoutMs: 30_000,
+    });
+    expect(third.received).toBe(`Echo: ${third.sent}`);
+    const fourth = await echoRoundTrip({
+      mockUrl,
+      numberId: NUMBER,
+      from: CUSTOMER,
+      timeoutMs: 30_000,
+    });
+    expect(fourth.received).toBe(`Echo: ${fourth.sent}`);
+  }, 90_000);
+
   test("a message to a number no tenant has is taken and answered by nobody", async () => {
     const before = (await (await fetch(`${mockUrl}/mock/sent`)).json()) as { sent: unknown[] };
     const response = await fetch(`${mockUrl}/mock/inbound`, {
@@ -185,7 +208,13 @@ describe("in production the programs themselves refuse (issue #165)", () => {
       execFile(
         process.execPath,
         [file],
-        { cwd: root, env: { PATH: process.env["PATH"] ?? "", ...settings, ...extra } },
+        // A program that should refuse and does not would run for ever: stop it.
+        {
+          cwd: root,
+          env: { PATH: process.env["PATH"] ?? "", ...settings, ...extra },
+          timeout: 10_000,
+          killSignal: "SIGKILL",
+        },
         (error, stdout, stderr) =>
           resolve({
             code: error === null ? 0 : Number(error.code ?? 1),
@@ -236,11 +265,47 @@ describe("in production the programs themselves refuse (issue #165)", () => {
     }
   });
 
+  test("the set-up script, which makes a demo tenant, runs in development and nowhere else", async () => {
+    for (const where of ["production", ""]) {
+      const result = await new Promise<{ code: number; text: string }>((resolve) => {
+        execFile(
+          "sh",
+          ["tools/dev-setup.sh"],
+          {
+            cwd: root,
+            env: { PATH: process.env["PATH"] ?? "", ...settings, PSA_ENV: where },
+            timeout: 10_000,
+          },
+          (error, stdout, stderr) =>
+            resolve({
+              code: error === null ? 0 : Number(error.code ?? 1),
+              text: `${stdout}${stderr}`,
+            }),
+        );
+      });
+      expect(result).toEqual({
+        code: 1,
+        text: "dev-setup: PSA_ENV is not development; this script is for development only\n",
+      });
+    }
+  });
+
   test("the mock listens on this machine, or on every interface for a container, and on nothing else", async () => {
     const result = await refused("apps/mock-whatsapp/src/main.ts", { PSA_MOCK_HOST: "192.0.2.7" });
     expect(result).toEqual({
       code: 1,
       text: "mock-whatsapp: PSA_MOCK_HOST is 127.0.0.1 or 0.0.0.0\n",
     });
+    const port = await freePort();
+    const every = start("mock-everywhere", "apps/mock-whatsapp/src/main.ts", {
+      PSA_MOCK_HOST: "0.0.0.0",
+      PSA_MOCK_PORT: String(port),
+    });
+    await expect.poll(() => every.output, { timeout: 10_000 }).toContain("listening on");
+    // It says so, and does not name the one address that would look safe.
+    expect(every.output).toBe(
+      `mock-whatsapp: listening on EVERY interface of this machine or container, port ${port}\n`,
+    );
+    every.child.kill("SIGKILL");
   });
 });

@@ -62,6 +62,8 @@ describe("what production refuses (issue #165)", () => {
     "https://graph.facebook.com.example.test",
     "https://example.test/graph.facebook.com",
     "https://user:word@graph.facebook.com",
+    "https://graph.facebook.com:8443",
+    "https://graph.facebook.com.",
     "not a url",
     "",
   ])("a channel that is not Meta's own address over https: %j", (whatsappBaseUrl) => {
@@ -91,6 +93,24 @@ describe("what production refuses (issue #165)", () => {
       "PSA_WHATSAPP_APP_SECRET holds a placeholder from the example file",
     ]);
     expect(problems.join(" ")).not.toMatch(/psa_app:|signing/);
+  });
+
+  test.each([
+    "postgres://psa_app:local%2Donly-app@db/psa",
+    "local_only-app-signing-value",
+    "LocalOnly",
+    "LOCAL ONLY",
+    "x-local.only-y",
+  ])("the mark is found however it is written: %j", (value) => {
+    expect(productionProblems("production", { secrets: { A: value } })).toEqual([
+      "A holds a placeholder from the example file",
+    ]);
+  });
+
+  test("a value without the mark is not refused: the mark is a net for a copied example, not a test of a secret", () => {
+    for (const value of ["postgres", "password", "Local-0nly-verify-value", "100%"]) {
+      expect(productionProblems("production", { secrets: { A: value } })).toEqual([]);
+    }
   });
 
   test("one channel credential for every tenant", () => {

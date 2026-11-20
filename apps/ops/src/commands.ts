@@ -22,8 +22,12 @@ import {
 /** The packs a tenant can be created on (data model, `tenants.pack`). */
 export const PACKS = ["booking", "faq-only"] as const;
 
-/** The channels a number can be connected on (data model, `channel_accounts.channel`). */
-export const CHANNELS = ["whatsapp", "mock"] as const;
+/**
+ * The channels a number can be connected on: those the worker can send on.
+ * The data model's other value, `mock`, is the in-memory channel of the
+ * tests; a number connected on it would receive and never be answered.
+ */
+export const CHANNELS = ["whatsapp"] as const;
 
 /** The most rows `log show` reads at once. */
 export const LOG_LIMIT_MAX = 1_000;
