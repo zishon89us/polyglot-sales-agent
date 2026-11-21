@@ -5,9 +5,12 @@ customers in their own language, using only what the business has entered,
 books the appointment in the chat, and hands over to a person when it
 should.
 
-> **Status: design complete, no code yet.** Requirements and design are
-> written and independently reviewed; the build starts with milestone M2.
-> Nothing here runs today. Progress is in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: a walking skeleton, no AI yet.** A message sent through a
+> stand-in for WhatsApp is verified, stored once and answered with an echo
+> of its own text ([try it](#try-it)). The model, bookings and the
+> dashboard are milestones M3 to M5 and are not built. Progress is in
+> [`docs/STATUS.md`](docs/STATUS.md); what waits for the maintainer is in
+> [`docs/decisions-needed.md`](docs/decisions-needed.md).
 
 This is a **portfolio and reference implementation**, built in the open to
 show a complete software lifecycle and a careful AI lifecycle. It is not a
