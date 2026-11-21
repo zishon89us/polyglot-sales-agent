@@ -2,10 +2,11 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M1 Design
+## Current milestone: M3 AI core (planned, not started)
 
-Exit criteria: design documents merged; open questions listed for the
-maintainer. Issues #37–#44, plus #58 and #61 for the requirements gate.
+Exit criteria: grounded multilingual answers pass the eval thresholds; the
+eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
+`m2-walking-skeleton`; its retro says how each of its criteria was shown.
 
 M0 Inception met its exit criteria on 2026-11-16; see
 [`retros/m0-inception.md`](retros/m0-inception.md).
@@ -390,14 +391,32 @@ M0 Inception met its exit criteria on 2026-11-16; see
   decided in M2; it is corrected
   (`reviews/2026-11-21-m3-preparation-check.md`).
 
+- 2026-11-22 — #297 merged. The 92 issues were moved as its page says,
+  each checked first to be open and where the page said; none was closed.
+  M3 now holds 90 open issues, M4 44, M5 49, M6 8. **The M3 plan is
+  written** (`plans/m3-ai-core.md`): nineteen units, U0 to U18, from
+  sessions and the model client to the eval harness and a measured
+  baseline, with every one of the 90 issues named under a unit. A second
+  agent checked the first draft and found it short: nothing owned buttons
+  in the channel or the test of whether a tenant is answering, the unit
+  count was wrong, six dependencies were missing, and the dataset it
+  promised cannot exist without tools
+  (`reviews/2026-11-22-m3-plan-check.md`). The plan now raises eight
+  questions; seven are rows 29 to 35 of the decisions page. A third
+  agent checked the rework: 25 of 29 findings fixed as claimed, and 19
+  new, lesser ones, three of them about what a handover does in M3
+  (`reviews/2026-11-22-m3-plan-check-verification.md`).
+
 ## Next
 
-1. Maintainer reads `decisions-needed.md` and answers what he can; merges
-   the preparation pull request.
-2. The agent sets the issues' milestones as the triage page says, then
-   plans M3 as units (`plans/m3-ai-core.md`), reading each finding now
-   sorted into M3.
-3. M3 cannot write its evals without the supported languages (#168).
+1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
+   to 6 and 29 to 35 of `decisions-needed.md`, above all rows 1, 4, 29
+   and 33. Units also build on rows 7, 8, 18 and 21.
+2. The agent opens an issue for each unit when the plan is merged, and
+   starts with U0, the document findings. U0 can start without answers;
+   it finishes only with rows 13 and 35.
+3. M3 cannot be called done without the maintainer: the languages, AWS
+   credentials, and acceptance of a measured baseline.
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
    each channel assumption re-read in full (threat model A7).
@@ -447,7 +466,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 35 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 
