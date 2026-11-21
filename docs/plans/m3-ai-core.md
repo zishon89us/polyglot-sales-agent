@@ -1,13 +1,15 @@
 # Plan: M3, the AI core
 
-Status: proposed · 2026-11-22 · follows ADR 0013 and the M2 retro
+Status: proposed · 2026-11-22 · follows ADR 0013 and the M2 retro ·
+checked by a second agent, whose report and what was done about it are in
+`reviews/2026-11-22-m3-plan-check.md`
 
 M3 puts a model where M2 has an echo. A customer's messages are gathered
 into a batch, answered in their language from the business's own data,
 checked by code before anything is sent, and recorded. An eval harness
-measures what code cannot check. This plan cuts M3 into sixteen units, each
-small enough for one pull request, in the order they depend on each other.
-It is a plan: nothing in it is built.
+measures what code cannot check. This plan cuts M3 into nineteen units, U0
+to U18, each meant for one pull request, in the order they depend on each
+other. It is a plan: nothing in it is built.
 
 ## Exit criteria
 
@@ -18,113 +20,188 @@ Three things the agent cannot supply stand between this plan and that
 sentence, and the plan is arranged so that everything else can be finished
 first:
 
-| What | Who | Needed by | On `decisions-needed.md` |
+| What | Who | Needed by | Where it is asked |
 | --- | --- | --- | --- |
-| The supported languages, and a speaker to read each language's cases | Maintainer | U14 (the dataset); the wording of U7's fixed texts | Row 4 |
-| AWS credentials and a spending limit | Maintainer | U12's check against the real service; U15 | Row 6 |
-| Acceptance of the baseline as the thresholds | Maintainer | U15 | `ai/eval-plan.md`, section 7 |
+| The supported languages, and a speaker to read each language's texts and cases | Maintainer | U7 (the supported set at run time), U8 (wording), U10 (keyword and emergency phrase lists), U16 (the dataset) | `decisions-needed.md`, row 4 |
+| AWS credentials and a spending limit | Maintainer | U14's one call against the real service; U17 | Row 6 |
+| Acceptance of the measured baseline as the thresholds | Maintainer | U17 | `ai/eval-plan.md`, section 7; asked when the baseline exists |
 
-Until the third, M3 can be built and tested but **cannot be called done**:
-thresholds are set from a measured baseline that the maintainer accepts,
-and there is no baseline without a real model.
+Until the third, M3 can be built and tested but **cannot be called done**.
+
+What "pass the eval thresholds" can mean in M3 is itself a question
+(question 5): the model has no tools until M5, so the M3 baseline covers
+only what can be measured without them.
 
 ## What M3 is not
 
 - No handover queue, no staff, no dashboard, no sign-in (M4).
 - No bookings, no slots, no reminders, no templates sent (M5). The model has
-  **no tools** in M3: the only pack a tenant can answer from is the profile
-  itself. The tool loop is built and tested with a tool of the tests' own.
+  **no tools** in M3. The tool loop is built and tested with a tool that
+  exists only in test files.
 - No real WhatsApp. No real customer's message goes to the model: the evals
   and every test use synthetic conversations.
 
-## Four questions to settle before the units that depend on them
+## Eight questions to settle before the units that depend on them
 
-Each is put with the agent's proposal. They are design questions, raised
-here so that they are answered once and not inside a pull request.
+Each is put with the agent's proposal. Questions 1 to 3 and 5 to 8 are
+rows 29 to 35 of `decisions-needed.md`.
 
-1. **Handover in M3.** Several M3 criteria end in "the session is handed
-   over": a sensitive topic (US-C8, 5), provider failure after 15 minutes
-   (US-C15, 4), an emergency phrase (order of checks, 4a). Handover is
-   US-C6, in M4, and only two criteria are listed as delivered later
-   (US-C11, 4; US-C12, 4). *Proposal:* M3 builds the handover **record**
-   and its first transition (unit U9): the session is marked handed over
-   with its reason, the assistant stops answering it, and the customer is
-   told a person will reply. The queue, staff, notifications and every
-   later transition are M4's. Without this, M3 would have to pretend to
-   hand over.
-2. **Email in M3.** Degraded mode sends one email to each tenant (US-C15,
-   6 and 8); the emergency event sends one (4a). Email sending has no ADR
-   (#200) and is M4's. *Proposal:* M3 queues the notice as a job and a
-   writer that only logs takes it; the production guard refuses that
-   writer (#165). The real sender is M4's.
-3. **Evals on pull requests need the provider key in CI.** The eval plan
-   runs a subset against the real model on every pull request that touches
-   prompts or the AI code. That spends money on each push. *Proposal:* as
-   the eval plan says, but only once the maintainer has put the key in the
-   repository's secrets and set the cap; until then CI runs the harness's
-   own tests on the fake client and says in its summary that no score
-   exists.
-4. **Who a customer is, and what may be sent twice** (rows 1 to 3 of
-   `decisions-needed.md`). U1 builds sessions on the contact rules as they
-   stand, and U11 keeps the send policy as it stands. A "no" to any of the
-   three is cheaper before those units than after.
+1. **Handover in M3** (row 29). Handover is US-C6, in M4, but M3's own
+   criteria and checks end in it: a sensitive topic (US-C8, 5), provider
+   failure after 15 minutes (US-C15, 4 and 5), an emergency phrase or flag
+   (order of checks, 4a). The stories file lists four criteria as delivered
+   later; two of them, US-C11, 4 and US-C12, 4, are there only because
+   handover is M4's, and it says that in M3 acting on a request for a
+   person "is US-C6, in M4". *Proposal:* M3 builds the handover **record**
+   and its first transition (U11), and every trigger of the guardrail
+   policy's section 6 whose detection M3 builds creates one:
+
+   | Reason | Trigger | With a yes |
+   | --- | --- | --- |
+   | `emergency` | Phrase list; the model's flag | M3 (U10, U11) |
+   | `requested` | The person button; the model's flag | M3 (U11); US-C11, 4 leaves the later table |
+   | `sensitive-topic`, `data-request` | The model's flag | M3 (U11) |
+   | `repeated-failure` | Two fallbacks in a row | M3 (U9 counts, U11 acts) |
+   | `unsupported-content` | Three batches with no text | M3 (U10 counts, U11 acts); US-C12, 4 leaves the later table |
+   | `limit` | The turn cap or the token budget | M3 (U12, U11) |
+   | `provider-failure` | An unanswered message 15 minutes old | M3 (U15, U11) |
+   | `late-change`, `staff` | — | M5, M4 |
+
+   The session is marked handed over with its reason, the assistant stops
+   answering it, and the customer gets the handover text. The queue, staff,
+   notifications, claiming, returning and every later transition stay in
+   M4, as do the tests the state machines call H1 and H3 beyond the first
+   transition. **In M3 nobody can reply:** the customer is told a person
+   will, and no screen exists for that person. That is acceptable only
+   because nothing is live. With a no, U11 is not built; the assistant
+   goes on answering in each of those cases; U10 sends the emergency text
+   with no handover; U15 sends its fallback and stops there; and those
+   criteria join the later table.
+2. **Email in M3** (row 30). Degraded mode sends one email to each tenant
+   (US-C15, 6 and 8); the emergency event sends one. Email sending has no
+   ADR (#200) and is M4's. *Proposal:* M3 queues the notice as a job, and
+   a writer that only logs takes it (built in U10, which needs it first).
+   The production guard refuses that writer. The real sender is M4's.
+   Either way no email is sent before M4.
+3. **Evals on pull requests, and a rule of `AGENTS.md` that cannot yet be
+   kept** (row 31). Section 6 says no change to AI behaviour merges without
+   an eval run attached. U7 to U15 change AI behaviour and merge before
+   any score can exist: the harness is U16 and a real model is U17.
+   *Proposal:* until U17, such a pull request attaches the run of its own
+   tests against the scripted client and says that no score exists; from
+   U17 the rule holds as written, and the eval plan's subset runs against
+   the real model on each such pull request, once the maintainer has put
+   the key in the repository's secrets and set the cap. Each push then
+   spends money. The key must not reach a run from a fork (#163, now in
+   M6; U17 needs it and takes it).
+4. **Rows already on the decisions page that units build on.** A "no" is
+   cheaper before the unit than after: U2 on rows 1 (who a customer is)
+   and 18 (`handled_at`, which U2 removes); U13 on rows 2, 3, 7 and 8 (the
+   send policy); U1 and U9 on row 21 (the pack's hooks, due "in M3 and
+   M5"); U0 closes #227 only on a yes to row 13.
+5. **What the M3 evals cover with no tools** (row 32). The eval plan's
+   minimum sizes are for v1.0 and say the M3 dataset will be smaller. Some
+   of what they grade does not exist in M3: tool use and bookings, inquiry
+   labels (US-C19), and the red-team cases on tool misuse beyond "a tool
+   that was not offered is not run". *Proposal:* U16's design note lists,
+   by dimension of the eval plan, what the M3 dataset holds and how many
+   cases, and what waits for M5; the M3 baseline and thresholds are for
+   those dimensions only; the baseline is measured again in M5 when tools
+   and the pack's part of the prompt arrive; the M3 tag's notes say so.
+6. **Buttons and captions** (row 33). The channel interface built in M2
+   receives text or "unsupported" and sends text. M3's criteria need more:
+   the stop and start buttons (US-C7, 1 and 5), the opt-in question with a
+   button (US-C7, 7), the person button on the fallback and the
+   unsupported-type reply, and a caption read as text (US-C12, 2).
+   *Proposal:* build them in M3 as their own unit (U5), in the interface,
+   the WhatsApp adapter and both stand-ins, from Meta's pages read and
+   dated at that time. A tap is checked for whose conversation it came
+   from, as #222 asks for booking buttons.
+7. **Whether a tenant is answering** (row 34). Steps 4a, 5 and 8 of the
+   order of checks read it, and the handover text and the notices need a
+   default language, business hours, a support contact and a notification
+   address that no table holds. *Proposal:* U3 stores those settings and
+   builds the test "every required setting is present and a channel is
+   connected"; step 8 is built in U10. The credential checks, the daily
+   timer, the emails and the unanswered list of machine 9 stay in M4.
+8. **Parts of M3 criteria that need M5** (row 35), not yet in the stories
+   file's table of criteria delivered later. *Proposal:* U0 adds them:
+   US-C4, 4 and 14 and the booking clause of 10 (slot, booking and
+   calendar claims are the pack's, ADR 0012); US-C5, 1 for a template;
+   US-C8, 4 for a real tool's result; US-C15, 9 (a reminder in degraded
+   mode). The core builds the place a pack registers its claim kinds, as
+   U1's ADR decides, and tests it with a claim kind of the tests' own.
 
 ## Units and order
 
 | Unit | What | Stories and criteria | Needs | Done when |
 | --- | --- | --- | --- | --- |
-| U0 | Settle the findings that are about documents, and write the ADR for the pack interface | — | — | Every finding listed under U0 is closed with its reason or moved; the ADR is merged |
-| U1 | Sessions, the reply window and the batch | US-C11, 1 to 3 and 5; order of checks, 4 and 12; NFR-P5 | U0 | A burst of messages inside the window gets one reply, in order; a message that arrives while a reply is being made replaces it; two workers never answer one conversation at once; `handled_at` is gone |
-| U2 | The business profile and what the model is given | ADR 0006; US-C4, 1 and 12 | U0 | Services, policies and opening hours are stored per tenant, seeded by an operator's command, and assembled into one context with nothing of the contact in it (NFR-V7) |
-| U3 | `LlmClient`, the fake client and the prompt loader | ADR 0005; #158 | U0 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded in input, output and tool rounds |
-| U4 | Traces and cost | US-C10 | U3 | Every model call leaves one trace with no message text, number or name in it; an end-to-end run's logs are scanned for both |
-| U5 | The turn: the model in place of the echo, and the customer's language | US-C3; US-C8, 1 to 4; order of checks, 15 | U1, U2, U3, U4 | With the fake client, a batch is answered from the profile; the session records its language; an unsupported language is attempted and marked |
-| U6 | Output checks | US-C4, 2 to 10, 14 and 15; guardrail policy, section 4 | U5 | Each claim kind passes only against the stored value it names; a value with no claim fails; a failed check sends the fallback and counts |
-| U7 | Fixed texts and disclosure | US-C5; guardrail policy, sections 7 and 8 | U5 | The first message of a session carries the disclosure, added by code, in the contact's language or the tenant's default; every fixed text exists in every supported language, or the gap is listed |
-| U8 | What code decides before the model | US-C7, 1 and 4 to 7; US-C12, 1 to 3; order of checks, 4a, 5 and 13 | U1, U7 | An opt-out keyword is applied without the model in every state; an emergency phrase sends its text; a batch with no text gets the unsupported-type reply |
-| U9 | The handover record (if question 1 is answered yes) | US-C8, 5; US-C15, 4 and 5; order of checks, 10 and 11 | U1, U7 | A session handed over for any M3 reason is never answered by the assistant again, and the customer is told once |
-| U10 | Limits: one sender, one tenant | US-C17; #157 | U1 | The twenty-first message in five minutes gets one notice and fifteen minutes of silence, with no model call; a tenant's daily budget stops model calls and says so |
-| U11 | Delivery tracking and order | US-C18, 6; NFR-R7 | U1 | The next message of a conversation goes when the one before is delivered, or ten seconds after it was sent |
-| U12 | The Bedrock adapter and the guard for the fake client | ADR 0010; #165 | U3 | Contract tests pass against recorded, synthetic answers; in production the fake client is refused; **one call against the real service, when credentials exist** |
-| U13 | Provider failure and degraded mode | US-C15 | U5, U9, U12 | Three failures in a row send the fallback once in fifteen minutes; five sessions failing in two minutes run a health check, and only its failure starts degraded mode |
-| U14 | The eval harness, and the first dataset | `ai/eval-plan.md`; NFR-A1, A2, A4 | U6, U8, and the languages | `make eval` drives the same code as production against the fake client and against a real model; the dataset has its planned minimum sizes in each supported language |
-| U15 | Baseline, thresholds and the eval job in CI | NFR-A1 to A4; OQ-6, OQ-7 | U12, U14, credentials, a speaker's review | Two or three candidate models are measured; the results are in ADR 0010; the maintainer accepts a baseline; the job blocks a merge that falls below it |
-| U16 | End to end with the model, and close | The exit criteria | All | The end-to-end test of M2 passes with a scripted model in place of the echo; README, STATUS, the retro and the tag |
+| U0 | Settle the findings that are about documents; move what is not M3's | — | — | Every finding listed under U0 is closed with its reason or moved; the stories file's later table is as question 8 was answered |
+| U1 | The ADR for the pack interface | ADR 0012 | U0 | The ADR is merged: how a pack registers tools, claim kinds, prompt text and buttons |
+| U2 | Sessions, the reply window and the batch | US-C11, 1 to 3; order of checks, 4 and 12; NFR-P5 | U0 | A burst inside the window gets one reply, in order; a message that arrives while a reply is being made replaces it; two workers never answer one conversation at once; `handled_at` is gone, with a tested way back |
+| U3 | The business profile, the tenant's settings, and what the model is given | ADR 0006; order of checks, 8 (the test only) | U0 | Services, policies, opening hours and settings are stored per tenant, loaded by an operator's command, and assembled into one context with nothing of the contact in it (NFR-V7); its size is measured and a budget set |
+| U4 | `LlmClient`, the fake client and the prompt loader | ADR 0005; US-C4, 2 (the schema); #158 | U1 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded; no provider's library is imported outside its adapter |
+| U5 | Buttons and captions in the channel | US-C12, 2 | U0 | A tap arrives as a typed event tied to its conversation; a text with buttons can be sent; a caption is read as text; both stand-ins do the same |
+| U6 | Traces and cost | US-C10 | U2, U4 | Every model call leaves one trace, linked to its session, with no message text, number or name in it |
+| U7 | The turn: the model in place of the echo, and the customer's language | US-C3, 4; US-C8, 4 with a test tool; US-C11, 5; order of checks, 15 | U2, U3, U4, U6 | With the fake client, a batch is answered from the profile; the session records its language; an unsupported language is attempted and marked; the lease is renewed before each attempt |
+| U8 | Fixed texts and disclosure | US-C5, 1 to 3 | U5, U7 | The first message of a session carries the disclosure, added by code; every fixed text M3 sends exists in every supported language, or the gap is listed |
+| U9 | Output checks | US-C4, 3, 5 to 9, 15, and 10 but for bookings; US-C15, 10; guardrail policy, section 4 | U7, U8 | Each core claim kind passes only against the stored value it names; a value with no claim fails; a failed check sends the fallback and counts; a fake that returns hostile output is stopped |
+| U10 | What code decides before the model | US-C7, 1, 2 and 4 to 7; US-C12, 1 to 3; order of checks, 4a, 5, 8 and 13 | U3, U9, and U11 if it is built | An opt-out keyword or button is applied without the model in every state; an emergency phrase sends its text; a batch with no text gets the unsupported-type reply |
+| U11 | The handover record (if question 1 is answered yes) | US-C8, 5; US-C11, 4; US-C12, 4; order of checks, 10 and 11 | U8, U9 | A session handed over for any reason in question 1's table is never answered by the assistant again, and the customer is told once |
+| U12 | Limits: one sender, one tenant | US-C17; NFR-C2; #157 | U8, and U11 if it is built | The twenty-first message in five minutes gets one notice and fifteen minutes of silence, with no model call; the turn cap and the token budget stop a session |
+| U13 | Delivery tracking and order | US-C18, 6; NFR-R7 | U2 | The next message of a conversation goes when the one before is delivered, or ten seconds after it was sent |
+| U14 | The Bedrock adapter and the guard for the fake client | ADR 0010; #165 | U4 | Contract tests pass against answers hand-written from a dated page; in production the fake client is refused; its logs carry no message text; **one call against the real service, when credentials exist** |
+| U15 | Provider failure and degraded mode | US-C15, 1 to 8 | U7, U9, U10, U14, and U11 if it is built | Three failures in a row send the fallback once in fifteen minutes; five sessions failing in two minutes run a health check, and only its failure starts degraded mode |
+| U16 | The eval harness, and the first dataset | `ai/eval-plan.md`; US-C3, 1 to 3; US-C4, 1, 11 to 13; US-C8, 1 to 3 and 6; NFR-A1, A2, A4 | U10, U11, and the languages | `make eval` drives the same code as production against the fake client; the dataset holds what question 5's answer says, in each supported language |
+| U17 | Baseline, thresholds and the eval job in CI | NFR-A1 to A4; NFR-V6; OQ-6, OQ-7 | U14, U16, credentials, a speaker's review | Two or three candidate models are measured; the provider's terms, prices and model list are read, dated and linked in ADR 0010; the maintainer accepts a baseline; the job blocks a merge that falls below it |
+| U18 | End to end with the model, and close | The exit criteria | U12, U13, U15, U17 | M2's end-to-end test passes with a scripted model in place of the echo, and its logs are scanned for message text and numbers; traceability, README, STATUS, the retro and the tag |
+
+US-C18, 1 to 4 were built in M2; their tests are entered in
+`traceability.md` by U13, which finds any that is missing.
 
 ```mermaid
 flowchart LR
     U0 --> U1
     U0 --> U2
     U0 --> U3
-    U3 --> U4
-    U1 --> U5
-    U2 --> U5
-    U3 --> U5
-    U4 --> U5
-    U5 --> U6
-    U5 --> U7
-    U1 --> U8
+    U0 --> U5
+    U1 --> U4
+    U2 --> U6
+    U4 --> U6
+    U2 --> U7
+    U3 --> U7
+    U4 --> U7
+    U6 --> U7
+    U5 --> U8
     U7 --> U8
-    U1 --> U9
     U7 --> U9
-    U1 --> U10
-    U1 --> U11
-    U3 --> U12
-    U5 --> U13
-    U9 --> U13
-    U12 --> U13
-    U6 --> U14
-    U8 --> U14
-    U12 --> U15
+    U8 --> U9
+    U8 --> U11
+    U9 --> U11
+    U3 --> U10
+    U9 --> U10
+    U11 --> U10
+    U8 --> U12
+    U11 --> U12
+    U2 --> U13
+    U4 --> U14
+    U7 --> U15
+    U9 --> U15
+    U10 --> U15
+    U11 --> U15
     U14 --> U15
-    U13 --> U16
-    U15 --> U16
     U10 --> U16
     U11 --> U16
+    U14 --> U17
+    U16 --> U17
+    U12 --> U18
+    U13 --> U18
+    U15 --> U18
+    U17 --> U18
 ```
 
-U1, U2 and U3 do not depend on each other and can be built in any order.
-U10 and U11 are off the main line and can be built whenever U1 is in.
+U2, U3 and U5 do not depend on each other. U13 and U14 are off the main
+line and can be built whenever U2 and U4 are in.
 
 ## How the units are worked
 
@@ -134,165 +211,217 @@ made:
 - A pull request is opened as a **draft** and marked ready only when its
   review and the check of the review's fixes are both in.
 - **A design note comes before the code** for any rule about people or
-  money: the cases as a table, reviewed before the build. In M3 that is U1
-  (what a session and a batch are), U6 (what passes), U8 (opt-out and the
-  emergency text), U9, U10 and U13.
+  money: the cases as a table, reviewed before the build. In M3 that is
+  U2, U3 (what of a person may reach the model), U8, U9, U10, U11, U12,
+  U13, U15 and U17 (the spending cap).
 - Each finding listed under a unit is **read in full in that unit's design
   note** and answered there: settled by the unit, moved with a reason, or
-  closed as overtaken. The lists below were made from the findings' titles.
+  closed as overtaken. The lists below were made from the findings' titles
+  and, for about a sixth of them, their text.
+- The README's state table and `traceability.md` are updated in the pull
+  request that changes what they describe.
 - Anything the agent cannot run on its own machine is named in the pull
   request before the push.
+- An issue is opened for each unit when this plan is merged.
 
 ## Scope of each unit, and the findings it must settle
 
 Every open issue in the M3 milestone on 2026-11-22 is in one of these
-lists. An issue under two units is listed where it is first needed.
+lists. #13 and #184 are shared by two units, and M2's three leftover
+issues (#288, #290, #295) are divided among units by U0.
 
-### U0: Documents, and the pack interface's ADR
+### U0: Document findings, and what is not M3's
 
 No code. The findings that are about what the documents say, read now so
 that no later unit builds on a contradiction: #76, #77, #92, #111, #125,
-#132, #147, #150, #199, #218, #219, #220, #221, #223, #225, #226, #229,
-#230, #232, #234, #253. An ADR for the pack interface and how a pack is
-registered, which the Gate 2 review called the central bet with no record
-(#200, #237, #278); it is built in M5, and M3 must not shape the turn in a
-way it would then have to undo.
+#147, #150, #199, #218, #221, #223, #225, #226, #229, #232, #234, #253.
 
 Sorted into M3 by the rule of the triage but, by their titles, not M3's.
 U0 reads each and moves it: #80 and #82 (handover rules, M4), #85 (a failed
-reply shown to staff, M4), #184 (stored data for sign-in, M4), #224
-(inviting a user, M4), #222 (a forged button naming a booking, M5), #240
-(what counts as a booking tool, M5). #227 (the application role and the
-operator's record) was settled in M2 and is closed with that reason, if the
-maintainer says yes to row 16 of the decisions page.
+reply shown to staff, M4), #224 (inviting a user, M4), #219 and #220 (the
+cross-tenant credential and the order of the webhook's checks), #222 (a
+forged button naming a booking, M5), #230 (the inquiry label as a second
+use of the model, M5), #240 (what counts as a booking tool, M5). #227 was
+settled in M2 and is closed with that reason on a yes to row 13.
 
-### U1: Sessions, the reply window and the batch
+U0 also reads the three leftover issues of M2 (#288, #290, #295) item by
+item, says which unit takes each item, and moves the rest: per-tenant
+credentials, operator alerts, deletion after 30 days, the image scan and
+the deployment definition are not M3's.
+
+### U1: The ADR for the pack interface
+
+What the Gate 2 review called the central bet with no record (#200, #237):
+how a pack registers its tools, claim kinds, prompt text, buttons and
+session outcome. It is built in M5; U4, U9, U10 and U11 must not shape the
+turn in a way M5 would undo, and steps 10 and 13 of the order of checks
+must not name the pack's buttons in the core.
+
+### U2: Sessions, the reply window and the batch
 
 The `sessions` table and its machine (state machines, section 3); the
 reply window; the batching window as the delay of the job that answers;
-the batch as the customer's messages since the last answered one. A reply
-not yet sent when a new message arrives is discarded (the `discarded`
-status, unused until now). Replaces `messages.handled_at`. US-C11 (#47);
-the worker's and the webhook's leftovers (#288, #290); #86, #99, #179,
-#189.
+the batch as the customer's messages since the last answered one; the
+`discarded` status for a reply overtaken by a new message; the send-time
+check of the reply window (state machines, section 7). A migration gives
+existing messages a session, removes `messages.handled_at`, and says what
+happens to a message unanswered at that moment; its way back is tested
+(NFR-O4). US-C11 (#47); #86, #179; the shared lists of states and flags
+(#278); who a customer is (#284); the items of #288 and #290 that U0
+assigns here.
 
-### U2: The business profile and what the model is given
+### U3: The business profile, the tenant's settings, what the model is given
 
 `services`, `policies` and opening hours as core tables (ADR 0012, "What
-the core owns"), an operator's command to load a profile from a file, since
-no dashboard exists to enter one, and the function that assembles what the
-model sees: the profile, the calendar, the batch, and nothing that
-identifies the contact. US-C4 (#13, in part); #228.
+the core owns"); the settings of question 7; an operator's command to load
+them from a file, since no dashboard exists; the test of whether a tenant
+is answering; the function that assembles what the model sees, with
+nothing that identifies the contact; the size budget ADR 0006 asks for,
+from measured counts. The calendar is not assembled here: dates are the
+pack's. US-C4 (#13, the storage); #228.
 
-### U3: `LlmClient`, the fake client and the prompt loader
+### U4: `LlmClient`, the fake client and the prompt loader
 
-The interface of ADR 0005 in this project's own types; `FakeLlmClient`,
-scripted; prompts under `prompts/` with a version and a `meta.yaml`; the
-output schema (reply, claims, flags, tool calls); the limits on every call
-(#158). No provider yet.
+The interface of ADR 0005 in this project's own types, `health()`
+included; `FakeLlmClient`, scripted; prompts under `prompts/` with a
+version and a `meta.yaml`; the output schema (reply, claims, flags, tool
+calls); the limits on every call (#158); the test that no provider's
+library is imported outside its adapter. No provider yet.
 
-### U4: Traces and cost
+### U5: Buttons and captions in the channel
+
+Question 6. Inbound: a tap as a typed event, a caption as text. Outbound:
+a text with up to the number of buttons Meta allows. The interface, the
+WhatsApp adapter, the contract tests, both stand-ins and dated fixtures.
+What Meta's pages say is read and dated in the pull request, not recalled.
+
+### U6: Traces and cost
 
 `ai_traces` and `tool_calls`; the wrapper that writes a trace for every
-call, failed ones included; cost from token counts and a price table that
-is a setting. US-C10 (#19); #186.
+call, failed ones included, with the spans NFR-P2 is measured from; cost
+from token counts and a price table that is a setting. US-C10 (#19); #186.
 
-### U5: The turn, and the customer's language
+### U7: The turn, and the customer's language
 
-The worker's turn calls the model through U3 with what U2 assembles and
-stores the reply as U1 allows. The tool loop, exercised by a tool of the
-tests'. The session's language and the unsupported-language mark. Customer
-text and owner-entered text are delimited as data. US-C3 (#12); US-C8
-(#17, criteria 1 to 4, as far as code can show; the rest is the evals').
+The worker's turn calls the model through U4 with what U3 assembles and
+stores the reply as U2 allows. The first prompt, holding what the
+guardrail policy's section 9 requires. The tool loop, exercised by a tool
+that exists only in test files. The session's language and the
+unsupported-language mark. Customer text and owner-entered text are
+delimited as data. US-C3 (#12); US-C8 (#17). Criteria that are the
+model's behaviour are shown by the evals, not here.
 
-### U6: Output checks
+### U8: Fixed texts and disclosure
 
-The checks of the guardrail policy, section 4: the claim checker for each
-kind, the scan for values with no claim, links and contact details, the
-fallback and its counter. US-C4 (#13); #102, #207, #208, #209, #211, #213,
-#239, #242.
+The texts of the guardrail policy's section 7 that M3 sends: disclosure,
+fallback, unsupported type, handover inside and outside business hours,
+emergency, opt-out and opt-in confirmations, rate notice, opt-in question,
+automated-assistant answer. The three booking texts are M5's; the holding
+message for an overdue handover is M4's. One table, one source, each
+language or a stated gap, with the buttons of U5. US-C5 (#14); #107, #212.
+The wording in languages other than English waits on row 4 and a speaker;
+the mechanism does not.
 
-### U7: Fixed texts and disclosure
+### U9: Output checks
 
-Every text code sends: disclosure, fallback, opt-out and opt-in
-confirmations, the unsupported-type reply, the rate notice, the emergency
-text, the holding message. One table, one source, each language or a
-stated gap. US-C5 (#14); #107, #212. The wording in languages other than
-English waits on row 4 and a speaker; the mechanism does not.
+The guardrail policy's section 4: the claim checker for the core's kinds
+(price, opening hours, service details, policies) and the place a pack
+registers its own; the scan for values with no claim; links and contact
+details; the `data-request` flag; the canary and repetition checks (O6);
+empty and over-long replies (O7); a reply that does not match the schema;
+the fallback and its counter. US-C4 (#13); #102, #207, #208, #209 (its
+part), #210, #211, #213, #239.
 
-### U8: What code decides before the model
+### U10: What code decides before the model
 
-Opt-out and opt-in keywords and buttons, applied in every state (machine
-6) with `consent_records`; a free-text request to stop, from the model's
-flag; the emergency phrase list (4a); the unsupported-type reply and its
-count. US-C7 (#16); US-C12 (#48); #78, #79, #100, #112, #129, #206, #233;
-who a customer is (#284).
+Opt-out and opt-in by keyword and button, in every state (machine 6), with
+`consent_records`; a free-text request to stop, from the model's flag; the
+emergency phrase list (4a); step 8; the unsupported-type reply and its
+count; the notice writer of question 2 and its guard. US-C7 (#16); US-C12
+(#48); #78, #79, #100, #112, #129, #206, #233. Four mechanisms: this unit
+is likely to be two pull requests.
 
-### U9: The handover record
+### U11: The handover record
 
 If question 1 is answered yes. The `handovers` table, the transition that
-creates one, the session's handed-over mark, the holding message, the
-person button (order of checks, 11) and what a handed-over session does
-with a new message (10). Nothing a member of staff would see.
+creates one for each trigger in question 1's table, the session's
+handed-over mark, the handover text, and what a handed-over session does
+with a new message (order of checks, 10 and 11). Nothing a member of
+staff would see.
 
-### U10: Limits
+### U12: Limits
 
-The per-contact rate limit and pause (order of checks, 9), and the
-tenant's limits on model calls and new contacts. US-C17 (#66); #87, #130,
-#131, #157, #190.
+The per-contact rate limit and pause (order of checks, 9); the turn cap
+and the token budget (NFR-C2); the tenant's limits on model calls and new
+contacts, whose numbers are the maintainer's (OQ-7) and are settings. The
+stored counters (#184, part c). US-C17 (#66); #87, #130, #131, #157, #190.
 
-### U11: Delivery tracking and order
+### U13: Delivery tracking and order
 
 What M2 left of US-C18: the wait for delivery before the next message
-(NFR-R7). US-C18 (#67); #139.
+(NFR-R7). A status that arrives before the message's identifier is
+recorded is lost today (#290), and every such message would wait the full
+ten seconds; U13 settles that first. US-C18 (#67); #139.
 
-### U12: The Bedrock adapter and the guard
+### U14: The Bedrock adapter and the guard
 
 The first real adapter (ADR 0010, amendment): region, inference profile,
 model and retention mode as settings; no retry of its own; errors mapped
-to the interface's typed failures. Contract tests against recorded,
-synthetic answers. The production guard refuses the fake client (#165).
-The rest of the end-to-end unit's leftovers (#295). A call against the
-real service is made once, by hand, when the maintainer supplies
-credentials; until then the adapter is checked against recordings only,
-and the pull request says so.
+to the interface's typed failures; `health()`. Its contract tests run
+against answers the agent writes by hand from a dated page of the
+provider's documentation, since nothing can be recorded without
+credentials; the pull request says so. The production guard refuses the
+fake client (#165). The items of #295 that U0 assigns here. One call
+against the real service is made by hand when credentials exist.
 
-### U13: Provider failure and degraded mode
+### U15: Provider failure and degraded mode
 
-Retries, `awaiting-retry`, the fifteen-minute rules, the health check,
-degraded mode and recovery (state machines, section 8). The notices to
-tenants are queued and logged (question 2). US-C15 (#64); #188.
+Retries and how they nest with the job's own (#99); `awaiting-retry` and
+its clock (#189); the fifteen-minute rules; the health check; degraded
+mode, its invariant (#132) and recovery (state machines, section 8); the
+operator's switch (guardrail policy, section 10); the stored trigger
+(#184, part c). The notices to tenants go to U10's writer. US-C15 (#64);
+#188.
 
-### U14: The eval harness and the first dataset
+### U16: The eval harness and the first dataset
 
 The runner, the case format, the graders, the report, `make eval` and
 `make eval-fast`, against the same code as production with only the
-channel absent. The first dataset at its planned minimum sizes. The
-findings of the Gate 2 review of the eval plan: #93, #94, #210, #214,
-#215, #216, #217, #241, #243, #244. The languages (#168).
+channel absent; the named cases the eval plan promises for M3; a tenant at
+U3's size budget. The findings of the Gate 2 review of the eval plan: #93,
+#94, #214, #215, #216, #217, #241, #242, #243, #244. The languages (#168).
 
-### U15: Baseline, thresholds and the job in CI
+### U17: Baseline, thresholds and the job in CI
 
-The comparison of candidate models that ADR 0010 asks for; cost per
-session from the traces (OQ-7); the baseline the maintainer accepts; the
-CI job with its spending cap and its key kept from forks (#163).
+The comparison of candidate models that ADR 0010 asks for; the reading
+NFR-V6 waits on; cost per session from the traces (OQ-7); the baseline the
+maintainer accepts; the CI job with its spending cap and its key kept from
+forks (#163).
 
-### U16: End to end, and close
+### U18: End to end, and close
 
 The M2 end-to-end test with a scripted model; the compose stack with the
-fake client; README and STATUS; the retro; the tag.
+fake client; the scan of a whole run's logs; README and STATUS; the retro;
+the tag.
 
 ## What could make this plan wrong
 
-- **Sixteen units is more than M2's ten,** and M2's ten were merged over
-  five days, 2026-11-17 to 2026-11-21, with a review round each. The count is a guess at where the
-  seams are, and U6 and U14 are the likeliest to split.
-- **The model has no tools in M3.** If the tool loop cannot be tested well
-  without a real tool, part of U5 moves to M5.
-- **A "no" to question 1** removes U9 and leaves three criteria to be
-  delivered in M4; the table in `user-stories.md` would then list them.
-- **The findings were assigned by title.** A design note may find that a
-  finding belongs to another unit, or that two units cannot be separated.
-- **No real model is called until U12's credentials.** Everything before
+- **Nineteen units is nearly twice M2's ten,** and M2's ten were merged
+  over five days, 2026-11-17 to 2026-11-21, with a review round each. The
+  count is a guess at where the seams are; U2, U9, U10 and U16 are the
+  likeliest to split.
+- **Tests are named only by each unit's "done when".** How time is driven
+  in the batching and waiting tests, with a clock the test owns or real
+  time, is decided in U2's design note; M2 had one flaky timed test.
+- **The model has no tools in M3.** A tool loop shaped by a test's tool,
+  and a baseline measured without tools, may both need redoing in M5.
+- **A "no" to question 1** changes U10, U12, U15 and U16 as that question
+  says, and leaves more of M3's criteria to M4.
+- **The findings were assigned mostly by title.** A design note may find
+  that a finding belongs to another unit, or that two units cannot be
+  separated.
+- **No real model is called until U14's credentials.** Everything before
   that is tested against a script the agent wrote, which shows that the
   code does what the script says and nothing about a model.
+- **NFRs whose check falls in M3 are not all cited above** (NFR-R4, R6,
+  S7, V2, A5, A6 among them). U0 lists each against a unit.

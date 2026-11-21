@@ -2,10 +2,11 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M1 Design
+## Current milestone: M3 AI core (planned, not started)
 
-Exit criteria: design documents merged; open questions listed for the
-maintainer. Issues #37–#44, plus #58 and #61 for the requirements gate.
+Exit criteria: grounded multilingual answers pass the eval thresholds; the
+eval job runs in CI. The plan is `plans/m3-ai-core.md`. M1 and M2 met
+theirs; M2 is tagged `m2-walking-skeleton`.
 
 M0 Inception met its exit criteria on 2026-11-16; see
 [`retros/m0-inception.md`](retros/m0-inception.md).
@@ -393,19 +394,24 @@ M0 Inception met its exit criteria on 2026-11-16; see
 - 2026-11-22 — #297 merged. The 92 issues were moved as its page says,
   each checked first to be open and where the page said; none was closed.
   M3 now holds 90 open issues, M4 44, M5 49, M6 8. **The M3 plan is
-  written** (`plans/m3-ai-core.md`): sixteen units, from sessions and the
-  model client to the eval harness and a measured baseline, with every one
-  of the 90 issues named under the unit that must settle it. It raises
-  four questions before the units that depend on them; three are new rows
-  on the decisions page.
+  written** (`plans/m3-ai-core.md`): nineteen units, U0 to U18, from
+  sessions and the model client to the eval harness and a measured
+  baseline, with every one of the 90 issues named under a unit. A second
+  agent checked the first draft and found it short: nothing owned buttons
+  in the channel or the test of whether a tenant is answering, the unit
+  count was wrong, six dependencies were missing, and the dataset it
+  promised cannot exist without tools
+  (`reviews/2026-11-22-m3-plan-check.md`). The plan now raises eight
+  questions; seven are rows 29 to 35 of the decisions page.
 
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 9 of `decisions-needed.md`, above all rows 1, 4 and 7.
+   to 6 and 29 to 35 of `decisions-needed.md`, above all rows 1, 4, 29
+   and 33.
 2. The agent opens an issue for each unit when the plan is merged, and
-   starts with U0, which needs no answer: the document findings and the
-   ADR for the pack interface.
+   starts with U0, the document findings. U0 can start without answers;
+   it finishes only with rows 13 and 35.
 3. M3 cannot be called done without the maintainer: the languages, AWS
    credentials, and acceptance of a measured baseline.
 4. Before any live use: the emergency phrase lists and text, reviewed by a
@@ -457,7 +463,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 9 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 35 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 
