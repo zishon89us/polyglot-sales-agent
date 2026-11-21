@@ -407,14 +407,23 @@ M0 Inception met its exit criteria on 2026-11-16; see
   new, lesser ones, three of them about what a handover does in M3
   (`reviews/2026-11-22-m3-plan-check-verification.md`).
 
+- 2026-11-22 — #298 merged; an issue is open for each unit (#299 to
+  #317). **M3 U0** (#299): the document findings read and each given an
+  end (`plans/m3-u0-findings.md`). Four small corrections to the glossary
+  and NFR-V7; one finding closed (#77); fifteen to be moved to M4, M5 and
+  M6 after the merge; the rest each named under the unit that answers it.
+  M2's three leftover issues are divided item by item, and M3's NFRs are
+  each tied to a unit. The table of criteria delivered later is unchanged:
+  it waits on rows 29 and 35.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
    to 6 and 29 to 35 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
-2. The agent opens an issue for each unit when the plan is merged, and
-   starts with U0, the document findings. U0 can start without answers;
-   it finishes only with rows 13 and 35.
+2. The agent goes on to U1, the ADR for the pack interface, then U2, U3
+   and U5. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
+   them is cheaper before the unit than after.
 3. M3 cannot be called done without the maintainer: the languages, AWS
    credentials, and acceptance of a measured baseline.
 4. Before any live use: the emergency phrase lists and text, reviewed by a
