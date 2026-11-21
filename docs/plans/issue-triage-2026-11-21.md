@@ -6,8 +6,8 @@ start of M3")
 At the end of M2 there were 203 open issues. 100 of them still
 sat in the milestones that are finished (M0, M1, M2), because a review
 finding is filed under the milestone whose review found it. This page says
-where each of those should go. It is a proposal: **no issue is moved until
-this page is merged**, and then the agent sets the milestones as written
+where each of those should go, or that it stays. It is a proposal: **no
+issue is moved until this page is merged**, and then the agent sets the milestones as written
 here and changes nothing else about any issue.
 
 The other 103 open issues are in M3 or later already
@@ -36,16 +36,17 @@ findings is read.
 
 | Goes to | Issues | Meaning |
 | --- | --- | --- |
-| M3 | 38 | Read while M3 is planned |
-| M4 | 27 | Read while M4 is planned |
+| M3 | 37 | Read while M3 is planned |
+| M4 | 28 | Read while M4 is planned |
 | M5 | 20 | Read while M5 is planned |
 | M6 | 7 | Hardening: how the NFRs are shown, CI, key rotation |
-| docs | 5 | The wording of the requirements; stays where it is, done in passing |
-| now | 2 | The maintainer's; on `decisions-needed.md` |
-| check | 1 | Built; the maintainer checks and closes |
+| docs | 5 | The wording of the requirements. Not moved: done in passing |
+| now | 2 | The maintainer's; on `decisions-needed.md`. Not moved |
+| check | 1 | Built; the maintainer checks and closes. Not moved |
 
-After the move, M3 holds 91 open issues, M4
-43, M5 49 and M6
+So 92 issues move and 8 stay in the milestone
+they are in. After the move, M3 holds 90 open issues,
+M4 44, M5 49 and M6
 8. That is the size of what the reviews of the
 requirements and the design left to settle, not a count of defects in what
 runs.
@@ -53,6 +54,12 @@ runs.
 **Nothing is closed by this page.** Some of these are likely done or
 overtaken, above all among the design findings of M2 (#178 to #253). Each
 is closed, with its reason, when the milestone it now sits in is planned.
+An issue placed by the first of several things it lists, such as #165 and
+the "what the unit left open" issues, stays open after that milestone for
+the rest.
+
+The table was made by `tools/issue-triage.py` from the issues' text as it
+was on 2026-11-21.
 
 ## Every issue
 
@@ -60,7 +67,7 @@ is closed, with its reason, when the milestone it now sits in is planned.
 | --- | --- | --- | --- | --- |
 | #6 | M0 | now | by hand: the maintainer's, on the decisions page | Maintainer: turn on branch protection for main |
 | #7 | M2 | now | by hand: the maintainer's; what is still open is on the decisions page | Maintainer: decisions and accounts needed before milestone M2 |
-| #10 | M2 | M3 | by hand: US-C1: built in M2 but for sessions and the reply window (criterion 4) | US-C1: Receive every inbound message exactly once |
+| #10 | M2 | M4 | by hand: US-C1: criteria 6 to 8 (a tenant that is not answering, the dashboard's list, the emails) are not built; criteria 4 and 9 await the maintainer | US-C1: Receive every inbound message exactly once |
 | #11 | M2 | check | by hand: US-C2: built in M2; the maintainer checks the criteria and closes | US-C2: Keep each business's data separate |
 | #73 | M1 | M5 | names US-B3, US-B4 | Review finding S9: Rescheduling after the reminder was sent is undefined |
 | #74 | M1 | M4 | names US-C6, US-D12, US-D5 | Review finding S10: Deletion with a future booking is incomplete |
@@ -133,7 +140,7 @@ is closed, with its reason, when the milestone it now sits in is planned.
 | #150 | M1 | M3 | names US-B3, US-C14, US-C17 | Low findings and model gaps from the second state-machines verification |
 | #162 | M2 | M6 | by hand: roles are separate (M2); key rotation is not planned | Separate database roles and plan key rotation |
 | #163 | M2 | M6 | by hand: CI and supply chain | Harden CI and the dependency supply chain |
-| #165 | M2 | M3 | by hand: the guard for a fake model client; then M4 for logged email | Refuse to start a deployment with development components |
+| #165 | M2 | M3 | by hand: the guard for a fake model client; it stays open after M3 for logged email (M4) | Refuse to start a deployment with development components |
 | #178 | M2 | M4 | by hand: channel credentials set from the dashboard | Review finding S9: `api` calls the channel directly, and API §6 says `setChannelCredenti… |
 | #183 | M2 | M4 | names US-D3 | Review finding S14: The API status enum lacks `pending`, `held` and `discarded`, which S… |
 | #184 | M2 | M3 | names US-C15, US-C6, US-C9 | Review finding S15: Behaviour that needs stored data with no table or column: (a) failed… |
@@ -150,7 +157,7 @@ is closed, with its reason, when the milestone it now sits in is planned.
 | #253 | M2 | M3 | names US-C17 | Leftovers from the second Gate 2 verification |
 | #276 | M2 | M6 | by hand: CI and document checks | Low findings from the Gate 4 review of U2 (CI and document checks) |
 | #278 | M2 | M3 | by hand: shared lists; the handover reasons a pack may add | M2 U3b: the shared lists U3 did not define, and its Low review findings |
-| #279 | M2 | M6 | by hand: the database unit's leftovers | M2 U4b: what the database unit left open |
+| #279 | M2 | M6 | by hand: the database unit's leftovers: images pinned by digest, the bootstrap's limits | M2 U4b: what the database unit left open |
 | #282 | M2 | M4 | by hand: delivering an operator alert | M2 U5b: what the jobs unit left open |
 | #284 | M2 | M3 | by hand: who a customer is: awaits the maintainer | A WhatsApp customer may have no phone number: contacts need the channel's own identifier |
 | #285 | M2 | M5 | by hand: templates and the channel's leftovers | M2 U6b: what the channel unit left open |

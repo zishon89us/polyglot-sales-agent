@@ -5,50 +5,59 @@ stop, or a thing only the maintainer can do. Answer with the row's number
 and "yes", "no", or a few words; a "no" tells the agent what to change.
 "If no" says what a no would cost, as far as the agent can tell.
 
-Last brought up to date: 2026-11-21, at the end of M2.
+Last brought up to date: 2026-11-21, at the end of M2. A second agent
+checked the first version against the repository and found it left out a
+third of what it should hold; this is the corrected page
+(`reviews/2026-11-21-m3-preparation-check.md`).
 
 ## Needed before M3 builds on them
 
-| # | Question | What was done | If no |
+| # | Question | What was done, and what a yes accepts | If no |
 | --- | --- | --- | --- |
-| 1 | **Is a customer the channel's own identifier first, and the phone number second?** WhatsApp may now send a customer with no number, only an identifier (#284) | A contact is found by identifier first. A number belongs to the identifier it last arrived with. Every case is a table in `design/data-model.md`, "Which contact a message belongs to" | The contact rules and their tests are rewritten; everything M3 stores per customer waits on it |
-| 2 | **May a reply be sent a second time after a timeout,** not only after a worker stopped? US-C1 criterion 9 allows only the second (#290) | A reply is sent once more after any outcome nobody knows. A notice or a message the business starts is never sent twice | Either the criterion's text changes, or replies are not resent after a timeout and a customer may get no answer |
+| 1 | **Is a customer the channel's own identifier first, and the phone number second?** WhatsApp may now send a customer with no number, only an identifier (#284) | A contact is found by identifier first. A number belongs to the identifier it last arrived with. Every case is a table in `design/data-model.md`, "Which contact a message belongs to". **A yes accepts** that nothing merges two contacts, so one person seen first by number and later by identifier can stay two; and that a contact known by number alone is taken by the first identifier that arrives with that number, so the new holder of a passed-on number can join the old holder's conversation | The contact rules and their tests are rewritten; everything M3 stores per customer waits on it |
+| 2 | **May a reply be sent a second time after a timeout,** not only after a worker stopped? US-C1 criterion 9 allows only the second (#290) | An assistant reply, a system reply and a staff message are each sent once more after an outcome nobody knows: a timeout, a broken connection, a fault on the channel's side (HTTP 5xx or 408), an unreadable answer, or a call with no recorded result after 2 minutes. A service notice or a message the business starts is never sent twice. Three calls for one message at most, the resend included | Either the criterion's text changes, or replies are not resent after a timeout and a customer may get no answer |
 | 3 | **Is a message that waited over 15 minutes to be sent dropped,** not sent late? (#290) | It is marked `expired` and reported in the worker's log. After an outage that long, customers who wrote just before it get no answer | Another limit, or late sending, or re-opening the customer's message for a fresh answer, which is M3 work |
-| 4 | **Supported languages** for v1.0, and who checks each language's test conversations (#168) | Nothing. The evals cannot be written without it | — |
-| 5 | **Bedrock, a Claude model, `us-east-1`** as the working choice (ADR 0010, amendment) | Recorded as you said it on 2026-11-21. The model is chosen by measuring two or three; only models whose data Bedrock neither keeps nor shares are candidates | — |
+| 4 | **Are these the six languages of v1.0: Arabic, English, Urdu, Hindi, Bengali, Tagalog?** And who, for each, reads its test conversations as a speaker would (#168) | The first four are required by NFR-A4. Bengali and Tagalog are the agent's proposal, on an assumption about who lives in the first target market that no source was read for (`ai/eval-plan.md`, section 4). The evals cannot be written until the list is fixed | Name the languages; fewer than six leaves NFR-A4 unmet, and v1.0 says so |
+| 5 | **Bedrock, a Claude model, `us-east-1`** as the working choice (ADR 0010, amendment). You said "likely" of both | Recorded as a working choice, confirmed or changed by the first eval run. **Decided by the agent on top of it:** the first real model adapter is for Bedrock; the model is chosen by measuring two or three; only models whose data Bedrock neither keeps nor shares are candidates; the default routing keeps processing inside the United States, which by AWS's description uses `us-east-2` and `us-west-2` as well as `us-east-1`; region, routing and model are settings | Say which part; each is a setting or a line of the record |
 | 6 | **AWS credentials and a spending limit** for the first eval run against a real model | Nothing; the agent does not ask for them until the eval harness exists | — |
 
 ## Made in M2; a yes closes them
 
 | # | Question | What was done | If no |
 | --- | --- | --- | --- |
-| 7 | The send policy's other rows: a refusal that can be retried is tried three times, after 2 and 8 seconds; a fault on the channel's side counts as "unknown", not as a refusal (#290) | As asked | The policy is one function with a test for every sequence; a change is small |
+| 7 | The send policy's numbers: a refusal the channel says can be retried is tried three times in all, after 2 and 8 seconds; one run of the send job makes at most 20 calls and stops at the first that is not accepted; a send times out after 10 seconds (#290, ADR 0004) | As asked | The policy is one function with a test for every sequence; a change is small |
 | 8 | One job sends a conversation's messages, oldest first, one at a time (#290) | As asked | Ordering needs a rule of its own |
 | 9 | `PSA_ENV` has no default: a process not told where it runs does not start (#295) | As asked | A default of `development` would let a forgotten setting run development parts for real |
-| 10 | No worker starts in production until each tenant has its own WhatsApp credential (#295) | The guard refuses | The guard's last rule is removed and one credential serves every tenant |
+| 10 | No worker starts in production until each tenant has its own WhatsApp credential (#295) | The guard refuses | The guard's last rule is removed, one credential serves every tenant in production, and NFR-S5 is unmet there |
 | 11 | The stand-in for WhatsApp may listen on every interface inside a container (#295) | It says so loudly and never starts in production | The compose stack needs another way for containers to reach it |
-| 12 | The application role, which serves the internet, has no access at all to the operator's record. ADR 0011 had allowed insert and read (#293) | As asked | One grant is added |
-| 13 | A tenant's name is not written to the operator's record; the tenant is recorded by its identifier (#293) | As asked | One argument is added |
-| 14 | `ops log show` and `ops channel connect` were added; commands that only read are recorded too (#293, #295) | As asked | They are removed |
-| 15 | No query builder: SQL is fixed text in one package, and only that package imports the database driver (ADR 0003, amendment) | As asked | A query builder is chosen and the statements rewritten, about fifty of them |
-| 16 | Database time limits: 2 s to connect, 4 s a statement, 3 s for a lock, 10 s idle in a transaction (#288) | As asked | Other numbers; one constant each |
-| 17 | NFR-S2 as reworded: a request with a bad signature is refused and not stored, but not always with 401; an oversized or throttled one gets 413, 429 or a closed connection | As asked | Say which answers are acceptable |
-| 18 | NFR-O1 as reworded: the worker is probed by a command that reads its heartbeat, since it serves no HTTP | As asked | Say how it should be probed |
+| 12 | In production a secret is refused only if it carries the mark `local-only`, which the example file's placeholders have, and the channel's address must be exactly `https://graph.facebook.com` (#295) | As asked. The mark is a net for a copied example, not a test of a secret | Say what else should be refused |
+| 13 | The application role, which serves the internet, has no access at all to the operator's record. ADR 0011 had allowed insert and read (#293) | As asked | One grant is added |
+| 14 | A tenant's name is not written to the operator's record, because a business's name can be a person's; the tenant is recorded by its identifier (#293) | As asked. The database refuses any recorded value with a space, an `@` or a `+` | An argument is added and the database's rule on recorded values is loosened |
+| 15 | The rest of how `ops` behaves (ADR 0011, amendment): `ops log show` and `ops channel connect` were added; commands that only read are recorded too; the first row of the record is committed before the command acts; a command done but half recorded exits with status 3; a time zone written with a plus sign is not taken; `ops service degraded` and `ops events list-unparsed` are not built | As listed | Say which |
+| 16 | No query builder: SQL is fixed text in one package, and only that package imports the database driver (ADR 0003, amendment) | As asked | A query builder is chosen and the statements rewritten: about fifty calls on 2026-11-21 |
+| 17 | Database time limits: 2 s to connect, 4 s a statement, 3 s for a lock, 10 s idle in a transaction (#288) | As asked | Other numbers; one constant each |
+| 18 | `messages.handled_at` marks a customer's message that a turn has dealt with, until sessions and batches exist; a message to send has a count of calls and of unknown outcomes; `unconfirmed` and `expired` are codes on a failed message, not statuses (`design/data-model.md`, decisions 18 and 19) | As asked | The columns change before M3 builds on them |
+| 19 | **NFR-S2 as reworded, and US-C1 criterion 4 with it.** A request with a missing or bad signature is refused and nothing is stored, but not always with 401: an oversized body gets 413, a source that keeps sending bad signatures gets 429, a malformed or too-slow request gets another 4xx or a closed connection, some of these before the signature can be read. Criterion 4 still says "HTTP 401 is returned" | The NFR was reworded; the criterion was not. A yes means the criterion is reworded to match | Say which answers are acceptable |
+| 20 | NFR-O1 as reworded: the worker is probed by a command that reads its heartbeat, since it serves no HTTP | As asked | Say how it should be probed |
+| 21 | The pack boundary test went on without the three known exceptions being routed through pack hooks first, as the plan had said: one is a pinned name in the core, two are in documents only because their steps are not built. Four folders are outside "the core" for the test: the packs, `apps/ops`, and the two stand-ins (ADR 0012, amendment) | As listed | The hooks are built first, in M3 |
 
 ## Only the maintainer can do
 
 | # | Thing | Why it matters |
 | --- | --- | --- |
-| 19 | Turn on branch protection for `main`, and require the CI checks (#6) | Nothing stops a push to `main` or a merge while a check is red |
-| 20 | Say whether pull requests should be merged by squash or by merge commit (OQ-11). `AGENTS.md` says squash; every merge so far was a merge commit | The history's shape; the document or the habit changes |
-| 21 | Delete the three leftover branches (`feat/265-…`, `feat/267-…`, `feat/269-…`). Each holds nothing that is not in `main`; the agent's session may not delete branches | Tidiness |
-| 22 | The copyright holder's name in `LICENSE`, currently the GitHub handle (#7) | Before anyone else uses the code |
-| 23 | Check US-C2's criteria against what M2 built, and close #11 | The agent does not close a story on its own word |
-| 24 | Whether one tenant's assistant can be paused (OQ-12) | Before any live use |
+| 22 | Turn on branch protection for `main` and require the CI checks; turn on private vulnerability reporting; make the project board (#6) | Nothing stops a push to `main` or a merge while a check is red; `SECURITY.md` points at a reporting form that may not be on |
+| 23 | Say whether pull requests should be merged by squash or by merge commit (OQ-11). `AGENTS.md` says squash; every merge so far was a merge commit | The history's shape; the document or the habit changes |
+| 24 | Delete the three leftover branches (`feat/265-…`, `feat/267-…`, `feat/269-…`). Each holds nothing that is not in `main`; the agent's session may not delete branches | Tidiness |
+| 25 | The copyright holder's name in `LICENSE`, currently the GitHub handle; whether the commit identity is as you want it (#7) | Before anyone else uses the code |
+| 26 | Check US-C2's criteria against what M2 built, and close #11 | The agent does not close a story on its own word |
+| 27 | Whether one tenant's assistant can be paused (OQ-12) | Before any live use |
+| 28 | Whether the proposed defaults of the settings are right (OQ-10). They are the agent's proposals with no data behind them | No deadline; from a pilot |
 
 ## Not needed until there is a real deployment
 
 A hosting target and its account (ADR 0009); a Meta developer app and a
-verified business number; a lawyer's reading of the points marked as
-inference in `compliance.md`, above all sending message text to a model
-outside the customer's country. None blocks v1.0 on the stand-in channel.
+verified business number; the emergency phrase lists and text, read by a
+fluent speaker and by a person with clinical or crisis training (#168); a
+lawyer's reading of the points marked as inference in `compliance.md`,
+above all sending message text to a model outside the customer's country.
+None blocks v1.0 on the stand-in channel.

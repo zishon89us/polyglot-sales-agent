@@ -381,10 +381,14 @@ M0 Inception met its exit criteria on 2026-11-16; see
   retention differs by model, so only models whose data is neither kept
   nor shared are candidates. Preparation for M3, as the retro asked: the
   decisions waiting for the maintainer are on one page
-  (`decisions-needed.md`), and the hundred open issues left in finished
-  milestones each have a proposed milestone
+  (`decisions-needed.md`), and of the hundred open issues left in
+  finished milestones, 92 have a proposed milestone and
+  8 stay where they are
   (`plans/issue-triage-2026-11-21.md`). No issue is moved until that page
-  is merged.
+  is merged. A second agent checked the pages against the repository and
+  found the decisions page had left out about a third of what the agent
+  decided in M2; it is corrected
+  (`reviews/2026-11-21-m3-preparation-check.md`).
 
 ## Next
 
@@ -394,7 +398,6 @@ M0 Inception met its exit criteria on 2026-11-16; see
    plans M3 as units (`plans/m3-ai-core.md`), reading each finding now
    sorted into M3.
 3. M3 cannot write its evals without the supported languages (#168).
-3. Still open for the maintainer: squash or merge commits (OQ-11).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
    each channel assumption re-read in full (threat model A7).

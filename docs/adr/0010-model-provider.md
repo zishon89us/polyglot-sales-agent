@@ -43,7 +43,8 @@ reputation:
 
 ## Decision Outcome
 
-Not decided.
+Not decided when this was written. **Since 2026-11-21 there is a working
+choice: see the amendment at the end.**
 
 The agent's recommendation: **measure before choosing**. When the eval
 harness and first dataset exist in M3, run them against two or three
@@ -123,13 +124,14 @@ about its service, not something the project has checked:
 | Point | Source |
 | --- | --- |
 | Bedrock has two kinds of cross-region inference profile: geographic, which routes within one geography such as the US, and global, which routes to supported commercial regions worldwide | <https://aws.amazon.com/blogs/machine-learning/global-cross-region-inference-for-latest-anthropic-claude-opus-sonnet-and-haiku-models-on-amazon-bedrock-in-thailand-malaysia-singapore-indonesia-and-taiwan> |
-| The global kind is described as for use "when you have no data residency constraints" | <https://docs.aws.amazon.com/bedrock/latest/userguide/models-region-compatibility.html> (read in its Japanese-language address; the English page was not opened) |
+| The global kind is described as for use when there are no data-residency constraints. The agent's paraphrase: the page was read as a search result of its Japanese-language address, and the English page was not opened | <https://docs.aws.amazon.com/jp_jp/bedrock/latest/userguide/models-region-compatibility.html> |
 | A US geographic profile needs access to more than one US region: for Claude Sonnet 4.5, `us-east-1`, `us-east-2` and `us-west-2` | <https://aws.amazon.com/blogs/machine-learning/securing-amazon-bedrock-cross-region-inference-geographic-and-global/> |
 | Bedrock says it does not store or log prompts and completions, does not use them to train AWS models, and does not distribute them to third parties; model providers have no access to the accounts the models run in | <https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html> |
-| **Retention is not the same for every model.** Bedrock's data-retention page says requests have a retention mode, that the default is the model's own policy, and that there is "no data retention change to Claude models released before Claude Fable 5". An AWS security post says some newer models require data sharing with the provider, and that choosing models that fit one's obligations is the customer's responsibility | <https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html>, <https://aws.amazon.com/blogs/security/enforce-zero-data-retention-on-amazon-bedrock-with-bedrock-projects-and-service-control-policies/> |
+| Bedrock's data-retention page says requests have a retention mode, that the default is the model's own policy, and that there is "no data retention change to Claude models released before Claude Fable 5". An AWS security post says some newer models require data sharing with the provider, and that choosing models that fit one's obligations is the customer's responsibility | <https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html>, <https://aws.amazon.com/blogs/security/enforce-zero-data-retention-on-amazon-bedrock-with-bedrock-projects-and-service-control-policies/> |
 
-So, for this product, whose channel forbids conversation data being used to
-train models (`docs/compliance.md`, finding 4; NFR-V6):
+The agent's reading of the last row: **retention is not the same for every
+model.** So, for this product, whose channel forbids conversation data
+being used to train models (`docs/compliance.md`, finding 4; NFR-V6):
 
 - **A candidate model is admitted to the comparison only if its retention
   on Bedrock is none and nothing is shared with its provider.** That is
@@ -141,11 +143,15 @@ train models (`docs/compliance.md`, finding 4; NFR-V6):
 Not read, and needed before the choice is final: which Claude models are
 offered in `us-east-1` and with which profiles; their prices; the service
 terms and the model's end-user licence; the quotas of a new account. The
-agent could not open the model list on the day.
+agent could not open the model list on the day. Until the terms and the
+licence are read and linked here, **NFR-V6 is not met**: it asks for terms,
+recorded in an ADR, that exclude training, and a page of documentation is
+not terms. The training row above is also about AWS's own models only.
 
 What `us-east-1` means for real customers: processing in the United States
 is, for a business in Saudi Arabia, a transfer of personal data outside the
-Kingdom (`docs/compliance.md`, Part B). It needs a permitted purpose, the
+Kingdom (`docs/compliance.md`, Part B). By that document's reading, which
+it marks as inference awaiting a lawyer, it needs a permitted purpose, the
 minimum of data, and an adequacy decision or standard contractual clauses.
 None of that arises while only synthetic conversations are used, which is
 all that development, CI and the evals use. It is a question for a lawyer

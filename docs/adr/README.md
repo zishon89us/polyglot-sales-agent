@@ -42,7 +42,7 @@ given here, because none has been verified.
 | [0007](0007-guardrail-strategy.md) | Guardrails in code first; no second model at run time | Accepted: merged by the maintainer in #151 |
 | [0008](0008-dashboard-authentication.md) | Email and password with server-side sessions | Accepted: merged by the maintainer in #151 |
 | [0009](0009-hosting-target.md) | Hosting target and region | Proposed; needs the maintainer |
-| [0010](0010-model-provider.md) | Model provider | Proposed; needs the maintainer |
+| [0010](0010-model-provider.md) | Model provider | A working choice by the maintainer on 2026-11-21 (Amazon Bedrock, a Claude model), to be confirmed by measurement |
 | [0011](0011-operator-access.md) | Operator access through commands run on the server, with an insert-only log | Accepted: merged by the maintainer in #175 |
 | [0012](0012-core-and-pack-boundary.md) | The core holds nothing about bookings; the booking pack owns its rules, tables and routes | Accepted: merged by the maintainer in #254 |
 | [0013](0013-ai-dlc-workflow.md) | Borrow four practices from AWS AI-DLC for the build milestones; do not install it | Proposed by the agent; accepted when the maintainer merges it |
