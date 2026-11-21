@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (planned, not started)
+## Current milestone: M3 AI core (U0 under way; no code yet)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -427,7 +427,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
    to 6 and 29 to 36 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U1, the ADR for the pack interface, then U2, U3
-   and U5, with U0 still open for four answers. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
+   and U5, with U0 still open for four answers. U1 builds on row 21 and
+   U3 on rows 34 and 36 as well. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
    them is cheaper before the unit than after.
 3. M3 cannot be called done without the maintainer: the languages, AWS
    credentials, and acceptance of a measured baseline.

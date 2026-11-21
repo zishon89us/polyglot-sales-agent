@@ -16,6 +16,9 @@ milestone that still has an open part, and each unit ticks its own part.
 **U0 is not finished by this page.** Its issue (#299) stays open until
 rows 13, 29, 35 and 36 of the decisions page are answered: they decide
 #227's first part, the table of criteria delivered later, and NFR-V7.
+The plan's "done when" for U0 is reworded by this pull request to what a
+page can deliver: every part has an end, and an issue with a unit's part
+stays open for that unit. U1 to U5 do not wait for the four answers.
 
 ## What changed in the documents
 
@@ -67,15 +70,16 @@ and 35 or are made by the unit that builds the story.
 | | W5, W6, W9, D2 to D5 | M5, M4 |
 | #199 | No map of stories and NFRs to components | M3's stories are mapped to units by the plan and M3's NFRs below; the flags are already answered by ADR 0007's amendment. Degraded emails U15, token budget U12, the output schema U4. The dashboard and the rest are M4's. **Stays in M3** until the three are done |
 | #218 | STRIDE gaps | Moved (M6) |
-| #221 | Notification email may carry identifiers | Moved (M4) |
+| #221 | Notification email may carry identifiers | Moved (M4). U10's logging writer keeps the same rule, under #82 |
 | #223 | A number's new holder can reach the old holder's bookings | Moved (M5). The same holder joining the old conversation is row 1's, and U2's note takes it with #284 |
 | #225 | The compliance notes overstate what was read | Moved (M6) |
 | #226 | Standards not read before use, against `AGENTS.md` section 11 | **Stays in M3.** U16 builds the red-team set on the eval plan, which rests on the unread sources: U16's design note reads them and dates the reading, as section 11 says. The threat model's half is then M6's |
-| #229 | What a person must be told about where their data goes | Moved (M6); before any live use |
+| #229 | What a person must be told about where their data goes | Moved (M6); before any live use. U8, which writes the disclosure, and U17, which chooses the model and its region, each read it |
 | #232 | A49 (the eval plan's parts), A50 | U16 |
 | | A48, the rest of A49 | M6 |
 | #234 | The glossary's list | Fixed here |
 | | ADR 0007's first layer omits 4a | Fixed here, by an amendment |
+| | The architecture's sequence of a turn starts its checks at step 5 | U10, which builds 4a and says which program runs it |
 | | Does the handover text follow the emergency text; a second emergency message | Already answered in the state machines (step 4a and section 2). What is left: the guardrail policy says the text is sent once per session, the state machines once in 60 minutes per contact. U10 |
 | #253 | A5: the rate pause's exception for an emergency | The ceiling is in the glossary now. The criterion's wording is U12's; the threat model's two lines (T5, the note on urgent emails) are U10's |
 | | V8 / S4: where the core still names bookings | U1 |
@@ -87,17 +91,18 @@ Issues the plan listed as not M3's:
 | Issue | End |
 | --- | --- |
 | #80, #224 | Moved (M4) |
-| #230, #240 | Moved (M5) |
-| #82 | **Stays.** Whether degraded mode's emails share the throttle is U15's; what an email may contain is U10's, whose writer logs it. The rest is M4's |
+| #240 | Moved (M5) |
+| #230 | Moved (M4): its last part, emails with no failure behaviour, is M4's; the inquiry label is M5's |
+| #82 | **Stays,** if row 30 is a yes. Whether degraded mode's emails share the throttle is U15's; what an email may contain is U10's, whose writer logs it. The rest is M4's, and all of it on a no |
 | #85 | **Stays.** Part (b), a first message that fails and stalls the queue, and (c), the error classes, are U13's. (a) and (d), the list, are M5's |
-| #219 | **Stays.** A job's tenant taken from its payload is every new job's concern: U2's note sets the rule for the units after it. Fairness between tenants is M6's, here and in #290 |
+| #219 | **Stays.** A job's tenant taken from its payload is every new job's concern: U2's note sets the rule for the units after it. Fairness between tenants, who may write a job, a job that always fails and a retried stale job are M6's |
 | #220 | Moved (M4): one signing secret or one per tenant is settled with per-tenant credentials, US-D6 |
 | #222 | Stays: whose conversation a tap came from is U5's; where the stop button appears is U8's. Then M5 |
 | #184 | Stays: (c) U12 and U15, (h) U9, (i) U15, (j) U12, (k) U13, (l) U8. The other parts are M4's and M5's |
 | #227 | Stays for U4 and U15; its first part is row 13's |
 
-**Moves to make after the merge:** to M4: #80, #220, #221, #224. To M5:
-#223, #230, #240. To M6: #218, #225, #229. Ten issues. M3 then holds its
+**Moves to make after the merge:** to M4: #80, #220, #221, #224, #230. To
+M5: #223, #240. To M6: #218, #225, #229. Ten issues. M3 then holds its
 19 unit issues and 80 others, if nothing else has changed.
 
 ## M2's three leftover issues, item by item
@@ -117,7 +122,7 @@ Issues the plan listed as not M3's:
 | | The pre-send check of the reply window; `discarded` | U2 |
 | | Templates; the other pre-send checks; `held` for quiet hours; the withheld list | M5 |
 | | The delivery wait; a status that arrives too early; what a dead send job leaves; a stale `sending` | U13 |
-| | Messages that expired unsent are never re-opened (row 3 calls it M3's work) | U13 |
+| | Messages that expired unsent are never re-opened | Nothing to build on a yes to row 3. On a no it is M3's work, for U2 and U13 |
 | | The trace of a turn | U6 |
 | | Renewing the lease | U7 |
 | | Migration 0004's way back | U2, whose migration replaces the column |
@@ -148,14 +153,14 @@ then carried into one issue per later milestone.
 | NFR-P5 | U2 | In full |
 | NFR-R1, R2 | U2, U7, U18 | Again: M2's proof rests on `handled_at` and the echo, which these units replace |
 | NFR-R4 | U15 | With a scripted client. Not US-C15, 9 (M5); the emails are logged, and only on a yes to row 30; the handover only on a yes to row 29 |
-| NFR-R5 | Each unit that adds a kind of job | For that kind |
+| NFR-R5 | Each unit that adds a kind of job | Retries and the dead mark, for that kind; the alert to the operator is delivered by nothing before M4 |
 | NFR-R6 | U2, U13 | Order with batches (U2) and the wait (U13); workers in separate processes still not tried |
 | NFR-R7 | U13 | In full, once #85's failed case is settled |
-| NFR-S1 | Each unit that adds a table: U2, U3, U6, U10, U11 | The tests that try to cross tenants, for each new table |
+| NFR-S1 | Each unit that adds a table: U2, U3, U6, U10, U11, U12, U15 | The tests that try to cross tenants, for each new table |
 | NFR-S7 | U12 | The limit and the pause. Where the pause starts (#150, W8) and the exception's wording are open; steps 6 and 7 are not built |
-| NFR-V2 | U6, U14, U18 | For what M3 writes: traces, the adapter's logs, an end-to-end run |
+| NFR-V2 | U6, U10, U14, U18 | For what M3 writes: traces, logged notices, the adapter's logs, an end-to-end run |
 | NFR-V5 | U16 | The dataset holds no real number or conversation |
-| NFR-V6 | U17 | When the provider's terms and licence are read |
+| NFR-V6 | U4, U16, U17 | No conversation record in `prompts/` (U4) or `evals/` (U16), by a scan in CI; the provider's terms and licence read (U17) |
 | NFR-V7 | U3 for the business's data, U7 for the prompt | As row 36 is answered; a tool's result is M5's |
 | NFR-A1 | U16, U17 | Prompt disclosure and cross-tenant exposure; tool misuse only as far as row 32 allows |
 | NFR-A2 | U16, U17 | Prices; slot and booking times are M5's |
@@ -169,7 +174,9 @@ then carried into one issue per later milestone.
 | NFR-O4 | U2 and every unit with a migration | In full |
 
 Not M3's though M3 touches them: NFR-S5 (per-tenant credentials, M4),
-NFR-C1 (needs the dashboard), NFR-M1 (the trial pack, M5).
+NFR-C1 (needs the dashboard), NFR-M1 (the trial pack, M5), NFR-V1 (U10
+builds opt-out and its record; no business-initiated message exists
+before M5).
 
 ## The query builder, looked at again
 
@@ -182,7 +189,9 @@ search that missed every typed call. The two counts were not made the
 same way, so "doubled in four days" is not shown either.
 
 **Kept as it is,** the agent's choice under row 16. The ADR's reason was
-that the SQL can be read in one sitting; at 83 statements in 11 files
+that the SQL can be read in one sitting; at 83 calls in 11 files (8 of
+them transaction control and the tenant setting, not statements of the
+package's own)
 that is still so, and less so with each unit. The cost it named, a
 renamed column found by a test and not the compiler, is not recorded in
 the M2 retro or its reviews; that is a search of them, not proof. U6's

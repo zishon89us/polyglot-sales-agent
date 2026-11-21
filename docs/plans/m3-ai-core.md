@@ -44,7 +44,8 @@ only what can be measured without them.
 ## Eight questions to settle before the units that depend on them
 
 Each is put with the agent's proposal. Questions 1 to 3 and 5 to 8 are
-rows 29 to 35 of `decisions-needed.md`.
+rows 29 to 35 of `decisions-needed.md`. Row 36 was added by U0 and is
+set out on its page.
 
 1. **Handover in M3** (row 29). Handover is US-C6, in M4, but M3's own
    criteria and checks end in it: a sensitive topic (US-C8, 5), provider
@@ -148,13 +149,13 @@ rows 29 to 35 of `decisions-needed.md`.
 
 | Unit | What | Stories and criteria | Needs | Done when |
 | --- | --- | --- | --- | --- |
-| U0 | Settle the findings that are about documents; move what is not M3's | — | — | Every finding listed under U0 is closed with its reason or moved; the stories file's later table is as question 8 was answered |
+| U0 | Settle the findings that are about documents; move what is not M3's | — | — | Every part of every finding listed under U0 has an end: fixed, a named unit's, moved, or already answered (an issue with a unit's part stays open for that unit); the stories file's later table is as question 8 was answered |
 | U1 | The ADR for the pack interface | ADR 0012 | U0 | The ADR is merged: how a pack registers tools, claim kinds, prompt text, fixed texts and buttons |
 | U2 | Sessions, the reply window and the batch | US-C11, 1 to 3; order of checks, 4 and 12; NFR-P5 | U0 | A burst inside the window gets one reply, in order; a message that arrives while a reply is being made replaces it; two workers never answer one conversation at once; `handled_at` is gone, with a tested way back |
 | U3 | The business profile, the tenant's settings, and what the model is given | ADR 0006; order of checks, 8 (the test only) | U0 | Services, policies, opening hours and settings are stored per tenant, loaded by an operator's command, and assembled into one context with nothing of the contact in it (NFR-V7); its size is measured and a budget set |
 | U4 | `LlmClient`, the fake client and the prompt loader | ADR 0005; US-C4, 2 (the schema); #158 | U1 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded; no provider's library is imported outside its adapter |
-| U5 | Buttons and captions in the channel | US-C12, 2 | U0 | A tap arrives as a typed event tied to its conversation; a text with buttons can be sent; a caption is read as text; both stand-ins do the same |
-| U6 | Traces and cost | US-C10, 1 and 2 | U2, U4 | Every model call leaves one trace, linked to its session, with no message text, number or name in it |
+| U5 | Buttons and captions in the channel | US-C12, 2; NFR-M2 | U0 | A tap arrives as a typed event tied to its conversation; a text with buttons can be sent; a caption is read as text; both stand-ins do the same; a test keeps channel-specific imports out of the core |
+| U6 | Traces, cost and the log line | US-C10, 1 and 2; NFR-O2 | U2, U4 | Every model call leaves one trace, linked to its session, with no message text, number or name in it; a test of the log line's shape passes for the api and the worker |
 | U7 | The turn: the model in place of the echo, and the customer's language | US-C3, 4; US-C8, 4 with a test tool; US-C11, 5; order of checks, 15 | U2, U3, U4, U6 | With the fake client, a batch is answered from the profile; the session records its language; an unsupported language is attempted and marked; the lease is renewed before each attempt |
 | U8 | Fixed texts and disclosure | US-C5, 1 to 3 | U5, U7 | The first message of a session carries the disclosure, added by code; every fixed text M3 sends exists in every supported language, or the gap is listed |
 | U9 | Output checks | US-C4, 3, 5 to 9, 15, and 10 but for bookings; US-C15, 10; guardrail policy, section 4 | U7, U8 | Each core claim kind passes only against the stored value it names; a value with no claim fails; a failed check sends the fallback and counts; a fake that returns hostile output is stopped |
@@ -257,8 +258,14 @@ No code. The findings that are about what the documents say, read now so
 that no later unit builds on a contradiction: #76, #77, #92, #111, #125,
 #147, #150, #199, #218, #221, #223, #225, #226, #229, #232, #234, #253.
 
+**U0's page, [`m3-u0-findings.md`](m3-u0-findings.md), overrides the
+lists in this section and adds to every unit's list below:** it read the
+issues in full, kept #82, #85, #199, #219 and #226 in M3, and names the
+unit for each part. A unit's design note reads its rows there as well as
+its list here.
+
 Sorted into M3 by the rule of the triage but, by their titles, not M3's.
-U0 reads each and moves it: #80 and #82 (handover rules, M4), #85 (a failed
+As first planned, U0 reads each and moves it: #80 and #82 (handover rules, M4), #85 (a failed
 reply shown to staff, M4), #224 (inviting a user, M4), #219 and #220 (the
 cross-tenant credential and the order of the webhook's checks; U0 finds
 their milestone), #222 (a forged button naming a booking, M5; its second

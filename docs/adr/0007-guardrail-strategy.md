@@ -143,5 +143,6 @@ independent review checks the policy against this record.
 
 - The first layer's list of checks omits step 4a of the order of checks,
   the emergency phrase list, which is also decided entirely by code. It
-  differs from the others in the list: after it the checks continue at
-  step 5, so a message that matches may still reach the model.
+  differs from the others in the list in that it does not end the
+  handling itself: the checks continue at step 5, and the handover it
+  opens ends them at step 10. The model is not called for it either.
