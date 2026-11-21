@@ -374,13 +374,30 @@ M0 Inception met its exit criteria on 2026-11-16; see
   and that a test did not pin the list of channels; both are fixed. The
   boundary test now also looks at file names.
 
+- 2026-11-21 — U10 merged as #296 and M2 tagged `m2-walking-skeleton` by
+  the maintainer. **M2 is done.** The maintainer's working choice for the
+  model: Amazon Bedrock, a Claude model, `us-east-1` (ADR 0010,
+  amendment). Reading AWS's pages for it turned up that Bedrock's data
+  retention differs by model, so only models whose data is neither kept
+  nor shared are candidates. Preparation for M3, as the retro asked: the
+  decisions waiting for the maintainer are on one page
+  (`decisions-needed.md`), and of the hundred open issues left in
+  finished milestones, 92 have a proposed milestone and
+  8 stay where they are
+  (`plans/issue-triage-2026-11-21.md`). No issue is moved until that page
+  is merged. A second agent checked the pages against the repository and
+  found the decisions page had left out about a third of what the agent
+  decided in M2; it is corrected
+  (`reviews/2026-11-21-m3-preparation-check.md`).
+
 ## Next
 
-1. Maintainer reviews and merges U10 (#271), **after its code review and
-   the verification of its fixes are both in**. That ends M2.
-2. Tag M2. Then plan M3, the AI core, which needs the maintainer's choice
-   of model provider first (OQ-9, ADR 0010).
-3. Still open for the maintainer: squash or merge commits (OQ-11).
+1. Maintainer reads `decisions-needed.md` and answers what he can; merges
+   the preparation pull request.
+2. The agent sets the issues' milestones as the triage page says, then
+   plans M3 as units (`plans/m3-ai-core.md`), reading each finding now
+   sorted into M3.
+3. M3 cannot write its evals without the supported languages (#168).
 4. Before any live use: the emergency phrase lists and text, reviewed by a
    fluent speaker and by a person with clinical or crisis training (#168);
    each channel assumption re-read in full (threat model A7).
@@ -429,39 +446,10 @@ v1.1.
 
 ## Blocked on the maintainer
 
-- **How a customer is identified** (#284). The agent decided, so as not to
-  stop: a contact is matched on the channel's own identifier first, then on
-  the phone number. Confirm, or say otherwise before M3 builds on it.
-
-- **Decisions the agent made in M2 so as not to stop,** each written in
-  the follow-up issue of its unit and waiting for a yes or a no: the send
-  policy by message class and the 15-minute limit (#290); what the
-  operator's record holds and who may read it (#293); `PSA_ENV` with no
-  default and what production refuses (#295); no query builder (ADR 0003,
-  amendment); database time limits (#288).
-- **US-C1 criterion 9** allows a second copy of a reply only when a worker
-  stopped. As built a reply is also sent once more after a timeout (#290).
-  Change the criterion or the build.
-
-- **NFR-S2 was reworded by the agent** in unit U6. It said every request
-  with a missing or invalid signature is "answered 401"; with the size
-  limit and the limit on refused requests of #154, some are refused with
-  413, 429, another 4xx or a closed connection before the signature can be
-  read. "Not stored" is
-  unchanged. Confirm, or say which answers are acceptable.
-- **NFR-O1 was reworded by the agent** in unit U5. It said health and
-  readiness endpoints are "present on API and worker"; the worker accepts
-  no HTTP, so it now says the worker is probed by a command that reads its
-  heartbeat. Confirm, or say how the worker should be probed instead.
-- Open questions with the maintainer as owner, in
-  `requirements/open-questions.md`. None blocks v1.0 on the mock channel
-  except OQ-9 (model provider) before M3 and OQ-11 (merge style) before M2.
-- #6 Project board and private vulnerability reporting.
-- #168 Confirm the supported languages and arrange a speaker's review of
-  each eval dataset. Needed in M3.
-- OQ-12 Whether one tenant's assistant can be paused. Before any live use.
-- #7 Copyright holder name, commit identity, and the accounts needed only
-  for live use.
+Everything waiting for a yes, a no or an action is on one page:
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 are needed
+before M3 builds on them; row 4, the supported languages, is the one
+nothing can go round.
 
 ## Not done yet
 
