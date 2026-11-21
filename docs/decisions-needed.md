@@ -7,7 +7,7 @@ and "yes", "no", or a few words; a "no" tells the agent what to change.
 
 Last brought up to date: 2026-11-22, with the M3 plan (rows 29 to 35;
 a row keeps its number for good, so new rows take the next numbers
-wherever they sit on the page). At the end of M2 A second agent
+wherever they sit on the page). At the end of M2 a second agent
 checked the first version against the repository and found it left out a
 third of what it should hold; this is the corrected page
 (`reviews/2026-11-21-m3-preparation-check.md`).
@@ -32,12 +32,12 @@ an earlier draft.
 
 | # | Decision | What the agent proposes | If no |
 | --- | --- | --- | --- |
-| 29 | **May M3 build the handover record,** though handover is M4's? (question 1) | M3 marks the session handed over for each reason it can detect, stops the assistant answering it and sends the handover text. Two criteria the stories file leaves to M4 (US-C11, 4; US-C12, 4) then come into M3. The queue and everything staff see stay in M4. In M3 no person can reply; nothing is live | Those criteria and three more are delivered in M4, and in M3 the assistant goes on answering a session it should have handed over |
-| 30 | **May M3 queue its notices to tenants and only log them,** real email being M4's? (question 2) | The production guard refuses the logging writer | The notices are not built until M4. Either way no email is sent before M4 |
+| 29 | **May M3 build the handover record,** though handover is M4's? (question 1) | M3 marks the session handed over for each reason it can detect, stops the assistant answering it and sends the handover text. Two criteria the stories file leaves to M4 (US-C11, 4; US-C12, 4) then come into M3, and with them most of the triggers of US-C6, an M4 story. When the session ends the handover is detached and the assistant answers the next message. The queue and everything staff see stay in M4. In M3 no person can reply; nothing is live | Those criteria and three more are delivered in M4, and in M3 the assistant goes on answering a session it should have handed over |
+| 30 | **May M3 queue its notices to tenants and only log them,** real email being M4's? (question 2) | The production guard refuses the logging writer | The notices of US-C15, 6 and 8 are not built until M4. Either way no email is sent before M4 |
 | 31 | **May pull requests that change AI behaviour merge without an eval score until the harness and a real model exist,** against `AGENTS.md` section 6? And after that, evals against the real model on each such pull request, which spends money on each push? (question 3) | Until then each such pull request attaches its tests' run against the scripted client and says no score exists. After: as the eval plan says, once you have put the key in the repository's secrets and set a cap | Say what should be attached instead, or when the real model should run: on merge only, or by hand |
 | 32 | **What M3's evals cover with no tools** (question 5) | The M3 dataset, baseline and thresholds cover only what needs no tool, listed by dimension in the harness's design note; measured again in M5; the M3 tag says so | M3 cannot be tagged until M5's tools exist |
 | 33 | **Build buttons and captions in the channel in M3** (question 6)? M2 built text only, and M3's opt-out, opt-in and person buttons need them | A unit of its own, from Meta's pages read and dated then | The button criteria of US-C7 and the caption of US-C12 move to a later milestone, and M3 has keywords only |
-| 34 | **A tenant's settings and the test "is this tenant answering"** in M3 (question 7): default language, business hours, support contact, notification address, loaded by an operator's command | The test only; credential checks and their emails stay in M4 | Steps 4a, 5 and 8 of the order of checks treat every tenant as answering until M4 |
+| 34 | **A tenant's settings and the test "is this tenant answering"** in M3 (question 7): business hours, support contact, notification address, loaded by an operator's command | The settings and the test; credential checks and their emails stay in M4, so the test is weaker than the design's | Steps 4a, 5 and 8 of the order of checks treat every tenant as answering until M4 |
 | 35 | **Add to the stories file's table of criteria delivered later** the parts of M3 criteria that need bookings, templates or real tools (question 8) | US-C4, 4 and 14 and the booking clause of 10; US-C5, 1 for a template; US-C8, 4 for a real tool; US-C15, 9 | Say which of them M3 should deliver, and how without the booking pack |
 
 ## Made in M2; a yes closes them

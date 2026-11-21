@@ -5,8 +5,8 @@ Living progress log. The agent updates this at the end of every session.
 ## Current milestone: M3 AI core (planned, not started)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
-eval job runs in CI. The plan is `plans/m3-ai-core.md`. M1 and M2 met
-theirs; M2 is tagged `m2-walking-skeleton`.
+eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
+`m2-walking-skeleton`; its retro says how each of its criteria was shown.
 
 M0 Inception met its exit criteria on 2026-11-16; see
 [`retros/m0-inception.md`](retros/m0-inception.md).
@@ -402,13 +402,16 @@ M0 Inception met its exit criteria on 2026-11-16; see
   count was wrong, six dependencies were missing, and the dataset it
   promised cannot exist without tools
   (`reviews/2026-11-22-m3-plan-check.md`). The plan now raises eight
-  questions; seven are rows 29 to 35 of the decisions page.
+  questions; seven are rows 29 to 35 of the decisions page. A third
+  agent checked the rework: 25 of 29 findings fixed as claimed, and 19
+  new, lesser ones, three of them about what a handover does in M3
+  (`reviews/2026-11-22-m3-plan-check-verification.md`).
 
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
    to 6 and 29 to 35 of `decisions-needed.md`, above all rows 1, 4, 29
-   and 33.
+   and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent opens an issue for each unit when the plan is merged, and
    starts with U0, the document findings. U0 can start without answers;
    it finishes only with rows 13 and 35.
