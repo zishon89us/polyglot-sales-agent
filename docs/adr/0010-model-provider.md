@@ -1,5 +1,5 @@
 ---
-status: "proposed; needs the maintainer"
+status: "working choice by the maintainer, to be confirmed by measurement"
 date: 2026-11-16
 decision-makers: "the maintainer"
 ---
@@ -96,3 +96,59 @@ held-out set, so that the held-out set is not used both to choose the model
 and to set its thresholds. Prompts written while working with one candidate
 favour it; the comparison report must say which candidate the prompts were
 written against.
+
+## Amendment, 2026-11-21: a working choice
+
+The maintainer's words on 2026-11-21: Amazon Bedrock "likely", with a Claude
+model behind it "likely", in the AWS region `us-east-1`. This is the option
+"choose one provider now, measure later", taken as a working choice: M3 is
+planned and built for it, and it is confirmed or changed by the first eval
+run. Nothing is paid for until the maintainer supplies credentials.
+
+What follows from it, as decided by the agent and open to the maintainer:
+
+- **The first real adapter behind `LlmClient` (ADR 0005) is for Bedrock.**
+  Development and CI stay on the fake client. The production guard gains
+  its check for the fake client in the same unit (#165).
+- **Which Claude model is not chosen.** Two or three of the models Bedrock
+  offers are to be run on the same eval set, and the results recorded here
+  as the recommendation above lists. The model's identifier is a setting.
+- **The region and the inference profile are settings.** The default is
+  `us-east-1` with a profile that keeps processing inside the United
+  States, not the global one.
+
+What was read, on 2026-11-21, from AWS's own pages. Each is AWS's statement
+about its service, not something the project has checked:
+
+| Point | Source |
+| --- | --- |
+| Bedrock has two kinds of cross-region inference profile: geographic, which routes within one geography such as the US, and global, which routes to supported commercial regions worldwide | <https://aws.amazon.com/blogs/machine-learning/global-cross-region-inference-for-latest-anthropic-claude-opus-sonnet-and-haiku-models-on-amazon-bedrock-in-thailand-malaysia-singapore-indonesia-and-taiwan> |
+| The global kind is described as for use "when you have no data residency constraints" | <https://docs.aws.amazon.com/bedrock/latest/userguide/models-region-compatibility.html> (read in its Japanese-language address; the English page was not opened) |
+| A US geographic profile needs access to more than one US region: for Claude Sonnet 4.5, `us-east-1`, `us-east-2` and `us-west-2` | <https://aws.amazon.com/blogs/machine-learning/securing-amazon-bedrock-cross-region-inference-geographic-and-global/> |
+| Bedrock says it does not store or log prompts and completions, does not use them to train AWS models, and does not distribute them to third parties; model providers have no access to the accounts the models run in | <https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html> |
+| **Retention is not the same for every model.** Bedrock's data-retention page says requests have a retention mode, that the default is the model's own policy, and that there is "no data retention change to Claude models released before Claude Fable 5". An AWS security post says some newer models require data sharing with the provider, and that choosing models that fit one's obligations is the customer's responsibility | <https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html>, <https://aws.amazon.com/blogs/security/enforce-zero-data-retention-on-amazon-bedrock-with-bedrock-projects-and-service-control-policies/> |
+
+So, for this product, whose channel forbids conversation data being used to
+train models (`docs/compliance.md`, finding 4; NFR-V6):
+
+- **A candidate model is admitted to the comparison only if its retention
+  on Bedrock is none and nothing is shared with its provider.** That is
+  read from AWS's page for the model on the day, and recorded here with
+  the date.
+- The retention mode is set explicitly in the adapter where the service
+  allows, not left to a default.
+
+Not read, and needed before the choice is final: which Claude models are
+offered in `us-east-1` and with which profiles; their prices; the service
+terms and the model's end-user licence; the quotas of a new account. The
+agent could not open the model list on the day.
+
+What `us-east-1` means for real customers: processing in the United States
+is, for a business in Saudi Arabia, a transfer of personal data outside the
+Kingdom (`docs/compliance.md`, Part B). It needs a permitted purpose, the
+minimum of data, and an adequacy decision or standard contractual clauses.
+None of that arises while only synthetic conversations are used, which is
+all that development, CI and the evals use. It is a question for a lawyer
+before any real customer's message is sent, and the reason the region is a
+setting.
+
