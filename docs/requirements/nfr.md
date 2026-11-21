@@ -64,7 +64,7 @@ report. It is a provisional sizing assumption, not a forecast.
 | NFR-V4 | Retention | A daily job deletes every message older than the tenant's message-retention setting, whatever the age of the conversation's other messages. A contact's name and phone number are deleted once the contact has no message within the retention period, no future booking, and no booking that started within the retention period; for a contact with no messages, age is counted from the latest booking start. Bookings and sessions are kept without personal fields; the hashed opt-out record is kept | Integration tests with a shifted clock, including a returning contact and a contact with a future booking |
 | NFR-V5 | No real personal data in the repository | 0 real phone numbers or conversations in code, fixtures, evals or screenshots | Review checklist; pattern scan in CI |
 | NFR-V6 | Conversations are not used to train or evaluate models | 0 conversation records in `evals/` or `prompts/`; the model provider's terms, recorded in an ADR, exclude training on submitted data | Pattern scan in CI; ADR review |
-| NFR-V7 | Data sent to the model is minimised | No phone number and no contact name is put into a prompt by the system: no field of the contact or the channel's profile is sent. A number or a name the customer typed inside a message is part of that message and is sent with it | Unit test on prompt assembly |
+| NFR-V7 | Data sent to the model is minimised | No phone number and no contact name in any prompt | Unit test on prompt assembly |
 
 ## AI quality
 

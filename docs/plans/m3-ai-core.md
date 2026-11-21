@@ -149,7 +149,7 @@ rows 29 to 35 of `decisions-needed.md`.
 | Unit | What | Stories and criteria | Needs | Done when |
 | --- | --- | --- | --- | --- |
 | U0 | Settle the findings that are about documents; move what is not M3's | — | — | Every finding listed under U0 is closed with its reason or moved; the stories file's later table is as question 8 was answered |
-| U1 | The ADR for the pack interface | ADR 0012 | U0 | The ADR is merged: how a pack registers tools, claim kinds, prompt text and buttons |
+| U1 | The ADR for the pack interface | ADR 0012 | U0 | The ADR is merged: how a pack registers tools, claim kinds, prompt text, fixed texts and buttons |
 | U2 | Sessions, the reply window and the batch | US-C11, 1 to 3; order of checks, 4 and 12; NFR-P5 | U0 | A burst inside the window gets one reply, in order; a message that arrives while a reply is being made replaces it; two workers never answer one conversation at once; `handled_at` is gone, with a tested way back |
 | U3 | The business profile, the tenant's settings, and what the model is given | ADR 0006; order of checks, 8 (the test only) | U0 | Services, policies, opening hours and settings are stored per tenant, loaded by an operator's command, and assembled into one context with nothing of the contact in it (NFR-V7); its size is measured and a budget set |
 | U4 | `LlmClient`, the fake client and the prompt loader | ADR 0005; US-C4, 2 (the schema); #158 | U1 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded; no provider's library is imported outside its adapter |
@@ -278,7 +278,8 @@ the deployment definition are not M3's.
 ### U1: The ADR for the pack interface
 
 What the Gate 2 review called the central bet with no record (#200, #237):
-how a pack registers its tools, claim kinds, prompt text, buttons and
+how a pack registers its tools, claim kinds, prompt text, fixed texts,
+buttons and
 session outcome. It is built in M5; U4, U9, U10 and U11 must not shape the
 turn in a way M5 would undo, and steps 10 and 13 of the order of checks
 must not name the pack's buttons in the core.
@@ -326,7 +327,9 @@ What Meta's pages say is read and dated in the pull request, not recalled.
 
 `ai_traces` and `tool_calls`; the wrapper that writes a trace for every
 call, failed ones included, with the spans NFR-P2 is measured from; cost
-from token counts and a price table that is a setting. US-C10 (#19); #186.
+from token counts and a price table that is a setting. The shape of a
+log line for the api and the worker, with a test of it (NFR-O2; added by
+U0). US-C10 (#19); #186.
 
 ### U7: The turn, and the customer's language
 

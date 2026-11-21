@@ -408,21 +408,26 @@ M0 Inception met its exit criteria on 2026-11-16; see
   (`reviews/2026-11-22-m3-plan-check-verification.md`).
 
 - 2026-11-22 — #298 merged; an issue is open for each unit (#299 to
-  #317). **M3 U0** (#299): the document findings read and each given an
-  end (`plans/m3-u0-findings.md`). Four small corrections to the glossary
-  and NFR-V7; one finding closed (#77); fifteen to be moved to M4, M5 and
-  M6 after the merge; the rest each named under the unit that answers it.
-  M2's three leftover issues are divided item by item, and M3's NFRs are
-  each tied to a unit. The table of criteria delivered later is unchanged:
-  it waits on rows 29 and 35.
+  #317). **M3 U0** (#299), not finished: the document findings are read
+  and each part given an end (`plans/m3-u0-findings.md`). Three
+  corrections to the glossary and an amendment to ADR 0007; ten issues to
+  be moved to M4, M5 and M6 after the merge; the other parts named under
+  a unit, which is a promise and not a fix. M2's three leftover issues are
+  divided item by item, and the NFRs M3 must check are listed against
+  units. A second agent made 25 findings on the first draft, two of
+  them High: an issue about to be moved out held exactly what U13 must
+  settle, and the count of SQL statements was 52 where it is 83
+  (`reviews/2026-11-22-m3-u0-findings-check.md`). A rewording of NFR-V7
+  was taken back and made a question, row 36. #299 stays open for rows
+  13, 29, 35 and 36.
 
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 35 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 36 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U1, the ADR for the pack interface, then U2, U3
-   and U5. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
+   and U5, with U0 still open for four answers. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
    them is cheaper before the unit than after.
 3. M3 cannot be called done without the maintainer: the languages, AWS
    credentials, and acceptance of a measured baseline.
@@ -475,7 +480,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 35 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 36 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 

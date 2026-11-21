@@ -138,3 +138,10 @@ independent review checks the policy against this record.
 - A model response that does not match the schema is a failed output check,
   not a provider failure.
 - The Consequences section above is corrected as marked.
+
+## Amendment, 2026-11-22 (finding V4 of the Gate 2 verification, #234)
+
+- The first layer's list of checks omits step 4a of the order of checks,
+  the emergency phrase list, which is also decided entirely by code. It
+  differs from the others in the list: after it the checks continue at
+  step 5, so a message that matches may still reach the model.
