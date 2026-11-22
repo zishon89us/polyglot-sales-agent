@@ -298,6 +298,12 @@ it re-reads the conversation before storing the reply, discards the reply and
 starts again (US-C11, criterion 2). What that means for a booking the first
 attempt already made is defined next.
 
+As built in M3 unit U2: the same holds for a reply that is stored and not
+yet sent. The send job holds it back while a newer message of the customer
+waits, and the next turn discards it and answers everything. After two
+replies in a row have been dropped in a session, the third is sent
+(`design/notes/m3-u2-sessions.md`, D1 to D9; decisions row 38).
+
 ### What the webhook does with each kind of event
 
 Decided in M2 unit U7 (Gate 2 finding S8, #177). The webhook's transaction
@@ -321,10 +327,15 @@ again, and what was already stored is skipped. Messages already stored are
 found with one query for the whole webhook, so a large one sent again is
 answered quickly.
 
-As built in M2 a job is due at once, and there is no batching window: the
-worker answers every message of the conversation that no turn has dealt
-with, together. In place of steps 5 to 15 it sends an echo of the
-customer's text (#290).
+As built in M3 unit U2, the webhook's transaction also puts the message in
+its session, opens the reply window, and does all of it under a lock on
+the conversation's row, which starting a turn, ending a turn and claiming a
+message to send take too (`design/notes/m3-u2-sessions.md`, sections 0 to
+2). The table above still says the session and the reply window run later,
+in the worker; step 4 of the order of checks puts them with the store, and
+that is what is built. The job is due 3 seconds after the message, and the
+turn checks the batching window itself. In place of steps 4a to 11 and 13
+to 15 the worker still sends an echo of the customer's text (#290).
 
 ### Processing one turn
 
@@ -499,12 +510,12 @@ cannot outlive the state it belongs to.
 
 | Timer | Job created when | Cancelled when |
 | --- | --- | --- |
-| Batching window | An inbound message is stored | It runs |
+| Batching window | An inbound message is stored. As built: each message queues its own job, due 3 seconds later, and the turn checks the window, so a job is never moved | It runs |
 | Awaiting-retry attempt, 15-minute expiry | The mark is set | The mark is cleared |
 | Reminder | A booking is created or moved | The booking is cancelled or moved |
 | Escalation | A handover becomes `waiting` or `detached` | It leaves both, or a follow-up is accepted |
 | Follow-up expiry (7 days), detached expiry (14 days) | The handover enters the state | It leaves the state |
-| Session end | Each message, replacing the previous one | A newer message |
+| Session end | Each message, replacing the previous one. **Not built:** as of M3 unit U2 a session is ended when its conversation is next touched; the unit that first needs an end with no new message builds this timer | A newer message |
 | Rate-pause end | The pause starts | It runs |
 | Delivery wait (10 s) | A message is sent while another is queued behind it | A delivered status arrives |
 | Daily: retention, credential checks, template status refresh | Recurring | Never |

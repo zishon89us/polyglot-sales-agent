@@ -7,7 +7,8 @@ should.
 
 > **Status: a walking skeleton, no AI yet.** A message sent through a
 > stand-in for WhatsApp is verified, stored once and answered with an echo
-> of its own text ([try it](#try-it)). The model, bookings and the
+> of its own text ([try it](#try-it)); several messages sent close
+> together get one answer, about three seconds after the last. The model, bookings and the
 > dashboard are milestones M3 to M5 and are not built. Progress is in
 > [`docs/STATUS.md`](docs/STATUS.md); what waits for the maintainer is in
 > [`docs/decisions-needed.md`](docs/decisions-needed.md).
@@ -109,7 +110,7 @@ vector database in version 1.0. Each choice has a decision record.
 | 1. Requirements | Done, reviewed | [Vision](docs/requirements/vision.md) · [36 user stories with 224 acceptance criteria](docs/requirements/user-stories.md) · [51 non-functional requirements](docs/requirements/nfr.md) · [37 risks](docs/requirements/risks.md) · [glossary](docs/requirements/glossary.md) |
 | 2. Design | Done, reviewed | [Architecture](docs/design/architecture.md) · [state machines](docs/design/state-machines.md) · [data model](docs/design/data-model.md) · [API](docs/design/api.md) and [OpenAPI file](docs/design/openapi.yaml) · [threat model](docs/design/threat-model.md) · [12 decision records](docs/adr/README.md) |
 | AI lifecycle | Planned, reviewed | [Guardrail policy](docs/ai/guardrail-policy.md) · [eval plan](docs/ai/eval-plan.md) · [compliance notes](docs/compliance.md) |
-| 3. Build | **M2 of M2 to M5 done: the walking skeleton.** A message in, an echo out; no AI yet | [Plan](docs/plans/m2-walking-skeleton.md) · [retro](docs/retros/m2-walking-skeleton.md) · [what is built and what is not](docs/STATUS.md) |
+| 3. Build | **M2 of M2 to M5 done: the walking skeleton.** A message in, an echo out; no AI yet. **M3, the AI core, is under way:** planned in 19 units, of which the pack interface is decided and sessions and message batching are built | [M2 plan](docs/plans/m2-walking-skeleton.md) · [retro](docs/retros/m2-walking-skeleton.md) · [M3 plan](docs/plans/m3-ai-core.md) · [what is built and what is not](docs/STATUS.md) |
 | 4 to 6. Verify, release, operate | Not started | |
 
 What runs today is a skeleton: a message sent to a business's WhatsApp
@@ -132,7 +133,9 @@ docker compose up --build
 
 Then open <http://127.0.0.1:4010>, the page of the stand-in for WhatsApp,
 and send a message as a customer to the number `100000000000002`. The reply
-that appears is the product's echo. `make e2e` does the same from the
+that appears, about three seconds later, is the product's echo; it waits
+that long in case you are still typing, and answers several quick messages
+together. `make e2e` does the same from the
 command line. Everything is published to your machine only. The secrets in
 the files are placeholders. Each but the database administrator's is
 marked `local-only`, and the product refuses to start with a marked one

@@ -65,8 +65,10 @@ export async function renewLease(
  * True if the lease is still this worker's. Call it first in the
  * transaction that stores a result or runs a tool, and store nothing if it
  * is false. It locks the conversation row against another worker taking the
- * lease until that transaction ends. The lock is the kind an ordinary
- * update takes, so it does not hold up a new message for the conversation.
+ * lease until that transaction ends. Since M3 unit U2 it is also the lock
+ * that storing a customer's message takes (`sessions.ts`, `lockConversation`),
+ * so a message being stored and a turn that is ending wait for each other:
+ * neither can miss the other.
  *
  * Call it first: a transaction that writes and only then calls this makes
  * others wait behind it for longer than they need to.

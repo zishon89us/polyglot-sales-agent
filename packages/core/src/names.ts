@@ -39,6 +39,10 @@ export const HANDOVER_REASONS = [
 ] as const;
 export type HandoverReason = (typeof HANDOVER_REASONS)[number];
 
+/** The states of a session (state machines, section 3). `ended` is terminal. */
+export const SESSION_STATES = ["active", "ended"] as const;
+export type SessionState = (typeof SESSION_STATES)[number];
+
 /** The states of an outbound message (state machines, section 7). */
 export const MESSAGE_STATUSES = [
   "pending",

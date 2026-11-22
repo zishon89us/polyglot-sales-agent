@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 done; U2 under way; no code yet)
+## Current milestone: M3 AI core (U1 done; U2 in review)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -448,9 +448,13 @@ M0 Inception met its exit criteria on 2026-11-16; see
   ready answer (`reviews/2026-11-23-m3-u2-design-review.md`). The note
   was rewritten: one lock per conversation; the send job holds an
   overtaken reply back and the turn decides; `handled_at` stays. Row 39
-  was withdrawn; rows 38 and 40 ask about two rules. **The rewritten
-  note has not been reviewed again;** the review of the code checks it.
-  No code yet.
+  was withdrawn; rows 38 and 40 ask about two rules. Then the code:
+  migration 0006 (sessions, each message's session, which reply answered
+  which message, the reply window), the turn and the send job changed as
+  the note says, and 48 new tests, one or more for each case of the note,
+  with six rules broken on purpose to see a test fail. 956 tests in all.
+  Several messages sent close together now get one echo, about three
+  seconds after the last.
 
 ## Next
 

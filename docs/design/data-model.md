@@ -124,7 +124,7 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 | `profile_name` ⚑ | As sent by the channel. Never given to the model (NFR-V7) |
 | `last_language` | A language code. Not treated as personal on its own |
 | `opted_out_at` | Null when not opted out |
-| `last_inbound_at` | The reply window is open while this is under 24 hours ago |
+| `last_inbound_at` | The reply window is open while this is under 24 hours ago. The earlier of the channel's time for the newest message and the time it was stored; never moved back |
 | `rate_paused_until` | |
 | `anonymised_at` | Set when personal fields were removed |
 
@@ -243,7 +243,8 @@ null when no worker holds it).
 
 | Column | Notes |
 | --- | --- |
-| `conversation_id`, `started_at`, `last_message_at`, `ended_at` | A partial unique index allows one session with `ended_at` null per conversation |
+| `conversation_id`, `started_at`, `last_message_at`, `ended_at` | A partial unique index allows one session with `ended_at` null per conversation. `last_message_at` is the stored time of the newest customer message, or the time the newest message of ours was accepted by the channel. `ended_at` is written when the conversation is next touched after the 24 hours, so a row without it may already be over; one function decides (`packages/db/src/sessions.ts`). **Built in M3 unit U2, with `reply_discards` and `pack_outcome`; the columns below arrive with the units that use them** |
+| `reply_discards` | How many replies in a row were dropped because the customer wrote again; at 2 the next is sent (decisions row 38) |
 | `disclosed` | Disclosure has been sent |
 | `guardrail_fallbacks`, `unreadable_batches`, `assistant_replies` | The counters of state machines, section 3 |
 | `awaiting_retry_since`, `provider_fallback_sent_at` | State machines, section 8 |
@@ -254,7 +255,8 @@ null when no worker holds it).
 
 | Column | Notes |
 | --- | --- |
-| `conversation_id`, `session_id` | |
+| `conversation_id`, `session_id` | Nothing in the schema ties the session to the same conversation; one function writes both |
+| `answered_by` | For a customer's message: the reply that answered it. Null while not dealt with, and for one dealt with by no reply. It is how a discarded reply's messages are found again |
 | `direction` | `inbound` or `outbound` |
 | `class` | For outbound: one of the five message classes |
 | `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on) |
@@ -516,7 +518,7 @@ question for a lawyer (open question OQ-4).
 | 15 | `jobs.subject_id`, a UUID, replaces `dedupe_key` | A timer has to be found again to be cancelled; an identifier cannot carry text. There is no uniqueness on it (ADR 0004, amendment) |
 | 16 | A contact has the channel's own identifier as well as a number, either of which may be missing. The identifier is the person; the number is something a person holds for a time. Every case is in the table under `contacts`, "Which contact a message belongs to" | Since April 2026 a WhatsApp customer who uses a username arrives with no number (#284). **The agent's decision, awaiting the maintainer.** Reworked after the Gate 4 review of unit U7 (finding W1): the first version let a number carry one person's conversation to another. What is still not done: nothing merges two contacts that turn out to be one person (#288) |
 | 17 | `unparsed_events` and `unroutable_events` each have the channel's name and a uniqueness rule | The channel sends an unanswered webhook again, and a slow request can commit after it was answered 503; the same event must be one row |
-| 18 | `messages.handled_at` marks a customer's message that a turn has dealt with | The worker must know what is still to answer, so that a job run twice answers once. The design does this with sessions and batches, which do not exist until M3. **The agent's decision**; it may go when they arrive (#290) |
+| 18 | `messages.handled_at` marks a customer's message that a turn has dealt with | The worker must know what is still to answer, so that a job run twice answers once. The design does this with sessions and batches, which do not exist until M3. **The agent's decision**; M3 unit U2 built sessions and batches and kept it: a batch is the open session's messages without the mark (`design/notes/m3-u2-sessions.md`) |
 | 19 | A message has a count of calls and a count of unknown outcomes; `unconfirmed` is a code in `error_code`, not a status or a withheld reason | Gate 2 finding V6 (#236): "never a third" needs a counter, and `unconfirmed` had no home. A withheld message was never attempted, which is not true of this one. **The agent's decision** |
 
 Decision 1 changes how US-C1 is read and decision 4 adds a rule; both are
