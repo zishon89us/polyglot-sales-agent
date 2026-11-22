@@ -107,7 +107,8 @@ set out on its page.
    M6; U17 needs it and takes it).
 4. **Rows already on the decisions page that units build on.** A "no" is
    cheaper before the unit than after: U2 on rows 1 (who a customer is)
-   and 18 (`handled_at`, which U2 removes); U13 on rows 2, 3, 7 and 8 (the
+   and 18 (`handled_at`, which U2 keeps, against this plan's first
+   intent; see its design note); U13 on rows 2, 3, 7 and 8 (the
    send policy); U9 on row 21 (the pack's hooks, which ADR 0014 leaves to
    M5); U4 on row 37; U0 closes the
    first part of #227 only on a yes to row 13.
@@ -152,7 +153,7 @@ set out on its page.
 | --- | --- | --- | --- | --- |
 | U0 | Settle the findings that are about documents; move what is not M3's | — | — | Every part of every finding listed under U0 has an end: fixed, a named unit's, moved, or already answered (an issue with a unit's part stays open for that unit); the stories file's later table is as question 8 was answered |
 | U1 | The ADR for the pack interface | ADR 0012 | U0 | The ADR is merged: how a pack is registered; the three parts M3 builds (prompt fragment, tool, claim kind); the rules M3 keeps for the parts left to M5 (ADR 0014) |
-| U2 | Sessions, the reply window and the batch | US-C11, 1 to 3; order of checks, 4 and 12; NFR-P5 | U0 | A burst inside the window gets one reply, in order; a message that arrives while a reply is being made replaces it; two workers never answer one conversation at once; `handled_at` is gone, with a tested way back |
+| U2 | Sessions, the reply window and the batch | US-C11, 1 to 3; order of checks, 4 and 12; NFR-P5 | U0 | A burst inside the window gets one reply, in order; a message that arrives while a reply is being made replaces it; two workers never answer one conversation at once; a reply is dropped for a newer message at most as often as row 38 allows; the migration has a tested way back |
 | U3 | The business profile, the tenant's settings, and what the model is given | ADR 0006; order of checks, 8 (the test only) | U0 | Services, policies, opening hours and settings are stored per tenant, loaded by an operator's command, and assembled into one context with nothing of the contact in it (NFR-V7); its size is measured and a budget set |
 | U4 | `LlmClient`, the fake client, the prompt loader, and the pack interface's packages | ADR 0005; ADR 0014; US-C4, 2 (the schema); #158 | U1 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded; no provider's library is imported outside its adapter; the interface and registry packages exist, `faq-only` is registered as row 37 is answered, and the boundary test is changed as ADR 0014 lists |
 | U5 | Buttons and captions in the channel | US-C12, 2; NFR-M2 | U1 | A tap arrives as a typed event tied to its conversation; a text with buttons can be sent; a caption is read as text; both stand-ins do the same; a test keeps channel-specific imports out of the core |
@@ -302,9 +303,10 @@ reply window; the batching window as the delay of the job that answers;
 the batch as the customer's messages since the last answered one; the
 `discarded` status for a reply overtaken by a new message; the send-time
 check of the reply window (state machines, section 7). A migration gives
-existing messages a session, removes `messages.handled_at`, and says what
-happens to a message unanswered at that moment; its way back is tested
-(NFR-O4). US-C11 (#47); #86, #179; the shared lists of states and flags
+existing messages a session and says what happens to a message unanswered
+at that moment; its way back is tested (NFR-O4). `messages.handled_at`
+stays: the unit's design note (`design/notes/m3-u2-sessions.md`) says
+why, and overrides this paragraph where they differ. US-C11 (#47); #86, #179; the shared lists of states and flags
 (#278); who a customer is (#284); the items of #288 and #290 that U0
 assigns here.
 
