@@ -54,8 +54,11 @@ happen one after another. They are made to:
   at the same moment as one that carries Y then X, can deadlock; the
   database ends one, the API answers 503 and the channel sends it again.
   M2 had this for two new customers (#288, X7); U2 widens it to any two.
-  Whether Meta puts several customers in one webhook has not been seen.
-  Not tested.
+  A second shape: a webhook that carries a message for X and a status
+  for a reply to Y, with one that carries the reverse. A status takes its
+  message's row without that conversation's lock, so the order of locks
+  above holds for messages and not for statuses. Whether Meta puts
+  several customers in one webhook has not been seen. Not tested.
 
 ## 1. Sessions
 
@@ -78,8 +81,8 @@ decides whether a session is open:
 | S4 | Exactly 24 hours | Ended: a session stays open only while under 24 hours have passed |
 | S5 | Two webhooks for one conversation at the same moment | The lock of section 0 puts one after the other; both messages land in one session. A unique index allows one open session per conversation, as the second guard |
 | S6 | One webhook with messages 25 hours apart by the channel's own time | Both are stored now, so both are in one session. Sessions, and the order of a batch, run on the time we stored a message; the channel does not promise to deliver in the order sent |
-| S7 | A reply is stored | It goes through the same function at the time it is stored. In U2 that is always the open session its turn just read |
-| S8 | A reply is accepted by the channel, by our call's result or by a status event that arrives first | If its session is still open, `last_message_at` moves to that time, if later. An ended session is never moved or reopened |
+| S7 | A reply is stored | In the session its turn read, and only while that session is open. A turn that ends after its session's 24 hours stores nothing: the session is ended, which closes its messages |
+| S8 | A reply is accepted by the channel: the worker records that its call was accepted | If its session is still open, `last_message_at` moves to that time, if later. An ended session is never moved or reopened. A delivery or read receipt is not a message and moves nothing |
 | S9 | A reply fails, expires or is discarded | Its session's `last_message_at` does not move |
 | S10 | A session's 24 hours pass and nobody writes | The row keeps no `ended_at` until the conversation is next touched. Only the one function reads whether a session is open, and it applies the 24 hours |
 
@@ -197,7 +200,8 @@ about 10 seconds. With a model answering in 5 seconds, about 25. With
 the worst a turn may take under US-C15 (three tries of 20 seconds, waits
 of 1 and 4), about 205 seconds. The reply that D6 forces does not cover
 the newest message, so a second reply follows it, and from M5 each
-reply sent is one the channel may charge for.
+reply sent is one the channel may charge for. Only an accepted reply
+ends a run: a receipt for an earlier reply does not.
 
 D6 is the bound that findings S22 (#86) and V32 (#147) ask for. Two is
 the agent's number; a yes also changes US-C11, 2, which today reads as
@@ -327,9 +331,8 @@ Not tested: the deadlock of section 0; P1 to P3, which are M2's rules.
   (U11).
 - First-reply time and fees on the session (#76, b): M5, with the
   metrics.
-- The list of session states in `packages/core/src/names.ts` (#278): two
-  names, `active` and `ended`, added. The check of shared names does not
-  read them yet.
+- The list of session states in `packages/core/src/names.ts` (#278): left
+  out; see "As built".
 
 ## As built
 
@@ -344,11 +347,21 @@ open:
   lock, so their order is the order the two happened in.
 - **W2 is decided on `contacts.last_inbound_at`,** the earlier of the
   channel's time and ours, not on the stored time of the newest message
-  of the batch.
-- **Tests named in this note and not written:** S5 is shown by two
-  webhooks made to wait on the lock, not by `pg_locks` of each; the stop
-  "after a D6 store" is covered only by D6's own test at the database;
-  nothing tests the cross-webhook deadlock.
+  of the batch. So a message stored now whose channel time is over 24
+  hours old, by a late delivery or a wrong clock at the channel, is
+  marked and not answered.
+- **Tests named in this note and not written:** the stop "after a D6
+  store" is covered only by D6's own test at the database; D2 and D3 are
+  tested one step after another, not with the send job and the turn made
+  to race; of the table of which job wakes a turn, the rows "a reply
+  stored though a newer message exists" and "a worker killed in a turn"
+  have no test at the worker; nothing tests either deadlock. B5 and B6
+  are M2's tests; W3 and P1 to P3 are not U2's to test.
+- **The migration** closes what an ended session left open, as S3 does:
+  old sessions' unanswered messages are marked and their unsent replies
+  discarded.
+- **Session states are not in `names.ts`:** nothing stores a state, so
+  there is nothing yet for the shared-names check to compare.
 - **M2's tests** store their messages as of 11 seconds earlier, so that a
   turn starts as soon as a worker looks; two of them changed meaning and
   were rewritten: a customer's second message no longer waits behind a

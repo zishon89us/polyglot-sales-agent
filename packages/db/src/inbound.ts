@@ -7,7 +7,7 @@
 import { BATCH_QUIET_MS, OPERATOR_ALERT_JOB } from "@polyglot-sales-agent/core";
 import { type Database, poolOf } from "./connect.ts";
 import { enqueueJob } from "./jobs.ts";
-import { lockConversation, noteAccepted, sessionFor, stamp } from "./sessions.ts";
+import { lockConversation, sessionFor, stamp } from "./sessions.ts";
 import { type Tx, withTenant } from "./tenant.ts";
 
 /** The job that makes a worker look at a conversation. */
@@ -170,8 +170,7 @@ const FORWARD = `
        ($2 = 'sent' AND status = 'sending')
     OR ($2 = 'delivered' AND status IN ('sending', 'sent'))
     OR ($2 = 'read' AND status IN ('sending', 'sent', 'delivered'))
-    OR ($2 = 'failed' AND status IN ('sending', 'sent')))
-  RETURNING id`;
+    OR ($2 = 'failed' AND status IN ('sending', 'sent')))`;
 
 /**
  * Stores one tenant's events from one webhook, in one transaction: each new
@@ -236,7 +235,7 @@ export function storeInbound(
       }
       // The clock is read for each row, so that messages of one webhook keep their order.
       const at = await stamp(tx, now, stored);
-      const sessionId = await sessionFor(tx, tenantId, conversationId, at, "inbound");
+      const sessionId = await sessionFor(tx, tenantId, conversationId, at);
       await tx.query(
         `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind,
                                channel_message_id, body, channel_sent_at, created_at)
@@ -281,18 +280,15 @@ export function storeInbound(
     }
     let statusesApplied = 0;
     for (const status of statuses) {
-      const moved = await tx.query<{ id: string }>(FORWARD, [
+      // A status never moves a session's time or ends a run of dropped
+      // replies: a receipt is not a message, and the acceptance itself is
+      // recorded by the worker that made the call (`recordSend`).
+      const moved = await tx.query(FORWARD, [
         status.channelMessageId,
         status.status,
         status.errorCode,
       ]);
       statusesApplied += moved.rowCount;
-      if (status.status !== "failed") {
-        // The channel has it: the same as the worker recording its own call.
-        for (const row of moved.rows) {
-          await noteAccepted(tx, row.id, await stamp(tx, now));
-        }
-      }
     }
     return { stored, duplicates, statusesApplied };
   });

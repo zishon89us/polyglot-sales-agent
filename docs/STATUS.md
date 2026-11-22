@@ -451,10 +451,14 @@ M0 Inception met its exit criteria on 2026-11-16; see
   was withdrawn; rows 38 and 40 ask about two rules. Then the code:
   migration 0006 (sessions, each message's session, which reply answered
   which message, the reply window), the turn and the send job changed as
-  the note says, and 48 new tests, one or more for each case of the note,
-  with six rules broken on purpose to see a test fail. 956 tests in all.
-  Several messages sent close together now get one echo, about three
-  seconds after the last.
+  the note says. Several messages sent close together now get one echo,
+  about three seconds after the last. The review of the code (Gate 4) ran
+  the tests and 43 mutants and found one High fault: a delivery or read
+  receipt was counted as the channel accepting a reply, which reset the
+  bound on dropped replies and kept a session open past its 24 hours.
+  Fixed, with the tests that had pinned it rewritten; thirteen mutants that
+  had survived now have a test each
+  (`reviews/2026-11-23-gate4-u2-sessions.md`). 55 new tests, 963 in all.
 
 ## Next
 
