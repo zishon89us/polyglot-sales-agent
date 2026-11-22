@@ -3,6 +3,10 @@
 -- and each session's count of dropped replies. Applying the up migration
 -- again makes sessions afresh from the messages' stored times.
 --
+-- Not undone: the up migration marked the unanswered messages of sessions
+-- that were already over as dealt with, and discarded their replies that
+-- had never reached the channel. Those marks stay.
+--
 -- Stop the API and the workers before running this.
 DROP INDEX messages_answered_by;
 ALTER TABLE messages

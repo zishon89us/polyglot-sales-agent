@@ -54,11 +54,11 @@ happen one after another. They are made to:
   at the same moment as one that carries Y then X, can deadlock; the
   database ends one, the API answers 503 and the channel sends it again.
   M2 had this for two new customers (#288, X7); U2 widens it to any two.
-  A second shape: a webhook that carries a message for X and a status
-  for a reply to Y, with one that carries the reverse. A status takes its
-  message's row without that conversation's lock, so the order of locks
-  above holds for messages and not for statuses. Whether Meta puts
-  several customers in one webhook has not been seen. Not tested.
+  A status takes its message's row without that conversation's lock and
+  nothing after it. (A second shape of deadlock, through statuses, was
+  found by the code's review while a status also touched a session; it
+  went with that.) Whether Meta puts several customers in one webhook has
+  not been seen. Not tested.
 
 ## 1. Sessions
 
@@ -149,9 +149,9 @@ in M2 is up to half a second later and from U7 can be much longer. NFR-P5
 is tested as "one reply, and not before the window closes", never as an
 upper time.
 
-**Which job wakes a turn.** Every stored customer message queues a job
-for its conversation, due 3 seconds later; none is ever skipped because
-another exists.
+**Which job wakes a turn.** Every webhook queues a job for each
+conversation it stored a message for, due 3 seconds later; none is ever
+skipped because another exists. "Its own job" below is that job.
 
 | After | The next turn is woken by |
 | --- | --- |
@@ -266,7 +266,8 @@ Existing rows:
 | `last_inbound_at` | Each contact's newest inbound message, by the earlier of its two times |
 | `turn_started_at` | Null |
 
-The way back drops all of it. Both ways are tested with rows of each
+The way back drops all of it, but does not undo what the migration
+closed in sessions that were already over. Both ways are tested with rows of each
 kind above (NFR-O4), and the tests that try to cross tenants gain the new
 table and its three references (NFR-S1).
 
@@ -284,7 +285,7 @@ M6's, with the other migration hardening.
 | The plan, U2: "`handled_at` is gone" | **`handled_at` stays.** The plan, decisions row 18 and data-model decision 18 are corrected in this pull request | The plan said it would be replaced and did not say by what. The batch is exactly "messages with no `handled_at`", and D2 needs one more column beside it |
 | The plan, U2: "the send-time check of the reply window" | Built as W2, at the start of a turn | A reply cannot wait more than 15 minutes, so the turn is where a closed window is met |
 | Architecture, "What the webhook writes": the session and the reply window "run later, in the worker" | S1 to S5 and W1 run in the webhook's transaction | Step 4 of the order of checks puts them with the store; a message row needs its session; they are three small statements under the lock |
-| Architecture, "Timers": the batching job is moved by later messages; a session-end job per message | Each message queues its own job and the turn checks the window; no session-end job | Section 3; section 1 |
+| Architecture, "Timers": the batching job is moved by later messages; a session-end job per message | Each webhook queues a job for each conversation it stored a message for, and the turn checks the window; no session-end job | Section 3; section 1 |
 | Architecture, "Processing one turn", step 7 | Knows only D1 | D2 to D9 |
 | State machines, step 12: "any reply not yet sent is discarded" | The same, done by the turn that reaches step 12, with the send job holding the reply back meanwhile | So that a message which ends before step 12 does not destroy a ready answer |
 | State machines, section 7: a closed window for a reply "cannot occur" | W2 | It can |

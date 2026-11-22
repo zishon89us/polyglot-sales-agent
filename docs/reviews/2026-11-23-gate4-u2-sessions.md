@@ -17,7 +17,7 @@ request for what was done about it.
 | G3 no tenant-crossing test for the three new references | Accepted. Three attempts as tenant A, each refused by the key |
 | G4 the lock test for starting a turn could not fail | Accepted. The holder now stores a message while the turn waits; the turn's batch must hold it |
 | G5 D6's hold-back guard and the time comparison untested | Accepted. The second D6 test claims the reply after the newer message arrives; a new test shows an older open message does not hold a reply |
-| G6 a second deadlock shape, through statuses | Added to the known limit; not removed and not tested |
+| G6 a second deadlock shape, through statuses | Gone with G1's fix, as the verifier showed: a status now takes one message row and nothing after it. The note says so |
 | G7 a turn that ends after its session's 24 hours stored a reply in a new session | Accepted. Ending a turn checks that the session it read is still the open one, and otherwise stores nothing ("session-over"). Tested. `sessionFor` no longer has an outbound case |
 | G8 seven rules no test noticed | A test or an assertion for each: the duplicate looked for again under the lock; a reply whose call ended unknown left alone at a session's end; the migration's 24-hour boundary; its "earlier of the two times"; the unique index; the check on `answered_by`; the one-microsecond stamp |
 | G9 sessions ended by the migration kept open messages and replies | Accepted. The migration closes them as S3 does; tested |
@@ -34,8 +34,8 @@ The N1 to N30 table: N12 and N14, which the reviewer marks "response
 misstates", are G1 and G3 and are fixed as above. The "partly" verdicts
 are G4, G6, G9, G10 and the tests listed as not written.
 
-Left for a follow-up issue: G6, G14, G15, G17, and the tests the note's
-"As built" lists as not written.
+Left for the follow-up issue #321: G14, G15, G17, and the tests the
+note's "As built" lists as not written.
 
 ## The report
 

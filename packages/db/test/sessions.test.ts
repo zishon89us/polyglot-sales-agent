@@ -262,6 +262,17 @@ describe("sessions", () => {
     ).toBe(0);
   });
 
+  test("S7: a turn that ends after its session is over and a new one has begun stores no reply either, and the new message is the next turn's", async () => {
+    await arrives("one", 0);
+    const turn = await begin(SESSION_INACTIVITY_MS - 1);
+    await arrives("the next day", SESSION_INACTIVITY_MS + 10);
+    expect(await finish(turn, "to one", SESSION_INACTIVITY_MS + 20)).toBe("session-over");
+    expect(await replies()).toEqual([]);
+    expect(bodies(await begin(SESSION_INACTIVITY_MS + 10 + BATCH_QUIET_MS))).toEqual([
+      "the next day",
+    ]);
+  });
+
   test("S5: the database itself allows one open session per conversation", async () => {
     await arrives("one", 0);
     await expect(
@@ -764,25 +775,24 @@ describe("one lock per conversation (design note, section 0)", () => {
     expect(await sessions()).toMatchObject([{ messages: 3, ended: null }]);
   });
 
-  test("starting a turn waits for it before it reads anything: a message stored while it waited is in its batch", async () => {
+  test("starting a turn waits for it before it reads anything: a message stored while it waited changes its answer", async () => {
     await arrives("one", 0);
     const id = await conversation();
+    // At 9.5 seconds the window of "one" has long closed. While the turn
+    // waits, whoever holds the conversation stores "two" as of 9 seconds,
+    // which opens the window again until 10. A turn that had looked at the
+    // window before it waited would start; this one is told to wait.
     const turn = await whileHeld(
       1,
-      () => beginTurn(app, tenant, id, at(10_000)),
-      // Stored by whoever held the conversation. A turn that had read its
-      // batch before waiting would not have this message.
+      () => beginTurn(app, tenant, id, at(9_500)),
       () =>
         administrator.query(
           `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind, body, created_at)
            SELECT tenant_id, conversation_id, id, 'inbound', 'text', 'two', $1 FROM sessions`,
-          [at(1_000)],
+          [at(9_000)],
         ),
     );
-    if (turn.kind !== "turn") {
-      throw new Error(`no turn: ${JSON.stringify(turn)}`);
-    }
-    expect(bodies(turn)).toEqual(["one", "two"]);
+    expect(turn).toEqual({ kind: "wait", ms: 500 });
   });
 
   test("the same webhook delivered twice at one moment stores the message once, starts one session and fails neither delivery", async () => {
@@ -933,6 +943,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
         );
       // One conversation with a gap of 29 hours in it; rows of each kind.
       await inbound("busy", t(0), t(-1), "b1");
+      await outbound("busy", t(0.5), "pending", "b1p");
       await outbound("busy", t(1), "sent", "b2");
       await outbound("busy", t(30), "failed", "b3");
       await inbound("busy", t(31), t(32), "b4");
@@ -958,6 +969,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
       );
       expect(made6.rows).toEqual([
         { body: "b1", started: 0, last: 1, ended: 25, same_conversation: true, answered_by: null },
+        { body: "b1p", started: 0, last: 1, ended: 25, same_conversation: true, answered_by: null },
         { body: "b2", started: 0, last: 1, ended: 25, same_conversation: true, answered_by: null },
         {
           body: "o1",
@@ -1023,6 +1035,19 @@ describe("migration 0006 on a database that has conversations (design note, sect
         { body: "e2", handled: false },
         { body: "e3", handled: false },
       ]);
+      // A reply that never reached the channel is discarded with its ended session; one in the open session waits on.
+      expect(
+        (
+          await admin.query(
+            "SELECT body, status FROM messages WHERE direction = 'outbound' ORDER BY created_at",
+          )
+        ).rows,
+      ).toEqual([
+        { body: "b1p", status: "discarded" },
+        { body: "b2", status: "sent" },
+        { body: "b3", status: "failed" },
+        { body: "b5", status: "pending" },
+      ]);
       // The reply window: the earlier of the channel's time and ours, of the newest inbound message.
       expect(
         (
@@ -1040,7 +1065,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
       // The way back: the messages stay, what 0006 added goes.
       expect(await migrateDown(migrator, all)).toBe("sessions");
       expect((await admin.query("SELECT count(*)::int AS n FROM messages")).rows).toEqual([
-        { n: 9 },
+        { n: 10 },
       ]);
       expect(
         (

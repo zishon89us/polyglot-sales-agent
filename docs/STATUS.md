@@ -458,7 +458,13 @@ M0 Inception met its exit criteria on 2026-11-16; see
   bound on dropped replies and kept a session open past its 24 hours.
   Fixed, with the tests that had pinned it rewritten; thirteen mutants that
   had survived now have a test each
-  (`reviews/2026-11-23-gate4-u2-sessions.md`). 55 new tests, 963 in all.
+  (`reviews/2026-11-23-gate4-u2-sessions.md`). A verifier confirmed the
+  fix by experiment and found two of the new tests still unable to fail
+  for what they named; both are rewritten
+  (`reviews/2026-11-23-gate4-u2-sessions-verification.md`). 56 new tests,
+  964 in all. **One commit's header is three characters over the limit,
+  so the commit-message step of `make check` fails on this branch;** the
+  maintainer is asked how to put it right. What the unit leaves is #321.
 
 ## Next
 
