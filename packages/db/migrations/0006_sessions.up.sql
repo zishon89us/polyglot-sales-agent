@@ -83,6 +83,18 @@ WHERE EXISTS (
     AND later.started_at > s.started_at
 );
 
+-- What a session that is over leaves open is closed, as it is when a
+-- session ends from now on: its customer messages nobody dealt with are
+-- marked, and its replies that never reached the channel are discarded.
+UPDATE messages m SET handled_at = s.ended_at
+FROM sessions s
+WHERE s.tenant_id = m.tenant_id AND s.id = m.session_id AND s.ended_at IS NOT NULL
+  AND m.direction = 'inbound' AND m.handled_at IS NULL;
+UPDATE messages m SET status = 'discarded', send_not_before = NULL
+FROM sessions s
+WHERE s.tenant_id = m.tenant_id AND s.id = m.session_id AND s.ended_at IS NOT NULL
+  AND m.class = 'assistant-reply' AND m.status = 'pending' AND m.unknown_outcomes = 0;
+
 -- Each contact's newest inbound message, by the earlier of the channel's
 -- time for it and ours.
 UPDATE contacts p SET last_inbound_at = newest.at

@@ -466,7 +466,6 @@ describe("several messages in a row get one answer (US-C11; design note, section
       workerId: "burst",
       pollMs: 20,
     });
-    let last = 0;
     for (const body of ["one", "two", "three"]) {
       serial += 1;
       await storeInbound(
@@ -485,18 +484,22 @@ describe("several messages in a row get one answer (US-C11; design note, section
         ],
         [],
       );
-      last = Date.now();
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     await expect.poll(() => mock.sent.length > 0, { timeout: 10_000, interval: 20 }).toBe(true);
-    const waited = Date.now() - last;
     // A little longer, in case a second reply were on its way.
     await new Promise((resolve) => setTimeout(resolve, 500));
     stop.abort();
     await running;
     expect(mock.sent.map((message) => message.body)).toEqual(["Echo: one\ntwo\nthree"]);
-    // Our clock and the database's are one machine's here; a few milliseconds of slack for the difference.
-    expect(waited).toBeGreaterThanOrEqual(BATCH_QUIET_MS - 50);
+    // By the database's own times, which are the ones the window is measured on:
+    // the reply was made not before three seconds after the last message was stored.
+    const waited = await administrator.query<{ ms: number }>(
+      `SELECT extract(epoch FROM
+                (SELECT min(created_at) FROM messages WHERE direction = 'outbound')
+              - (SELECT max(created_at) FROM messages WHERE direction = 'inbound')) * 1000 AS ms`,
+    );
+    expect(Number(waited.rows[0]?.ms)).toBeGreaterThanOrEqual(BATCH_QUIET_MS);
   }, 20_000);
 });
 

@@ -510,7 +510,7 @@ cannot outlive the state it belongs to.
 
 | Timer | Job created when | Cancelled when |
 | --- | --- | --- |
-| Batching window | An inbound message is stored. As built: each message queues its own job, due 3 seconds later, and the turn checks the window, so a job is never moved | It runs |
+| Batching window | An inbound message is stored. As built: a webhook queues one job for each conversation it stored a message for, due 3 seconds later, and the turn checks the window, so a job is never moved | It runs |
 | Awaiting-retry attempt, 15-minute expiry | The mark is set | The mark is cleared |
 | Reminder | A booking is created or moved | The booking is cancelled or moved |
 | Escalation | A handover becomes `waiting` or `detached` | It leaves both, or a follow-up is accepted |

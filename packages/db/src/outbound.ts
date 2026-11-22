@@ -22,7 +22,7 @@ import {
 import { type Database, poolOf } from "./connect.ts";
 import { enqueueJob } from "./jobs.ts";
 import { holdsLease, releaseLease, takeLease } from "./lease.ts";
-import { lockConversation, noteAccepted, openSession, sessionFor, stamp } from "./sessions.ts";
+import { lockConversation, noteAccepted, openSession, stamp } from "./sessions.ts";
 import { type Tx, withTenant } from "./tenant.ts";
 
 /** Sends what is waiting in one conversation, oldest first. Its subject is the conversation. */
@@ -187,7 +187,12 @@ export type TurnEnd =
   /** Another worker has the conversation now. Nothing was stored. */
   | "lost-lease"
   /** The customer wrote again meanwhile. Nothing was stored; the newer message's job runs the next turn. */
-  | "newer-message";
+  | "newer-message"
+  /**
+   * The session the turn read has ended meanwhile: its 24 hours passed.
+   * Nothing was stored; its messages were closed when it ended.
+   */
+  | "session-over";
 
 /**
  * Ends a turn in one transaction: checks that the lease is still this
@@ -216,6 +221,14 @@ export function finishTurn(
     if (!(await holdsLease(tx, conversationId, turn.token))) {
       return "lost-lease";
     }
+    const at = await stamp(tx, now);
+    // A reply is stored only in the session its turn read, and only while
+    // that session is open (design note, S7).
+    const open = await openSession(tx, conversationId, at);
+    if (open?.id !== turn.sessionId) {
+      await releaseLease(tx, conversationId, turn.token);
+      return "session-over";
+    }
     const newer = await tx.query(
       `SELECT 1 FROM messages WHERE ${UNHANDLED} AND NOT (id = ANY($2::uuid[])) LIMIT 1`,
       [turn.sessionId, handled],
@@ -232,16 +245,14 @@ export function finishTurn(
         return "newer-message";
       }
     }
-    const at = await stamp(tx, now);
     let replyId: string | null = null;
     if (reply !== undefined) {
-      const sessionId = await sessionFor(tx, tenantId, conversationId, at, "outbound");
       const stored = await tx.query<{ id: string }>(
         `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
                                status, created_at)
          VALUES ($1, $2, $3, 'outbound', 'assistant-reply', 'text', $4, 'pending', $5::timestamptz)
          RETURNING id`,
-        [tenantId, conversationId, sessionId, reply, at],
+        [tenantId, conversationId, turn.sessionId, reply, at],
       );
       replyId = stored.rows[0]?.id as string;
       await enqueueJob(tx, {

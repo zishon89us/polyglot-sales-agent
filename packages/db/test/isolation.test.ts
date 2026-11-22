@@ -222,6 +222,31 @@ describe("as tenant A, tenant B's rows cannot be read or changed", () => {
         [a.tenantId, b.conversationId, a.sessionId],
       ),
     ).toBe("23503");
+    // The three references of migration 0006: a message's session, the
+    // reply a message was answered by, and a session's conversation.
+    expect(
+      await asA(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind) VALUES ($1, $2, $3, 'inbound', 'text')`,
+        [a.tenantId, a.conversationId, b.sessionId],
+      ),
+    ).toBe("23503");
+    const administrator = await database.administrator();
+    const ofB = await administrator.query<{ id: string }>(
+      "SELECT id FROM messages WHERE tenant_id = $1 AND direction = 'outbound'",
+      [b.tenantId],
+    );
+    expect(
+      await asA("UPDATE messages SET answered_by = $1 WHERE direction = 'inbound'", [
+        ofB.rows[0]?.id,
+      ]),
+    ).toBe("23503");
+    expect(
+      await asA(
+        `INSERT INTO sessions (tenant_id, conversation_id, started_at, last_message_at)
+         VALUES ($1, $2, now(), now())`,
+        [a.tenantId, b.conversationId],
+      ),
+    ).toBe("23503");
   });
 });
 

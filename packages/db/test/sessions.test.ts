@@ -231,6 +231,53 @@ describe("sessions", () => {
     expect(
       await rows("SELECT body FROM messages WHERE direction = 'inbound' ORDER BY created_at, id"),
     ).toEqual([{ body: "message 0" }, { body: "message 1" }]);
+    expect(await one<number>("SELECT count(DISTINCT created_at)::int AS value FROM messages")).toBe(
+      2,
+    );
+  });
+
+  test("S3: ending a session leaves alone a reply the customer may have: one whose call ended unknown", async () => {
+    await arrives("one", 0);
+    await answer("perhaps delivered", BATCH_QUIET_MS);
+    const next = await claim(BATCH_QUIET_MS);
+    if (next.kind !== "send") {
+      throw new Error("nothing to send");
+    }
+    await recordSend(app, tenant, next.message, { kind: "unknown" }, at(BATCH_QUIET_MS));
+    await arrives("a day later", 25 * HOUR);
+    expect(await replies()).toEqual([{ body: "perhaps delivered", status: "pending" }]);
+  });
+
+  test("S7: a turn that ends after its session's 24 hours stores no reply: the session is over, and its messages were closed with it", async () => {
+    await arrives("one", 0);
+    const turn = await begin(SESSION_INACTIVITY_MS - 1);
+    expect(await finish(turn, "too late", SESSION_INACTIVITY_MS + 1_000)).toBe("session-over");
+    expect(await replies()).toEqual([]);
+    expect(await sessions()).toMatchObject([{ ended: String(SESSION_INACTIVITY_MS), messages: 1 }]);
+    expect(await unhandled()).toBe(0);
+    expect(
+      await one<number>(
+        "SELECT count(*)::int AS value FROM conversations WHERE lease_token IS NOT NULL",
+      ),
+    ).toBe(0);
+  });
+
+  test("S5: the database itself allows one open session per conversation", async () => {
+    await arrives("one", 0);
+    await expect(
+      administrator.query(
+        `INSERT INTO sessions (tenant_id, conversation_id, started_at, last_message_at)
+         SELECT tenant_id, conversation_id, now(), now() FROM sessions`,
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+
+  test("only a customer's message can point at the reply that answered it", async () => {
+    await arrives("one", 0);
+    await answer("a reply", BATCH_QUIET_MS);
+    await expect(
+      administrator.query("UPDATE messages SET answered_by = id WHERE direction = 'outbound'"),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 
   test("S7, S9: a reply is stored in the open session and does not move its time", async () => {
@@ -248,19 +295,30 @@ describe("sessions", () => {
     expect(await sessions()).toMatchObject([{ last: String(10 * 60_000), ended: null }]);
   });
 
-  test("S8: a status event that tells of the acceptance first does the same", async () => {
+  test("S8: a delivery or read receipt is not a message: it does not move the session's time, and the session still ends 24 hours after the acceptance", async () => {
     await arrives("one", 0);
     await answer("a reply", BATCH_QUIET_MS);
     await accepted(BATCH_QUIET_MS);
-    await storeInbound(
-      app,
-      tenant,
-      NUMBER,
-      [],
-      [{ channelMessageId: `wamid.OUT${BATCH_QUIET_MS}`, status: "delivered", errorCode: null }],
-      at(2 * HOUR),
-    );
-    expect(await sessions()).toMatchObject([{ last: String(2 * HOUR), ended: null }]);
+    for (const [status, hours] of [
+      ["delivered", 2],
+      ["read", 23],
+    ] as const) {
+      const stored = await storeInbound(
+        app,
+        tenant,
+        NUMBER,
+        [],
+        [{ channelMessageId: `wamid.OUT${BATCH_QUIET_MS}`, status, errorCode: null }],
+        at(hours * HOUR),
+      );
+      expect(stored.statusesApplied).toBe(1);
+    }
+    expect(await sessions()).toMatchObject([{ last: String(BATCH_QUIET_MS), ended: null }]);
+    await arrives("a day later", 25 * HOUR);
+    expect(await sessions()).toMatchObject([
+      { last: String(BATCH_QUIET_MS), ended: String(BATCH_QUIET_MS + SESSION_INACTIVITY_MS) },
+      { started: String(25 * HOUR) },
+    ]);
   });
 
   test("S8: a session that is over is never moved or reopened by an acceptance", async () => {
@@ -551,9 +609,57 @@ describe("a reply that has been overtaken", () => {
       { body: "r3", status: "pending" },
     ]);
     await arrives("m4", 9_300);
+    // m4 is newer than r3, and r3 is still not held back: two have been dropped already.
+    expect(await claim(9_400)).toMatchObject({ kind: "send", message: { body: "r3" } });
+    await administrator.query(
+      "UPDATE messages SET status = 'pending', sending_at = NULL WHERE status = 'sending'",
+    );
     const turn = await begin(12_300);
     expect(bodies(turn)).toEqual(["m4"]);
     expect((await replies())[2]).toEqual({ body: "r3", status: "pending" });
+  });
+
+  test("D2: only a message stored after the reply holds it back; an older one that is still open does not", async () => {
+    await arrives("m1", 0);
+    let turn = await begin(3_000);
+    await arrives("m2", 3_100);
+    await finish(turn, "first try", 3_200);
+    turn = await begin(6_100);
+    await arrives("m3", 6_200);
+    await finish(turn, "second try", 6_300);
+    turn = await begin(9_200);
+    await arrives("m4", 9_300);
+    // Stored although m4 is open: m4 is older than this reply.
+    expect(await finish(turn, "third try", 9_400)).toBe("stored");
+    // Even with the count back at zero, as after an acceptance, m4 does not hold it.
+    await administrator.query("UPDATE sessions SET reply_discards = 0");
+    expect(await claim(9_500)).toMatchObject({ kind: "send", message: { body: "third try" } });
+  });
+
+  test("D6: a delivery or read receipt for an earlier reply does not end a run of dropped replies", async () => {
+    await arrives("m0", 0);
+    await answer("r0", 3_000);
+    await accepted(3_100);
+    await arrives("m1", 10_000);
+    let turn = await begin(13_000);
+    await arrives("m2", 13_100);
+    await finish(turn, "first try", 13_200);
+    turn = await begin(16_100);
+    await arrives("m3", 16_200);
+    await finish(turn, "second try", 16_300);
+    expect(await discards()).toBe(2);
+    await storeInbound(
+      app,
+      tenant,
+      NUMBER,
+      [],
+      [{ channelMessageId: "wamid.OUT3100", status: "read", errorCode: null }],
+      at(16_400),
+    );
+    expect(await discards()).toBe(2);
+    turn = await begin(19_200);
+    await arrives("m4", 19_300);
+    expect(await finish(turn, "third try", 19_400)).toBe("stored");
   });
 
   test("D6: the count returns to zero when an assistant reply is accepted by the channel", async () => {
@@ -621,7 +727,11 @@ describe("one lock per conversation (design note, section 0)", () => {
    * lock. Then lets go. Without the lock in an operation, nothing would
    * ever be seen waiting and this would time out.
    */
-  async function whileHeld<Result>(waiters: number, work: () => Promise<Result>): Promise<Result> {
+  async function whileHeld<Result>(
+    waiters: number,
+    work: () => Promise<Result>,
+    meanwhile?: () => Promise<unknown>,
+  ): Promise<Result> {
     await administrator.query("BEGIN");
     let running: Promise<Result>;
     try {
@@ -629,7 +739,8 @@ describe("one lock per conversation (design note, section 0)", () => {
       running = work();
       for (let tries = 0; ; tries += 1) {
         const waiting = await pool.query<{ n: number }>(
-          "SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted",
+          `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+           WHERE NOT l.granted AND a.datname = current_database()`,
         );
         if (waiting.rows[0]?.n === waiters) {
           break;
@@ -639,6 +750,8 @@ describe("one lock per conversation (design note, section 0)", () => {
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
+      // Done by the holder, in its transaction: visible to the waiters only once it lets go.
+      await meanwhile?.();
     } finally {
       await administrator.query("COMMIT");
     }
@@ -651,11 +764,53 @@ describe("one lock per conversation (design note, section 0)", () => {
     expect(await sessions()).toMatchObject([{ messages: 3, ended: null }]);
   });
 
-  test("starting a turn waits for it", async () => {
+  test("starting a turn waits for it before it reads anything: a message stored while it waited is in its batch", async () => {
     await arrives("one", 0);
     const id = await conversation();
-    const turn = await whileHeld(1, () => beginTurn(app, tenant, id, at(3_000)));
-    expect(turn.kind).toBe("turn");
+    const turn = await whileHeld(
+      1,
+      () => beginTurn(app, tenant, id, at(10_000)),
+      // Stored by whoever held the conversation. A turn that had read its
+      // batch before waiting would not have this message.
+      () =>
+        administrator.query(
+          `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind, body, created_at)
+           SELECT tenant_id, conversation_id, id, 'inbound', 'text', 'two', $1 FROM sessions`,
+          [at(1_000)],
+        ),
+    );
+    if (turn.kind !== "turn") {
+      throw new Error(`no turn: ${JSON.stringify(turn)}`);
+    }
+    expect(bodies(turn)).toEqual(["one", "two"]);
+  });
+
+  test("the same webhook delivered twice at one moment stores the message once, starts one session and fails neither delivery", async () => {
+    await arrives("first", 0);
+    const twice = () =>
+      storeInbound(
+        app,
+        tenant,
+        NUMBER,
+        [
+          {
+            channelMessageId: "wamid.SESSION-TWICE",
+            phone: "+15550161",
+            userId: "US.10000000000000000061",
+            kind: "text",
+            body: "second",
+            sentAt: at(1_000),
+          },
+        ],
+        [],
+        at(1_000),
+      );
+    const stored = await whileHeld(2, () => Promise.all([twice(), twice()]));
+    expect(stored.map((batch) => [batch.stored, batch.duplicates]).sort()).toEqual([
+      [0, 1],
+      [1, 0],
+    ]);
+    expect(await sessions()).toMatchObject([{ messages: 2 }]);
   });
 
   test("ending a turn waits for it, so a message being stored cannot slip past: whichever goes second sees the other", async () => {
@@ -749,6 +904,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
         ["busy", "+15550171"],
         ["quiet", "+15550172"],
         ["once", "+15550173"],
+        ["edge", "+15550174"],
       ] as const) {
         const contact = await admin.query<{ id: string }>(
           "INSERT INTO contacts (tenant_id, phone) VALUES ($1, $2) RETURNING id",
@@ -781,8 +937,13 @@ describe("migration 0006 on a database that has conversations (design note, sect
       await outbound("busy", t(30), "failed", "b3");
       await inbound("busy", t(31), t(32), "b4");
       await outbound("busy", t(31.5), "pending", "b5");
-      // One with a single message, and one with none.
-      await inbound("once", t(5), null, "o1");
+      // One with a single message, delivered an hour after it was sent, and one with none.
+      await inbound("once", t(5), t(4), "o1");
+
+      // Two messages exactly 24 hours apart, and a third a millisecond short of 24 hours after.
+      await inbound("edge", t(100), t(100), "e1");
+      await inbound("edge", t(124), t(124), "e2");
+      await inbound("edge", new Date(t(148).getTime() - 1), t(147), "e3");
 
       expect(await migrateUp(migrator, all)).toContain("sessions");
 
@@ -792,7 +953,8 @@ describe("migration 0006 on a database that has conversations (design note, sect
         `SELECT m.body, ${hours("s.started_at")}::float AS started,
                 ${hours("s.last_message_at")}::float AS last, ${hours("s.ended_at")}::float AS ended,
                 s.conversation_id = m.conversation_id AS same_conversation, m.answered_by
-         FROM messages m JOIN sessions s ON s.id = m.session_id ORDER BY m.created_at`,
+         FROM messages m JOIN sessions s ON s.id = m.session_id
+         WHERE m.body NOT LIKE 'e%' ORDER BY m.created_at`,
       );
       expect(made6.rows).toEqual([
         { body: "b1", started: 0, last: 1, ended: 25, same_conversation: true, answered_by: null },
@@ -830,8 +992,36 @@ describe("migration 0006 on a database that has conversations (design note, sect
           answered_by: null,
         },
       ]);
+      // Exactly 24 hours apart is two sessions; a millisecond less is one.
+      expect(
+        (
+          await admin.query(
+            `SELECT array_agg(m.body ORDER BY m.created_at) AS bodies, s.ended_at IS NULL AS open
+             FROM messages m JOIN sessions s ON s.id = m.session_id
+             WHERE m.body LIKE 'e%' GROUP BY s.id ORDER BY min(m.created_at)`,
+          )
+        ).rows,
+      ).toEqual([
+        { bodies: ["e1"], open: false },
+        { bodies: ["e2", "e3"], open: true },
+      ]);
       expect((await admin.query("SELECT count(*)::int AS n FROM sessions")).rows).toEqual([
-        { n: 3 },
+        { n: 5 },
+      ]);
+      // What an ended session left open is closed, as when a session ends from now on.
+      expect(
+        (
+          await admin.query(
+            "SELECT body, handled_at IS NOT NULL AS handled FROM messages WHERE direction = 'inbound' ORDER BY created_at",
+          )
+        ).rows,
+      ).toEqual([
+        { body: "b1", handled: true },
+        { body: "o1", handled: false },
+        { body: "b4", handled: false },
+        { body: "e1", handled: true },
+        { body: "e2", handled: false },
+        { body: "e3", handled: false },
       ]);
       // The reply window: the earlier of the channel's time and ours, of the newest inbound message.
       expect(
@@ -843,13 +1033,14 @@ describe("migration 0006 on a database that has conversations (design note, sect
       ).toEqual([
         { phone: "+15550171", window: 31 },
         { phone: "+15550172", window: null },
-        { phone: "+15550173", window: 5 },
+        { phone: "+15550173", window: 4 },
+        { phone: "+15550174", window: 147 },
       ]);
 
       // The way back: the messages stay, what 0006 added goes.
       expect(await migrateDown(migrator, all)).toBe("sessions");
       expect((await admin.query("SELECT count(*)::int AS n FROM messages")).rows).toEqual([
-        { n: 6 },
+        { n: 9 },
       ]);
       expect(
         (
@@ -863,7 +1054,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
       // And up again gives the same sessions.
       await migrateUp(migrator, all);
       expect((await admin.query("SELECT count(*)::int AS n FROM sessions")).rows).toEqual([
-        { n: 3 },
+        { n: 5 },
       ]);
     } finally {
       await scratch.drop();

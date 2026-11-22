@@ -90,27 +90,24 @@ export async function openSession(
 }
 
 /**
- * The session a message stored at `at` belongs to: the open one, or a new
- * one. A customer's message moves the session's last-message time; a
- * message of ours does not until the channel accepts it (design note, S1 to
- * S3, S7 to S9).
+ * The session a customer's message stored at `at` belongs to: the open one,
+ * whose last-message time it moves, or a new one (design note, S1 to S3).
+ * A message of ours is stored in the session its turn read, and moves that
+ * time only when the channel accepts it (`noteAccepted`).
  */
 export async function sessionFor(
   tx: Tx,
   tenantId: string,
   conversationId: string,
   at: string,
-  direction: "inbound" | "outbound",
 ): Promise<string> {
   const open = await openSession(tx, conversationId, at);
   if (open !== undefined) {
-    if (direction === "inbound") {
-      await tx.query(
-        `UPDATE sessions SET last_message_at = greatest(last_message_at, $2::timestamptz)
-         WHERE id = $1`,
-        [open.id, at],
-      );
-    }
+    await tx.query(
+      `UPDATE sessions SET last_message_at = greatest(last_message_at, $2::timestamptz)
+       WHERE id = $1`,
+      [open.id, at],
+    );
     return open.id;
   }
   const made = await tx.query<{ id: string }>(
@@ -125,8 +122,9 @@ export async function sessionFor(
  * The channel accepted a message of ours at `at`: its session's
  * last-message time moves, and an accepted assistant reply ends a run of
  * dropped replies. A session that is ended, or over by time, is never moved
- * (design note, S8, D6). Called from both places that learn of an
- * acceptance: the worker's own record of its call, and a status event.
+ * (design note, S8, D6). Called only when the worker records that its own
+ * call was accepted. A delivery or read receipt is not an acceptance and
+ * does neither.
  */
 export async function noteAccepted(tx: Tx, messageId: string, at: string): Promise<void> {
   await tx.query(
