@@ -108,7 +108,8 @@ set out on its page.
 4. **Rows already on the decisions page that units build on.** A "no" is
    cheaper before the unit than after: U2 on rows 1 (who a customer is)
    and 18 (`handled_at`, which U2 removes); U13 on rows 2, 3, 7 and 8 (the
-   send policy); U1 and U9 on row 21 (the pack's hooks); U0 closes the
+   send policy); U9 on row 21 (the pack's hooks, which ADR 0014 leaves to
+   M5); U4 on row 37; U0 closes the
    first part of #227 only on a yes to row 13.
 5. **What the M3 evals cover with no tools** (row 32). The eval plan's
    minimum sizes are for v1.0 and say the M3 dataset will be smaller. Some
@@ -150,11 +151,11 @@ set out on its page.
 | Unit | What | Stories and criteria | Needs | Done when |
 | --- | --- | --- | --- | --- |
 | U0 | Settle the findings that are about documents; move what is not M3's | — | — | Every part of every finding listed under U0 has an end: fixed, a named unit's, moved, or already answered (an issue with a unit's part stays open for that unit); the stories file's later table is as question 8 was answered |
-| U1 | The ADR for the pack interface | ADR 0012 | U0 | The ADR is merged: how a pack registers tools, claim kinds, prompt text, fixed texts and buttons |
+| U1 | The ADR for the pack interface | ADR 0012 | U0 | The ADR is merged: how a pack is registered; the three parts M3 builds (prompt fragment, tool, claim kind); the rules M3 keeps for the parts left to M5 (ADR 0014) |
 | U2 | Sessions, the reply window and the batch | US-C11, 1 to 3; order of checks, 4 and 12; NFR-P5 | U0 | A burst inside the window gets one reply, in order; a message that arrives while a reply is being made replaces it; two workers never answer one conversation at once; `handled_at` is gone, with a tested way back |
 | U3 | The business profile, the tenant's settings, and what the model is given | ADR 0006; order of checks, 8 (the test only) | U0 | Services, policies, opening hours and settings are stored per tenant, loaded by an operator's command, and assembled into one context with nothing of the contact in it (NFR-V7); its size is measured and a budget set |
-| U4 | `LlmClient`, the fake client and the prompt loader | ADR 0005; US-C4, 2 (the schema); #158 | U1 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded; no provider's library is imported outside its adapter |
-| U5 | Buttons and captions in the channel | US-C12, 2; NFR-M2 | U0 | A tap arrives as a typed event tied to its conversation; a text with buttons can be sent; a caption is read as text; both stand-ins do the same; a test keeps channel-specific imports out of the core |
+| U4 | `LlmClient`, the fake client, the prompt loader, and the pack interface's packages | ADR 0005; ADR 0014; US-C4, 2 (the schema); #158 | U1 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded; no provider's library is imported outside its adapter; the interface and registry packages exist, `faq-only` is registered as row 37 is answered, and the boundary test is changed as ADR 0014 lists |
+| U5 | Buttons and captions in the channel | US-C12, 2; NFR-M2 | U1 | A tap arrives as a typed event tied to its conversation; a text with buttons can be sent; a caption is read as text; both stand-ins do the same; a test keeps channel-specific imports out of the core |
 | U6 | Traces, cost and the log line | US-C10, 1 and 2; NFR-O2 | U2, U4 | Every model call leaves one trace, linked to its session, with no message text, number or name in it; a test of the log line's shape passes for the api and the worker |
 | U7 | The turn: the model in place of the echo, and the customer's language | US-C3, 4; US-C8, 4 with a test tool; US-C11, 5; order of checks, 15 | U2, U3, U4, U6 | With the fake client, a batch is answered from the profile; the session records its language; an unsupported language is attempted and marked; the lease is renewed before each attempt |
 | U8 | Fixed texts and disclosure | US-C5, 1 to 3 | U5, U7 | The first message of a session carries the disclosure, added by code; every fixed text M3 sends exists in every supported language, or the gap is listed |
@@ -182,7 +183,7 @@ flowchart LR
     U0 --> U1
     U0 --> U2
     U0 --> U3
-    U0 --> U5
+    U1 --> U5
     U1 --> U4
     U2 --> U6
     U4 --> U6
@@ -284,12 +285,15 @@ the deployment definition are not M3's.
 
 ### U1: The ADR for the pack interface
 
-What the Gate 2 review called the central bet with no record (#200, #237):
-how a pack registers its tools, claim kinds, prompt text, fixed texts,
-buttons and
-session outcome. It is built in M5; U4, U9, U10 and U11 must not shape the
-turn in a way M5 would undo, and steps 10 and 13 of the order of checks
-must not name the pack's buttons in the core.
+What the Gate 2 review listed as a decision with no record (#200; #237
+is about the documents that still name bookings):
+how a pack is registered and hands over its parts. As first planned it
+was to cover tools, claim kinds, prompt text, fixed texts, buttons and
+session outcome. As written (ADR 0014) it decides registration and three
+parts, the prompt fragment, the tool and the claim kind, and gives a
+rule for each of the others, which M5 shapes. U2, U4 to U11 keep those
+rules, each as ADR 0014's table names it; steps 10, 13 and 15 of the order of checks
+name no button but the core's own.
 
 ### U2: Sessions, the reply window and the batch
 
@@ -314,14 +318,17 @@ nothing that identifies the contact; the size budget ADR 0006 asks for,
 from measured counts. The calendar is not assembled here: dates are the
 pack's. US-C4 (#13, the storage); #228; the settings of #278.
 
-### U4: `LlmClient`, the fake client and the prompt loader
+### U4: `LlmClient`, the fake client, the prompt loader, the pack packages
 
 The interface of ADR 0005 in this project's own types, `health()`
 included; `FakeLlmClient`, scripted; prompts under `prompts/` with a
 version and a `meta.yaml`; the output schema (reply, claims, flags, tool
 calls, with the seven flags of the guardrail policy, #278); the limits on
 every call (#158); the test that no provider's library is imported
-outside its adapter. No provider yet.
+outside its adapter. No provider yet. The packages of ADR 0014: the
+interface, the registry, `faq-only`, and `booking`'s own object; the
+loader takes a pack's fragment;
+the boundary test changed in the places that record lists.
 
 ### U5: Buttons and captions in the channel
 

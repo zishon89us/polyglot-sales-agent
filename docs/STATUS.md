@@ -421,14 +421,28 @@ M0 Inception met its exit criteria on 2026-11-16; see
   was taken back and made a question, row 36. #299 stays open for rows
   13, 29, 35 and 36.
 
+- 2026-11-23 — #318 merged. Ten issues moved as its page says (M3 now
+  holds 99 open: 19 units and 80 others), and each unit's issue carries
+  the parts the page gave it. **M3 U1** (#300): ADR 0014, how a pack
+  hands its parts to the core. A pack is one typed object in its own
+  package, listed in a registry that a program's entry point imports and
+  passes down. M3 builds three parts, the prompt fragment, the tool and
+  the claim kind, each shown by a pack written in a test; the others wait
+  for M5, with a rule M3 keeps for each. No pack code gets a database
+  handle in M3. The first draft shaped six parts; its review made 33
+  findings, seven of them High (a button's reference undefined and
+  against the data model; a database scope against ADR 0003; three steps
+  rewritten with behaviour lost and a fourth left out), and the record was rewritten to decide
+  less (`reviews/2026-11-23-adr-0014-review.md`). Row 37 asks about
+  `faq-only`. The plan's U4 now creates the two packages. No code.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 36 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 37 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
-2. The agent goes on to U1, the ADR for the pack interface, then U2, U3
-   and U5, with U0 still open for four answers. U1 builds on row 21 and
-   U3 on rows 34 and 36 as well. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
+2. The agent goes on to U2, U3, U4 and U5, with U0 still open for four
+   answers. U3 builds on rows 34 and 36 as well, and U4 on row 37. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
    them is cheaper before the unit than after.
 3. M3 cannot be called done without the maintainer: the languages, AWS
    credentials, and acceptance of a measured baseline.
@@ -481,7 +495,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 36 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 37 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 
