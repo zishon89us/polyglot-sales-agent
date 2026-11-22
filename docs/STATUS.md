@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U0 under way; no code yet)
+## Current milestone: M3 AI core (U1 done; U2 under way; no code yet)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -436,10 +436,17 @@ M0 Inception met its exit criteria on 2026-11-16; see
   less (`reviews/2026-11-23-adr-0014-review.md`). Row 37 asks about
   `faq-only`. The plan's U4 now creates the two packages. No code.
 
+- 2026-11-23 — #319 merged: ADR 0014 is accepted. **M3 U2** (#301)
+  begun with its design note, before any code
+  (`design/notes/m3-u2-sessions.md`): each case of a session, the reply
+  window, the batch and a reply overtaken by a newer message, as a table.
+  It departs from the plan in one thing that matters: `handled_at` stays.
+  Rows 38 and 39 ask about two rules it proposes.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 37 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 39 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U2, U3, U4 and U5, with U0 still open for four
    answers. U3 builds on rows 34 and 36 as well, and U4 on row 37. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
@@ -495,7 +502,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 37 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 39 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 
