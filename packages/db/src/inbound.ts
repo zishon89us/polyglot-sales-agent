@@ -4,9 +4,10 @@
 // again for the same webhook: the channel sends a webhook again whenever it
 // was not answered 200, and may do so after a run that did commit.
 
-import { OPERATOR_ALERT_JOB } from "@polyglot-sales-agent/core";
+import { BATCH_QUIET_MS, OPERATOR_ALERT_JOB } from "@polyglot-sales-agent/core";
 import { type Database, poolOf } from "./connect.ts";
 import { enqueueJob } from "./jobs.ts";
+import { lockConversation, noteAccepted, sessionFor, stamp } from "./sessions.ts";
 import { type Tx, withTenant } from "./tenant.ts";
 
 /** The job that makes a worker look at a conversation. */
@@ -169,7 +170,8 @@ const FORWARD = `
        ($2 = 'sent' AND status = 'sending')
     OR ($2 = 'delivered' AND status IN ('sending', 'sent'))
     OR ($2 = 'read' AND status IN ('sending', 'sent', 'delivered'))
-    OR ($2 = 'failed' AND status IN ('sending', 'sent')))`;
+    OR ($2 = 'failed' AND status IN ('sending', 'sent')))
+  RETURNING id`;
 
 /**
  * Stores one tenant's events from one webhook, in one transaction: each new
@@ -186,6 +188,7 @@ export function storeInbound(
   receivingNumberId: string,
   messages: readonly IncomingMessage[],
   statuses: readonly IncomingStatus[],
+  now?: Date,
 ): Promise<StoredBatch> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
     const account = await tx.query<{ id: string }>(
@@ -214,46 +217,82 @@ export function storeInbound(
       }
       seen.add(message.channelMessageId);
       const contactId = await contactFor(tx, tenantId, message);
+      // Locks are taken in one order everywhere: contact, conversation, session, message.
+      await tx.query("SELECT 1 FROM contacts WHERE id = $1 FOR NO KEY UPDATE", [contactId]);
       const conversationId = await conversationFor(tx, tenantId, contactId, channelAccountId);
+      // From here to the end of the transaction nothing else stores a
+      // message, starts or ends a turn, or claims a send for this
+      // conversation (design note, section 0).
+      await lockConversation(tx, conversationId);
+      // Looked for again under the lock, so that a webhook delivered twice at
+      // the same moment starts no session and opens no window the second time.
+      const again = await tx.query(
+        "SELECT 1 FROM messages WHERE direction = 'inbound' AND channel_message_id = $1",
+        [message.channelMessageId],
+      );
+      if (again.rowCount > 0) {
+        duplicates += 1;
+        continue;
+      }
       // The clock is read for each row, so that messages of one webhook keep their order.
-      const inserted = await tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, kind, channel_message_id,
-                               body, channel_sent_at, created_at)
-         VALUES ($1, $2, 'inbound', $3, $4, $5, $6, clock_timestamp())
-         ON CONFLICT (tenant_id, direction, channel_message_id) DO NOTHING`,
+      const at = await stamp(tx, now, stored);
+      const sessionId = await sessionFor(tx, tenantId, conversationId, at, "inbound");
+      await tx.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind,
+                               channel_message_id, body, channel_sent_at, created_at)
+         VALUES ($1, $2, $3, 'inbound', $4, $5, $6, $7, $8::timestamptz)`,
         [
           tenantId,
           conversationId,
+          sessionId,
           message.kind,
           message.channelMessageId,
           message.body,
           message.sentAt,
+          at,
         ],
       );
-      if (inserted.rowCount === 1) {
-        stored += 1;
-        touched.add(conversationId);
-      } else {
-        // Stored by another transaction since the look above.
-        duplicates += 1;
-      }
+      // The reply window opens from the earlier of the channel's time for
+      // the message and ours, and never moves back (design note, W1).
+      await tx.query(
+        `UPDATE contacts
+         SET last_inbound_at = greatest(
+               last_inbound_at,
+               least(coalesce($2::timestamptz, $3::timestamptz), $3::timestamptz))
+         WHERE id = $1`,
+        [contactId, message.sentAt, at],
+      );
+      stored += 1;
+      touched.add(conversationId);
     }
+    // Each conversation that got a message gets a job, due when its batching
+    // window can first close. The turn checks the window itself, so a job
+    // that is early, late or doubled does no harm; none is ever left out
+    // because another exists (design note, section 3).
     for (const conversationId of touched) {
       await enqueueJob(tx, {
         type: PROCESS_CONVERSATION_JOB,
         tenantId,
         subjectId: conversationId,
         payload: { conversationId },
+        ...(now === undefined ? {} : { runAt: now }),
+        runInMs: BATCH_QUIET_MS,
       });
     }
     let statusesApplied = 0;
     for (const status of statuses) {
-      const moved = await tx.query(FORWARD, [
+      const moved = await tx.query<{ id: string }>(FORWARD, [
         status.channelMessageId,
         status.status,
         status.errorCode,
       ]);
       statusesApplied += moved.rowCount;
+      if (status.status !== "failed") {
+        // The channel has it: the same as the worker recording its own call.
+        for (const row of moved.rows) {
+          await noteAccepted(tx, row.id, await stamp(tx, now));
+        }
+      }
     }
     return { stored, duplicates, statusesApplied };
   });

@@ -6,9 +6,13 @@
 // transaction.
 
 import {
+  batchWindowClosesAt,
   decideAfterSend,
   EXPIRED,
+  HELD_BACK_WAIT_MS,
   type MessageClass,
+  REPLY_DISCARDS_MAX,
+  REPLY_WINDOW_MS,
   SEND_EXPIRES_MS,
   SENDING_STALE_MS,
   type SendDecision,
@@ -18,6 +22,7 @@ import {
 import { type Database, poolOf } from "./connect.ts";
 import { enqueueJob } from "./jobs.ts";
 import { holdsLease, releaseLease, takeLease } from "./lease.ts";
+import { lockConversation, noteAccepted, openSession, sessionFor, stamp } from "./sessions.ts";
 import { type Tx, withTenant } from "./tenant.ts";
 
 /** Sends what is waiting in one conversation, oldest first. Its subject is the conversation. */
@@ -35,18 +40,49 @@ export interface UnhandledMessage {
 
 export type TurnStart =
   /** Another worker holds the conversation. */
-  | { readonly busy: true }
+  | { readonly kind: "busy" }
+  /** The batching window is still open: come back after this long. No lease was taken. */
+  | { readonly kind: "wait"; readonly ms: number }
+  /** The open session has no message to deal with, or the conversation has no open session. */
+  | { readonly kind: "idle" }
+  /**
+   * The batch was marked as dealt with and nothing is to be answered: the
+   * reply window had closed (design note, W2). `messages` is how many.
+   */
+  | { readonly kind: "skipped"; readonly reason: "window-closed"; readonly messages: number }
   | {
-      readonly busy: false;
+      readonly kind: "turn";
       /** The lease token, to present when the turn's result is stored. */
       readonly token: string;
-      /** The customer's messages no turn has dealt with, oldest first. */
+      readonly sessionId: string;
+      /** The customer's messages of the open session no turn has dealt with, oldest first. */
       readonly messages: readonly UnhandledMessage[];
     };
 
+const UNHANDLED = "session_id = $1 AND direction = 'inbound' AND handled_at IS NULL";
+
+function noConversation(where: string): Error {
+  return Object.assign(new Error(`${where}: no such conversation in this tenant`), {
+    code: "conversation-not-found",
+  });
+}
+
 /**
- * Takes the conversation's lease and reads the customer's messages that no
- * turn has dealt with. `now` is for tests.
+ * Starts a turn, if one may start (design note, sections 0 to 3). In one
+ * transaction, under the conversation's lock:
+ *
+ * - a session that is over is ended, with its effects;
+ * - if the batching window is still open, nothing is taken and the caller
+ *   is told how long to wait;
+ * - the lease is taken;
+ * - if the reply window has closed, the batch is marked as dealt with and
+ *   no turn starts;
+ * - replies of the session that wait unsent are discarded and the messages
+ *   they answered count as not dealt with again, unless that has already
+ *   happened twice in a row;
+ * - the batch is read.
+ *
+ * `now` is for tests.
  */
 export function beginTurn(
   app: Database,
@@ -55,17 +91,93 @@ export function beginTurn(
   now?: Date,
 ): Promise<TurnStart> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
+    if (!(await lockConversation(tx, conversationId))) {
+      throw noConversation("beginTurn");
+    }
+    const at = await stamp(tx, now);
+    const session = await openSession(tx, conversationId, at);
+    if (session === undefined) {
+      return { kind: "idle" };
+    }
+    const window = await tx.query<{
+      waiting: string;
+      latest: string | null;
+      first: string | null;
+      now: string;
+    }>(
+      `SELECT count(*) AS waiting,
+              extract(epoch FROM max(m.created_at)) * 1000 AS latest,
+              extract(epoch FROM min(m.created_at) FILTER (
+                WHERE c.turn_started_at IS NULL OR m.created_at > c.turn_started_at
+              )) * 1000 AS first,
+              extract(epoch FROM $2::timestamptz) * 1000 AS now
+       FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.session_id = $1 AND m.direction = 'inbound' AND m.handled_at IS NULL`,
+      [session.id, at],
+    );
+    const batch = window.rows[0];
+    const waiting = Number(batch?.waiting ?? 0);
+    if (batch === undefined || waiting === 0) {
+      return { kind: "idle" };
+    }
+    // With no message stored since the last turn started, the batch has
+    // already waited and the window is closed.
+    const closes = batchWindowClosesAt(
+      Number(batch.latest),
+      batch.first === null ? undefined : Number(batch.first),
+    );
+    if (Number(batch.now) < closes) {
+      return { kind: "wait", ms: Math.ceil(closes - Number(batch.now)) };
+    }
     const token = await takeLease(tx, conversationId, now);
     if (token === undefined) {
-      return { busy: true };
+      return { kind: "busy" };
+    }
+    const closed = await tx.query(
+      `SELECT 1 FROM conversations c JOIN contacts p ON p.id = c.contact_id
+       WHERE c.id = $1 AND (p.last_inbound_at IS NULL
+         OR p.last_inbound_at + $3::double precision * interval '1 millisecond' <= $2::timestamptz)`,
+      [conversationId, at, REPLY_WINDOW_MS],
+    );
+    if (closed.rowCount > 0) {
+      await tx.query(`UPDATE messages SET handled_at = $2::timestamptz WHERE ${UNHANDLED}`, [
+        session.id,
+        at,
+      ]);
+      await releaseLease(tx, conversationId, token);
+      return { kind: "skipped", reason: "window-closed", messages: waiting };
+    }
+    await tx.query("UPDATE conversations SET turn_started_at = $2::timestamptz WHERE id = $1", [
+      conversationId,
+      at,
+    ]);
+    if (session.replyDiscards < REPLY_DISCARDS_MAX) {
+      // A reply that has waited its 15 minutes is left to expire as it
+      // always did, with nothing reopened (design note, D8).
+      const dropped = await tx.query<{ id: string }>(
+        `UPDATE messages SET status = 'discarded', send_not_before = NULL
+         WHERE session_id = $1 AND class = 'assistant-reply' AND status = 'pending'
+           AND unknown_outcomes = 0
+           AND $2::timestamptz - greatest(created_at, send_not_before)
+               <= $3::double precision * interval '1 millisecond'
+         RETURNING id`,
+        [session.id, at, SEND_EXPIRES_MS],
+      );
+      if (dropped.rowCount > 0) {
+        await tx.query(
+          "UPDATE messages SET handled_at = NULL, answered_by = NULL WHERE answered_by = ANY($1::uuid[])",
+          [dropped.rows.map((row) => row.id)],
+        );
+        await tx.query("UPDATE sessions SET reply_discards = reply_discards + 1 WHERE id = $1", [
+          session.id,
+        ]);
+      }
     }
     const unhandled = await tx.query<UnhandledMessage>(
-      `SELECT id, kind, body FROM messages
-       WHERE conversation_id = $1 AND direction = 'inbound' AND handled_at IS NULL
-       ORDER BY created_at, id`,
-      [conversationId],
+      `SELECT id, kind, body FROM messages WHERE ${UNHANDLED} ORDER BY created_at, id`,
+      [session.id],
     );
-    return { busy: false, token, messages: unhandled.rows };
+    return { kind: "turn", token, sessionId: session.id, messages: unhandled.rows };
   });
 }
 
@@ -74,60 +186,78 @@ export type TurnEnd =
   | "stored"
   /** Another worker has the conversation now. Nothing was stored. */
   | "lost-lease"
-  /** The customer wrote again meanwhile. Nothing was stored; the turn is to be run again. */
+  /** The customer wrote again meanwhile. Nothing was stored; the newer message's job runs the next turn. */
   | "newer-message";
 
 /**
  * Ends a turn in one transaction: checks that the lease is still this
- * worker's, marks the messages as dealt with, stores the reply as an
- * assistant reply waiting to be sent, queues the job that sends it, and
- * gives the lease back. If the customer wrote again since `beginTurn`, the
- * reply is dropped and nothing is marked (architecture, "Processing one
- * turn", step 7). With no reply the messages are only marked.
+ * worker's, which also locks the conversation; marks the messages as dealt
+ * with, each pointing at the reply; stores the reply as an assistant reply
+ * waiting to be sent; queues the job that sends it; and gives the lease
+ * back. With no reply the messages are only marked.
+ *
+ * If the customer wrote again since `beginTurn`, the reply is dropped and
+ * nothing is marked, unless a reply has already been dropped twice in a row
+ * in this session: then this one is stored, and the newer message is left
+ * for the next turn (design note, D1, D6).
+ *
+ * `now` is for tests.
  */
 export function finishTurn(
   app: Database,
   tenantId: string,
   conversationId: string,
-  token: string,
+  turn: { readonly token: string; readonly sessionId: string },
   handled: readonly string[],
   reply: string | undefined,
+  now?: Date,
 ): Promise<TurnEnd> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
-    if (!(await holdsLease(tx, conversationId, token))) {
+    if (!(await holdsLease(tx, conversationId, turn.token))) {
       return "lost-lease";
     }
     const newer = await tx.query(
-      `SELECT 1 FROM messages
-       WHERE conversation_id = $1 AND direction = 'inbound' AND handled_at IS NULL
-         AND NOT (id = ANY($2::uuid[]))
-       LIMIT 1`,
-      [conversationId, handled],
+      `SELECT 1 FROM messages WHERE ${UNHANDLED} AND NOT (id = ANY($2::uuid[])) LIMIT 1`,
+      [turn.sessionId, handled],
     );
     if (newer.rowCount > 0) {
-      await releaseLease(tx, conversationId, token);
-      return "newer-message";
-    }
-    await tx.query(
-      `UPDATE messages SET handled_at = clock_timestamp()
-       WHERE id = ANY($1::uuid[]) AND direction = 'inbound' AND handled_at IS NULL`,
-      [handled],
-    );
-    if (reply !== undefined) {
-      await tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status,
-                               created_at)
-         VALUES ($1, $2, 'outbound', 'assistant-reply', 'text', $3, 'pending', clock_timestamp())`,
-        [tenantId, conversationId, reply],
+      const counted = await tx.query(
+        `UPDATE sessions SET reply_discards = reply_discards + 1
+         WHERE id = $1 AND reply_discards < $2 AND $3::boolean`,
+        [turn.sessionId, REPLY_DISCARDS_MAX, reply !== undefined],
       );
+      // With no reply there is nothing to drop, and nothing is counted.
+      if (reply === undefined || counted.rowCount === 1) {
+        await releaseLease(tx, conversationId, turn.token);
+        return "newer-message";
+      }
+    }
+    const at = await stamp(tx, now);
+    let replyId: string | null = null;
+    if (reply !== undefined) {
+      const sessionId = await sessionFor(tx, tenantId, conversationId, at, "outbound");
+      const stored = await tx.query<{ id: string }>(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
+                               status, created_at)
+         VALUES ($1, $2, $3, 'outbound', 'assistant-reply', 'text', $4, 'pending', $5::timestamptz)
+         RETURNING id`,
+        [tenantId, conversationId, sessionId, reply, at],
+      );
+      replyId = stored.rows[0]?.id as string;
       await enqueueJob(tx, {
         type: SEND_MESSAGES_JOB,
         tenantId,
         subjectId: conversationId,
         payload: { conversationId },
+        ...(now === undefined ? {} : { runAt: now }),
       });
     }
-    await releaseLease(tx, conversationId, token);
+    await tx.query(
+      `UPDATE messages SET handled_at = $2::timestamptz, answered_by = $3
+       WHERE id = ANY($1::uuid[]) AND direction = 'inbound' AND handled_at IS NULL`,
+      [handled, at, replyId],
+    );
+    await releaseLease(tx, conversationId, turn.token);
     return "stored";
   });
 }
@@ -191,6 +321,23 @@ interface Waiting {
   receiving_number_id: string;
 }
 
+// An assistant reply that never reached the channel is held back while its
+// session has a newer customer message no turn has dealt with: the turn for
+// that message decides whether it is still wanted (design note, D2). Not
+// held back: a reply whose call ended unknown, which the customer may have
+// (D4); one that has waited its 15 minutes, which must be let expire (D8);
+// and any reply once two in a row have been dropped (D6).
+const HELD_BACK = (now: number) => `(
+  m.class = 'assistant-reply' AND m.status = 'pending' AND m.unknown_outcomes = 0
+  AND ${NOW(now)} - greatest(m.created_at, m.send_not_before)
+      <= ${SEND_EXPIRES_MS} * interval '1 millisecond'
+  AND EXISTS (
+    SELECT 1 FROM sessions s WHERE s.id = m.session_id AND s.reply_discards < ${REPLY_DISCARDS_MAX})
+  AND EXISTS (
+    SELECT 1 FROM messages newer
+    WHERE newer.session_id = m.session_id AND newer.direction = 'inbound'
+      AND newer.handled_at IS NULL AND newer.created_at > m.created_at))`;
+
 const OLDEST_WAITING = (now: number) => `
   SELECT m.id, m.class, m.kind, m.body, m.status, m.send_attempts, m.unknown_outcomes,
          extract(epoch FROM ${NOW(now)} - m.sending_at) * 1000 AS sending_for,
@@ -202,7 +349,7 @@ const OLDEST_WAITING = (now: number) => `
   JOIN conversations c ON c.id = m.conversation_id
   JOIN contacts p ON p.id = c.contact_id
   JOIN channel_accounts a ON a.id = c.channel_account_id
-  WHERE m.conversation_id = $1 AND m.status IN ('pending', 'sending')
+  WHERE m.conversation_id = $1 AND m.status IN ('pending', 'sending') AND NOT ${HELD_BACK(now)}
   ORDER BY m.created_at, m.id
   LIMIT 1
   FOR UPDATE OF m`;
@@ -273,6 +420,11 @@ export function claimNextSend(
   now?: Date,
 ): Promise<NextSend> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
+    // Throws for a conversation the tenant does not have, which is a fault
+    // in the job and must not look like "nothing to send".
+    if (!(await lockConversation(tx, conversationId))) {
+      throw noConversation("claimNextSend");
+    }
     const ended: string[] = [];
     const also = (): { ended?: readonly string[] } => (ended.length > 0 ? { ended } : {});
     // Each pass either returns or ends one message for good, so this ends.
@@ -280,15 +432,16 @@ export function claimNextSend(
       const found = await tx.query<Waiting>(OLDEST_WAITING(2), [conversationId, now ?? null]);
       const waiting = found.rows[0];
       if (waiting === undefined) {
-        const exists = await tx.query("SELECT 1 FROM conversations WHERE id = $1", [
-          conversationId,
-        ]);
-        if (exists.rowCount === 0) {
-          throw Object.assign(new Error("claimNextSend: no such conversation in this tenant"), {
-            code: "conversation-not-found",
-          });
-        }
-        return { kind: "none", ...also() };
+        // What is left, if anything, is held back: look again later, so that
+        // it is sent if the newer message is dealt with some other way, and
+        // expires if nothing comes of it.
+        const held = await tx.query(
+          "SELECT 1 FROM messages WHERE conversation_id = $1 AND status = 'pending' LIMIT 1",
+          [conversationId],
+        );
+        return held.rowCount > 0
+          ? { kind: "wait", ms: HELD_BACK_WAIT_MS, ...also() }
+          : { kind: "none", ...also() };
       }
       const expired = Number(waiting.waiting_for) > SEND_EXPIRES_MS;
       if (waiting.status === "sending") {
@@ -378,6 +531,15 @@ export function recordSend(
   now?: Date,
 ): Promise<SendDecision | "superseded"> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
+    // The conversation first, then the message: one order of locks everywhere.
+    const whose = await tx.query<{ conversation_id: string }>(
+      "SELECT conversation_id FROM messages WHERE id = $1",
+      [message.id],
+    );
+    const conversationId = whose.rows[0]?.conversation_id;
+    if (conversationId === undefined || !(await lockConversation(tx, conversationId))) {
+      return "superseded";
+    }
     const found = await tx.query<{ class: MessageClass; unknown_outcomes: number }>(
       `SELECT class, unknown_outcomes FROM messages
        WHERE id = $1 AND status = 'sending' AND send_attempts = $2 FOR UPDATE`,
@@ -398,6 +560,9 @@ export function recordSend(
       now,
       ...(result.kind === "accepted" ? { channelMessageId: result.channelMessageId } : {}),
     });
+    if (decision.next === "sent") {
+      await noteAccepted(tx, message.id, await stamp(tx, now));
+    }
     return decision;
   });
 }
