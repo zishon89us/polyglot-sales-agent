@@ -216,8 +216,9 @@ test before v1.0.0 does (risk R-T3).
 **Dependency rule.** `core` imports nothing from this repository. No package
 imports from `apps`. The core never imports a pack; packs are registered with
 `worker` and with `api` at start-up, since a pack supplies both tools and
-routes (ADR 0012). The package diagram above predates ADR 0012 and lacks the
-edge from `api` to `pack`; it is corrected with finding V9. An import-boundary test in CI enforces all three.
+routes (ADR 0012). How a pack is registered, and the registry package the
+programs import, are decided in ADR 0014; the diagram above does not draw
+the registry. An import-boundary test in CI enforces all three.
 
 ### What a pack provides
 
