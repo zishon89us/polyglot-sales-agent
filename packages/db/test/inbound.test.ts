@@ -528,8 +528,9 @@ describe("storeInbound: a status", () => {
     const [conversation] = await rows("conversations", key);
     await withTenant(app, tenant[key], (tx) =>
       tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, channel_message_id, body, status, sending_at)
-         VALUES ($1, $2, 'outbound', 'assistant-reply', 'text', $3, 'reply', $4,
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, channel_message_id, body, status, sending_at)
+         VALUES ($1, $2, (SELECT id FROM sessions WHERE conversation_id = $2 AND ended_at IS NULL),
+                 'outbound', 'assistant-reply', 'text', $3, 'reply', $4,
                  CASE WHEN $4 = 'sending' THEN clock_timestamp() END)`,
         [tenant[key], conversation?.id, id, status],
       ),

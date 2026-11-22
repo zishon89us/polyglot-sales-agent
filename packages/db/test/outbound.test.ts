@@ -77,7 +77,7 @@ async function arrives(body: string, key: "a" | "b" = "a"): Promise<string> {
         userId: "US.10000000000000000042",
         kind: "text",
         body,
-        sentAt: new Date("2026-11-19T10:00:00.000Z"),
+        sentAt: new Date(),
       },
     ],
     [],
@@ -88,21 +88,24 @@ async function arrives(body: string, key: "a" | "b" = "a"): Promise<string> {
   return found.rows[0]?.id as string;
 }
 
+/** After the batching window of anything stored so far: these tests are not about the window. */
+const afterWindow = (): Date => new Date(Date.now() + 11_000);
+
 const count = async (where: string): Promise<number> =>
   (await administrator.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${where}`)).rows[0]
     ?.n as number;
 
 /** Runs one whole turn with this reply. */
 async function answered(conversation: string, reply: string): Promise<void> {
-  const turn = await beginTurn(app, tenant.a, conversation);
-  if (turn.busy) {
+  const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
+  if (turn.kind !== "turn") {
     throw new Error("busy");
   }
   await finishTurn(
     app,
     tenant.a,
     conversation,
-    turn.token,
+    turn,
     turn.messages.map((message) => message.id),
     reply,
   );
@@ -112,28 +115,26 @@ describe("a turn", () => {
   test("reads what the customer wrote and no turn has dealt with, oldest first, and holds the conversation", async () => {
     const conversation = await arrives("one");
     await arrives("two");
-    const turn = await beginTurn(app, tenant.a, conversation);
+    const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
     expect(turn).toMatchObject({
-      busy: false,
+      kind: "turn",
       messages: [
         { kind: "text", body: "one" },
         { kind: "text", body: "two" },
       ],
     });
-    expect(await beginTurn(app, tenant.a, conversation)).toEqual({ busy: true });
+    expect(await beginTurn(app, tenant.a, conversation, afterWindow())).toEqual({ kind: "busy" });
   });
 
   test("ends by marking the messages, storing the reply to send, queueing its job and freeing the conversation, together", async () => {
     const conversation = await arrives("one");
-    const turn = await beginTurn(app, tenant.a, conversation);
-    if (turn.busy) {
+    const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
+    if (turn.kind !== "turn") {
       throw new Error("busy");
     }
     await administrator.query("DELETE FROM jobs");
     const ids = turn.messages.map((message) => message.id);
-    expect(await finishTurn(app, tenant.a, conversation, turn.token, ids, "a reply")).toBe(
-      "stored",
-    );
+    expect(await finishTurn(app, tenant.a, conversation, turn, ids, "a reply")).toBe("stored");
     expect(await count("messages WHERE direction = 'inbound' AND handled_at IS NOT NULL")).toBe(1);
     expect(
       await count(
@@ -153,23 +154,18 @@ describe("a turn", () => {
     ]);
     expect(await count("conversations WHERE lease_token IS NOT NULL")).toBe(0);
     // A second turn finds nothing to answer.
-    expect(await beginTurn(app, tenant.a, conversation)).toMatchObject({
-      busy: false,
-      messages: [],
-    });
+    expect(await beginTurn(app, tenant.a, conversation, afterWindow())).toEqual({ kind: "idle" });
   });
 
   test("with no reply, only marks the messages and queues nothing", async () => {
     const conversation = await arrives("one");
-    const turn = await beginTurn(app, tenant.a, conversation);
-    if (turn.busy) {
+    const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
+    if (turn.kind !== "turn") {
       throw new Error("busy");
     }
     await administrator.query("DELETE FROM jobs");
     const ids = turn.messages.map((message) => message.id);
-    expect(await finishTurn(app, tenant.a, conversation, turn.token, ids, undefined)).toBe(
-      "stored",
-    );
+    expect(await finishTurn(app, tenant.a, conversation, turn, ids, undefined)).toBe("stored");
     expect(await count("messages WHERE handled_at IS NOT NULL")).toBe(1);
     expect(await count("messages WHERE direction = 'outbound'")).toBe(0);
     expect(await count("jobs")).toBe(0);
@@ -177,18 +173,16 @@ describe("a turn", () => {
 
   test("stores nothing when another worker has taken the conversation meanwhile", async () => {
     const conversation = await arrives("one");
-    const turn = await beginTurn(app, tenant.a, conversation);
-    if (turn.busy) {
+    const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
+    if (turn.kind !== "turn") {
       throw new Error("busy");
     }
     // The lease ran out and another worker took it.
     const later = new Date(Date.now() + 10 * 60_000);
     const other = await beginTurn(app, tenant.a, conversation, later);
-    expect(other.busy).toBe(false);
+    expect(other.kind).toBe("turn");
     const ids = turn.messages.map((message) => message.id);
-    expect(await finishTurn(app, tenant.a, conversation, turn.token, ids, "late")).toBe(
-      "lost-lease",
-    );
+    expect(await finishTurn(app, tenant.a, conversation, turn, ids, "late")).toBe("lost-lease");
     expect(await count("messages WHERE direction = 'outbound'")).toBe(0);
     expect(await count("messages WHERE handled_at IS NOT NULL")).toBe(0);
     // And the other worker's lease is untouched.
@@ -197,34 +191,34 @@ describe("a turn", () => {
 
   test("drops the reply when the customer wrote again meanwhile, and frees the conversation for the next turn", async () => {
     const conversation = await arrives("one");
-    const turn = await beginTurn(app, tenant.a, conversation);
-    if (turn.busy) {
+    const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
+    if (turn.kind !== "turn") {
       throw new Error("busy");
     }
     await arrives("two");
     const ids = turn.messages.map((message) => message.id);
-    expect(await finishTurn(app, tenant.a, conversation, turn.token, ids, "to one only")).toBe(
+    expect(await finishTurn(app, tenant.a, conversation, turn, ids, "to one only")).toBe(
       "newer-message",
     );
     expect(await count("messages WHERE direction = 'outbound'")).toBe(0);
     expect(await count("messages WHERE handled_at IS NOT NULL")).toBe(0);
-    const next = await beginTurn(app, tenant.a, conversation);
-    expect(next).toMatchObject({ busy: false, messages: [{ body: "one" }, { body: "two" }] });
+    const next = await beginTurn(app, tenant.a, conversation, afterWindow());
+    expect(next).toMatchObject({ kind: "turn", messages: [{ body: "one" }, { body: "two" }] });
   });
 
   test("can be given up: the conversation is free at once, and nothing is stored", async () => {
     const conversation = await arrives("one");
-    const turn = await beginTurn(app, tenant.a, conversation);
-    if (turn.busy) {
+    const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
+    if (turn.kind !== "turn") {
       throw new Error("busy");
     }
     // Not with another's token, nor from another tenant.
     await abandonTurn(app, tenant.a, conversation, "00000000-0000-4000-8000-000000000000");
     await abandonTurn(app, tenant.b, conversation, turn.token);
-    expect(await beginTurn(app, tenant.a, conversation)).toEqual({ busy: true });
+    expect(await beginTurn(app, tenant.a, conversation, afterWindow())).toEqual({ kind: "busy" });
     await abandonTurn(app, tenant.a, conversation, turn.token);
-    expect(await beginTurn(app, tenant.a, conversation)).toMatchObject({
-      busy: false,
+    expect(await beginTurn(app, tenant.a, conversation, afterWindow())).toMatchObject({
+      kind: "turn",
       messages: [{ body: "one" }],
     });
   });
@@ -234,12 +228,12 @@ describe("a turn", () => {
     await expect(beginTurn(app, tenant.b, conversation)).rejects.toMatchObject({
       code: "conversation-not-found",
     });
-    const turn = await beginTurn(app, tenant.a, conversation);
-    if (turn.busy) {
+    const turn = await beginTurn(app, tenant.a, conversation, afterWindow());
+    if (turn.kind !== "turn") {
       throw new Error("busy");
     }
     const ids = turn.messages.map((message) => message.id);
-    expect(await finishTurn(app, tenant.b, conversation, turn.token, ids, "x")).toBe("lost-lease");
+    expect(await finishTurn(app, tenant.b, conversation, turn, ids, "x")).toBe("lost-lease");
     expect(await count("messages WHERE direction = 'outbound'")).toBe(0);
   });
 });
@@ -393,9 +387,9 @@ describe("a send", () => {
   test("a notice found stale is ended unconfirmed, and the look says so", async () => {
     const conversation = await arrives("one");
     await administrator.query(
-      `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status, sending_at, send_attempts)
-       SELECT tenant_id, id, 'outbound', 'service-notice', 'text', 'a notice', 'sending', clock_timestamp() - interval '3 minutes', 1
-       FROM conversations`,
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, sending_at, send_attempts)
+       SELECT tenant_id, conversation_id, id, 'outbound', 'service-notice', 'text', 'a notice', 'sending', clock_timestamp() - interval '3 minutes', 1
+       FROM sessions`,
     );
     expect(await claimNextSend(app, tenant.a, conversation)).toEqual({
       kind: "none",
@@ -549,8 +543,8 @@ describe("what the database itself refuses", () => {
   const insert = (columns: string, values: string) =>
     sqlState(
       administrator.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, status, ${columns})
-         SELECT tenant_id, id, 'outbound', 'system-reply', 'text', ${values} FROM conversations`,
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, status, ${columns})
+         SELECT tenant_id, conversation_id, id, 'outbound', 'system-reply', 'text', ${values} FROM sessions`,
       ),
     );
 
@@ -594,9 +588,12 @@ describe("migration 0004, down and up again, with a message being sent", () => {
          ), conversation AS (
            INSERT INTO conversations (tenant_id, contact_id, channel_account_id)
            SELECT $1, contact.id, account.id FROM contact, account RETURNING id
+         ), session AS (
+           INSERT INTO sessions (tenant_id, conversation_id, started_at, last_message_at)
+           SELECT $1, id, now(), now() FROM conversation RETURNING id, conversation_id
          )
-         INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status, sending_at, send_attempts)
-         SELECT $1, id, 'outbound', 'assistant-reply', 'text', 'in flight', 'sending', now(), 1 FROM conversation`,
+         INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, sending_at, send_attempts)
+         SELECT $1, conversation_id, id, 'outbound', 'assistant-reply', 'text', 'in flight', 'sending', now(), 1 FROM session`,
         [tenantId],
       );
       const migrator = await scratch.client(MIGRATE_ROLE);
@@ -607,6 +604,11 @@ describe("migration 0004, down and up again, with a message being sent", () => {
       const after = await admin.query("SELECT status, error_code FROM messages");
       expect(after.rows).toEqual([{ status: "failed", error_code: "unconfirmed" }]);
       expect(await migrateUp(migrator, all)).toContain("sending");
+      // 0006 came back too, and gave the message a session again.
+      const again = await admin.query(
+        "SELECT count(*)::int AS n FROM messages m JOIN sessions s ON s.id = m.session_id",
+      );
+      expect(again.rows).toEqual([{ n: 1 }]);
     } finally {
       await scratch.drop();
     }

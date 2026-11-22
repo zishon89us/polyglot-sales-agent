@@ -9,6 +9,7 @@ import {
   MOCK_ACCESS_TOKEN,
   type MockChannel,
 } from "@polyglot-sales-agent/channel-mock";
+import { BATCH_MAX_MS } from "@polyglot-sales-agent/core";
 import {
   APP_ROLE,
   CROSS_ROLE,
@@ -89,12 +90,20 @@ async function arrives(body: string | null, key: "a" | "b" = "a", phone = CUSTOM
         userId: null,
         kind: body === null ? "image" : "text",
         body,
-        sentAt: new Date("2026-11-19T10:00:00.000Z"),
+        sentAt: new Date(),
       },
     ],
     [],
+    settled(),
   );
 }
+
+/**
+ * A time whose batching window has already closed. The tests that are not
+ * about the window store their messages as of then, so that a turn starts
+ * as soon as a worker looks, and every other wait keeps its real length.
+ */
+const settled = (): Date => new Date(Date.now() - BATCH_MAX_MS - 1_000);
 
 const failed: string[] = [];
 const handlersFor = (channel: Channel): Record<string, JobHandler> =>
@@ -170,8 +179,9 @@ async function planted(
     const conversation = await tx.query<{ id: string }>("SELECT id FROM conversations");
     const id = conversation.rows[0]?.id as string;
     await tx.query(
-      `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status)
-       VALUES ($1, $2, 'outbound', $3, 'text', $4, 'pending')`,
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status)
+       VALUES ($1, $2, (SELECT id FROM sessions WHERE conversation_id = $2 AND ended_at IS NULL),
+               'outbound', $3, 'text', $4, 'pending')`,
       [tenant.a, id, messageClass, body],
     );
     await tx.query(
@@ -215,10 +225,10 @@ describe("a customer's message is answered with an echo", () => {
       userId: null,
       kind: "text",
       body: "hello",
-      sentAt: new Date("2026-11-19T10:00:00.000Z"),
+      sentAt: new Date(),
     };
     for (let delivery = 0; delivery < 5; delivery += 1) {
-      await storeInbound(app, tenant.a, NUMBER.a, [same], []);
+      await storeInbound(app, tenant.a, NUMBER.a, [same], [], settled());
       await work();
     }
     expect(mock.sent.map((message) => message.body)).toEqual(["Echo: hello"]);
@@ -277,6 +287,7 @@ describe("a customer's message is answered with an echo", () => {
         },
       ],
       [],
+      settled(),
     );
     await work();
     expect(mock.sent.map((message) => message.body)).toEqual(["Echo: the text"]);
@@ -598,15 +609,15 @@ describe("the send policy when the channel answers", () => {
     await work();
     await withTenant(appPool, tenant.a, (tx) =>
       tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, status)
-         SELECT tenant_id, id, 'outbound', 'business-initiated', 'template', 'pending' FROM conversations`,
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, status)
+         SELECT tenant_id, conversation_id, id, 'outbound', 'business-initiated', 'template', 'pending' FROM sessions`,
       ),
     );
     // One with a body too: it must not go out as free text.
     await withTenant(appPool, tenant.a, (tx) =>
       tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status)
-         SELECT tenant_id, id, 'outbound', 'business-initiated', 'template', 'reminder_v1', 'pending' FROM conversations`,
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status)
+         SELECT tenant_id, conversation_id, id, 'outbound', 'business-initiated', 'template', 'reminder_v1', 'pending' FROM sessions`,
       ),
     );
     await planted("system-reply", "after it");
@@ -626,12 +637,15 @@ describe("messages of one conversation go one at a time and in order (NFR-R6)", 
     await arrives("first");
     mock.failNextSend("rate-limited", true);
     await work();
-    await arrives("second");
+    // Something of ours behind it. (A second message from the customer would
+    // not wait behind the reply: it would replace it. See "a reply that has
+    // been overtaken".)
+    await planted("system-reply", "second");
     await work(mock, 1_000);
     expect(mock.sent).toEqual([]);
     await endWaits();
     await work(mock, 120_000);
-    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: first", "Echo: second"]);
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: first", "second"]);
   });
 
   test("a message waits while the one before it is being sent, and nothing overtakes", async () => {
@@ -947,7 +961,10 @@ describe("the worker's loop", () => {
     for (const phone of customers) {
       expect(said(phone)).toEqual([0, 1, 2, 3, 4].map((n) => `${phone} says ${n}`));
     }
-    expect((await outbound()).every((message) => message.status === "sent")).toBe(true);
+    // A reply overtaken by the next message of its burst was discarded, never sent late.
+    const statuses = (await outbound()).map((message) => message.status);
+    expect(statuses.filter((status) => status !== "sent" && status !== "discarded")).toEqual([]);
+    expect(statuses.filter((status) => status === "sent")).toHaveLength(mock.sent.length);
     // A job the workers had not reached when they were stopped, or had put back because the
     // other held the conversation (a second) or was sending its message (up to two minutes),
     // finds nothing left to do.
