@@ -5,7 +5,7 @@ stop, or a thing only the maintainer can do. Answer with the row's number
 and "yes", "no", or a few words; a "no" tells the agent what to change.
 "If no" says what a no would cost, as far as the agent can tell.
 
-Last brought up to date: 2026-11-23, with the M3 plan (rows 29 to 35) and its first units (rows 36 and 37;
+Last brought up to date: 2026-11-23, with the M3 plan (rows 29 to 35) and its first units (rows 36 to 39;
 a row keeps its number for good, so new rows take the next numbers
 wherever they sit on the page). At the end of M2 a second agent
 checked the first version against the repository and found it left out a
@@ -41,6 +41,8 @@ an earlier draft.
 | 35 | **Add to the stories file's table of criteria delivered later** the parts of M3 criteria that need bookings, templates or real tools (question 8) | US-C4, 4 and 14 and the booking clause of 10; US-C5, 1 for a template; US-C8, 4 for a real tool; US-C15, 9 | Say which of them M3 should deliver, and how without the booking pack |
 | 36 | **May what a customer types inside a message go to the model as written, a phone number or a name included?** `AGENTS.md` section 7 says never to send a phone number or a contact's name to the model; the architecture says the system adds none, and ADR 0005 adds that it cannot remove what a customer typed. NFR-V7's wording should say which (#77; set out in `plans/m3-u0-findings.md`, not in the M3 plan). A yes accepts that numbers and names a customer types, their own or another person's, go to the model provider, where `compliance.md` argues for sending only the text needed to answer | Nothing is changed. Proposed: NFR-V7 reads "no phone number or name of the contact, from the contact's record or the channel's profile, is put into a prompt; the messages of the session are sent as written", and `AGENTS.md` section 7 is reworded by you to match | Typed numbers and names must be found and removed before the model sees a message, which is new work for U7 and will sometimes remove what the customer meant to say |
 | 37 | **Register `faq-only` now as a pack with a name and nothing else** (ADR 0014)? `ops` already accepts the name and the data model and the API list it, but it has no package, so a tenant created on it would get no answers once the worker looks packs up | Proposed. Its prompt and evals are still added at the end of M5, and NFR-M1 is still measured then on `packages/core`; the trial no longer includes adding a line to the registry | The name is taken out of `ops`, the data model and the API until M5, so that the trial adds the pack whole. A built command changes |
+| 38 | **After two replies in a row have been dropped because the customer wrote again, the third is sent anyway** (`design/notes/m3-u2-sessions.md`, D6). Without a bound, a customer who writes every few seconds is never answered | Proposed, not built: two | Say another number, or that a reply is always dropped for a newer message, as US-C11, 2 reads today |
+| 39 | **When a contact known only by a number first gets the channel's identifier, its open session is ended** (the same note, P2), so that a new holder of the number is not answered in the light of the old holder's last day of messages. If it was the same person, they are told once more that they are talking to an assistant | Proposed, not built. It narrows what row 1 accepts | The session carries on, and from U7 the model is shown its earlier messages |
 
 ## Made in M2; a yes closes them
 
