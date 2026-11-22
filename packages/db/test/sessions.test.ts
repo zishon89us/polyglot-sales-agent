@@ -19,11 +19,15 @@ import {
   claimNextSend,
   type Database,
   finishTurn,
+  loadMigrations,
+  MIGRATE_ROLE,
+  migrateDown,
+  migrateUp,
   recordSend,
   storeInbound,
   type TurnStart,
 } from "../src/index.ts";
-import { adopt, createTestDatabase, type TestDatabase } from "./harness.ts";
+import { adopt, createTestDatabase, MIGRATIONS_DIRECTORY, type TestDatabase } from "./harness.ts";
 
 let database: TestDatabase;
 let pool: pg.Pool;
@@ -715,4 +719,154 @@ describe("one lock per conversation (design note, section 0)", () => {
     );
     expect(decision).toMatchObject({ next: "sent" });
   });
+});
+
+describe("migration 0006 on a database that has conversations (design note, section 6)", () => {
+  test("old messages are cut into sessions at gaps of 24 hours; the way back loses only what it added; and up again", async () => {
+    const scratch = await createTestDatabase({ migrate: true });
+    try {
+      const all = loadMigrations(MIGRATIONS_DIRECTORY);
+      const sessionsAt = all.findIndex((migration) => migration.name === "sessions");
+      const migrator = await scratch.client(MIGRATE_ROLE);
+      // Back to just before 0006, and whatever came after it.
+      for (let step = all.length; step > sessionsAt; step -= 1) {
+        await migrateDown(migrator, all.slice(0, step));
+      }
+      const admin = await scratch.administrator();
+      const t = (hours: number): Date => at(hours * HOUR);
+      const made = await admin.query<{ id: string }>(
+        `INSERT INTO tenants (name, pack, time_zone, default_language)
+         VALUES ('t', 'faq-only', 'Asia/Riyadh', 'ar') RETURNING id`,
+      );
+      const tenantId = made.rows[0]?.id;
+      const account = await admin.query<{ id: string }>(
+        `INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id)
+         VALUES ($1, 'mock', '100000000000008') RETURNING id`,
+        [tenantId],
+      );
+      const conversations: Record<string, string> = {};
+      for (const [name, phone] of [
+        ["busy", "+15550171"],
+        ["quiet", "+15550172"],
+        ["once", "+15550173"],
+      ] as const) {
+        const contact = await admin.query<{ id: string }>(
+          "INSERT INTO contacts (tenant_id, phone) VALUES ($1, $2) RETURNING id",
+          [tenantId, phone],
+        );
+        const conversation = await admin.query<{ id: string }>(
+          `INSERT INTO conversations (tenant_id, contact_id, channel_account_id)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [tenantId, contact.rows[0]?.id, account.rows[0]?.id],
+        );
+        conversations[name] = conversation.rows[0]?.id as string;
+      }
+      const inbound = (name: string, stored: Date, sent: Date | null, body: string) =>
+        admin.query(
+          `INSERT INTO messages (tenant_id, conversation_id, direction, kind, body, channel_message_id,
+                                 channel_sent_at, created_at)
+           VALUES ($1, $2, 'inbound', 'text', $3, $3, $4, $5)`,
+          [tenantId, conversations[name], body, sent, stored],
+        );
+      const outbound = (name: string, stored: Date, status: string, body: string) =>
+        admin.query(
+          `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status,
+                                 created_at)
+           VALUES ($1, $2, 'outbound', 'assistant-reply', 'text', $3, $4, $5)`,
+          [tenantId, conversations[name], body, status, stored],
+        );
+      // One conversation with a gap of 29 hours in it; rows of each kind.
+      await inbound("busy", t(0), t(-1), "b1");
+      await outbound("busy", t(1), "sent", "b2");
+      await outbound("busy", t(30), "failed", "b3");
+      await inbound("busy", t(31), t(32), "b4");
+      await outbound("busy", t(31.5), "pending", "b5");
+      // One with a single message, and one with none.
+      await inbound("once", t(5), null, "o1");
+
+      expect(await migrateUp(migrator, all)).toContain("sessions");
+
+      const hours = (column: string) =>
+        `round(extract(epoch FROM ${column}) * 1000 - ${T0}) / ${HOUR}`;
+      const made6 = await admin.query(
+        `SELECT m.body, ${hours("s.started_at")}::float AS started,
+                ${hours("s.last_message_at")}::float AS last, ${hours("s.ended_at")}::float AS ended,
+                s.conversation_id = m.conversation_id AS same_conversation, m.answered_by
+         FROM messages m JOIN sessions s ON s.id = m.session_id ORDER BY m.created_at`,
+      );
+      expect(made6.rows).toEqual([
+        { body: "b1", started: 0, last: 1, ended: 25, same_conversation: true, answered_by: null },
+        { body: "b2", started: 0, last: 1, ended: 25, same_conversation: true, answered_by: null },
+        {
+          body: "o1",
+          started: 5,
+          last: 5,
+          ended: null,
+          same_conversation: true,
+          answered_by: null,
+        },
+        {
+          body: "b3",
+          started: 30,
+          last: 31.5,
+          ended: null,
+          same_conversation: true,
+          answered_by: null,
+        },
+        {
+          body: "b4",
+          started: 30,
+          last: 31.5,
+          ended: null,
+          same_conversation: true,
+          answered_by: null,
+        },
+        {
+          body: "b5",
+          started: 30,
+          last: 31.5,
+          ended: null,
+          same_conversation: true,
+          answered_by: null,
+        },
+      ]);
+      expect((await admin.query("SELECT count(*)::int AS n FROM sessions")).rows).toEqual([
+        { n: 3 },
+      ]);
+      // The reply window: the earlier of the channel's time and ours, of the newest inbound message.
+      expect(
+        (
+          await admin.query(
+            `SELECT phone, ${hours("last_inbound_at")}::float AS window FROM contacts ORDER BY phone`,
+          )
+        ).rows,
+      ).toEqual([
+        { phone: "+15550171", window: 31 },
+        { phone: "+15550172", window: null },
+        { phone: "+15550173", window: 5 },
+      ]);
+
+      // The way back: the messages stay, what 0006 added goes.
+      expect(await migrateDown(migrator, all)).toBe("sessions");
+      expect((await admin.query("SELECT count(*)::int AS n FROM messages")).rows).toEqual([
+        { n: 6 },
+      ]);
+      expect(
+        (
+          await admin.query(
+            `SELECT count(*)::int AS n FROM information_schema.columns
+             WHERE table_schema = 'public' AND (table_name = 'sessions'
+               OR column_name IN ('session_id', 'answered_by', 'last_inbound_at', 'turn_started_at'))`,
+          )
+        ).rows,
+      ).toEqual([{ n: 0 }]);
+      // And up again gives the same sessions.
+      await migrateUp(migrator, all);
+      expect((await admin.query("SELECT count(*)::int AS n FROM sessions")).rows).toEqual([
+        { n: 3 },
+      ]);
+    } finally {
+      await scratch.drop();
+    }
+  }, 30_000);
 });

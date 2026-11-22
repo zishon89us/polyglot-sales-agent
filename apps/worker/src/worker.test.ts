@@ -9,9 +9,10 @@ import {
   MOCK_ACCESS_TOKEN,
   type MockChannel,
 } from "@polyglot-sales-agent/channel-mock";
-import { BATCH_MAX_MS } from "@polyglot-sales-agent/core";
+import { BATCH_MAX_MS, BATCH_QUIET_MS } from "@polyglot-sales-agent/core";
 import {
   APP_ROLE,
+  beginTurn,
   CROSS_ROLE,
   type Database,
   type Job,
@@ -340,6 +341,163 @@ describe("a customer's message is answered with an echo", () => {
       { type: PROCESS_CONVERSATION_JOB, state: "dead" },
     ]);
   });
+});
+
+describe("several messages in a row get one answer (US-C11; design note, section 3)", () => {
+  /** A message stored as of `when`, not as of a moment already settled. */
+  async function arrivesAt(body: string, when: Date, sentAt = when): Promise<void> {
+    serial += 1;
+    await storeInbound(
+      app,
+      tenant.a,
+      NUMBER.a,
+      [
+        {
+          channelMessageId: `wamid.BURST${serial}`,
+          phone: CUSTOMER,
+          userId: null,
+          kind: "text",
+          body,
+          sentAt,
+        },
+      ],
+      [],
+      when,
+    );
+  }
+  /** Runs every due job with the queue and the handlers both at `when`. */
+  async function workAt(when: Date): Promise<string[]> {
+    const handlers = createHandlers({
+      app,
+      channels: { mock },
+      accessToken: MOCK_ACCESS_TOKEN,
+      report: (event, code) => failed.push(`${event} ${code}`),
+      clock: () => when,
+    });
+    const results: string[] = [];
+    for (let runs = 0; runs < 50; runs += 1) {
+      const outcome = await workOnce(cross, handlers, { clock: () => when });
+      if (!outcome.ran) {
+        return results;
+      }
+      results.push(`${outcome.job.type} ${outcome.result}`);
+    }
+    throw new Error("the queue did not empty");
+  }
+  const base = Date.UTC(2026, 10, 23, 12, 0, 0);
+  const t = (ms: number): Date => new Date(base + ms);
+
+  test("a burst is answered together, in order, and not before the window closes (NFR-P5)", async () => {
+    await arrivesAt("one", t(0));
+    await arrivesAt("two", t(1_000));
+    await arrivesAt("three", t(2_000));
+    // No job is due before the first message's three seconds.
+    expect(await workAt(t(BATCH_QUIET_MS - 1))).toEqual([]);
+    // The first job comes due while the customer may still be writing: put off, nothing answered.
+    expect(await workAt(t(4_999))).toEqual([
+      `${PROCESS_CONVERSATION_JOB} deferred`,
+      `${PROCESS_CONVERSATION_JOB} deferred`,
+    ]);
+    expect(await outbound()).toEqual([]);
+    // Three seconds after the last message: one turn, one reply. The other jobs find nothing to do.
+    const ran = await workAt(t(5_000));
+    expect(ran.filter((result) => result === `${SEND_MESSAGES_JOB} done`)).toHaveLength(1);
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: one\ntwo\nthree"]);
+    expect(await workAt(t(60_000))).toEqual([]);
+    expect(mock.sent).toHaveLength(1);
+  });
+
+  test("a worker that stops while a job is put off for the window loses nothing: the next one answers, once (NFR-R1)", async () => {
+    await arrivesAt("one", t(0));
+    expect(await workAt(t(BATCH_QUIET_MS - 1))).toEqual([]);
+    // That worker is gone. Another looks much later.
+    await workAt(t(10 * 60_000));
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: one"]);
+  });
+
+  test("the customer writes while a reply waits to be sent: that reply is never sent, and one reply covers both (US-C11, 2)", async () => {
+    await arrivesAt("first", t(0));
+    mock.failNextSend("rate-limited", true);
+    await workAt(t(BATCH_QUIET_MS));
+    // The reply was refused and waits to be tried again. The customer has nothing.
+    expect(await outbound()).toMatchObject([{ body: "Echo: first", status: "pending" }]);
+    await arrivesAt("second", t(4_000));
+    await workAt(t(4_000 + BATCH_QUIET_MS));
+    await workAt(t(60_000));
+    expect(await outbound()).toMatchObject([
+      { body: "Echo: first", status: "discarded" },
+      { body: "Echo: first\nsecond", status: "sent" },
+    ]);
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: first\nsecond"]);
+  });
+
+  test("a worker that stops after discarding a reply and before making the new one: the next turn still answers everything, once (NFR-R2)", async () => {
+    await arrivesAt("first", t(0));
+    mock.failNextSend("rate-limited", true);
+    await workAt(t(BATCH_QUIET_MS));
+    await arrivesAt("second", t(4_000));
+    // A worker starts the turn, which discards the waiting reply, and is never heard of again.
+    const conversation = await administrator.query<{ id: string }>("SELECT id FROM conversations");
+    const begun = await beginTurn(app, tenant.a, conversation.rows[0]?.id as string, t(7_000));
+    expect(begun.kind).toBe("turn");
+    await administrator.query("DELETE FROM jobs WHERE type = $1", [PROCESS_CONVERSATION_JOB]);
+    // Its lease runs out; an operator retries, or the next message's job comes.
+    await arrivesAt("third", t(10 * 60_000));
+    await workAt(t(10 * 60_000 + BATCH_QUIET_MS));
+    await workAt(t(11 * 60_000));
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: first\nsecond\nthird"]);
+  });
+
+  test("a message nobody answered while its reply window was open is not answered, and the worker says so without quoting it", async () => {
+    // Delivered now, sent 26 hours ago: the channel would refuse a reply.
+    await arrivesAt("a day late", t(0), t(-26 * 60 * 60_000));
+    await workAt(t(BATCH_QUIET_MS));
+    expect(mock.sent).toEqual([]);
+    expect(await outbound()).toEqual([]);
+    expect(failed).toEqual(["turn-skipped window-closed"]);
+  });
+
+  test("in real time, with a worker running: three quick messages, one reply, not before three seconds after the last", async () => {
+    const stop = new AbortController();
+    const running = runWorker({
+      cross,
+      handlers: handlersFor(mock),
+      signal: stop.signal,
+      workerId: "burst",
+      pollMs: 20,
+    });
+    let last = 0;
+    for (const body of ["one", "two", "three"]) {
+      serial += 1;
+      await storeInbound(
+        app,
+        tenant.a,
+        NUMBER.a,
+        [
+          {
+            channelMessageId: `wamid.REAL${serial}`,
+            phone: CUSTOMER,
+            userId: null,
+            kind: "text",
+            body,
+            sentAt: new Date(),
+          },
+        ],
+        [],
+      );
+      last = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await expect.poll(() => mock.sent.length > 0, { timeout: 10_000, interval: 20 }).toBe(true);
+    const waited = Date.now() - last;
+    // A little longer, in case a second reply were on its way.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    stop.abort();
+    await running;
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: one\ntwo\nthree"]);
+    // Our clock and the database's are one machine's here; a few milliseconds of slack for the difference.
+    expect(waited).toBeGreaterThanOrEqual(BATCH_QUIET_MS - 50);
+  }, 20_000);
 });
 
 describe("a turn and the conversation's lease", () => {

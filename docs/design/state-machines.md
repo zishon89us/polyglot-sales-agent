@@ -37,7 +37,7 @@ at step 12.
 | 9 | Contact paused for rate? | Yes: no reply, no model call, no handover. **Ends.** If this message is the one that crosses the limit, send the rate notice once and start the pause. |
 | 10 | Session handed over? | Yes: the message joins the waiting session; no assistant reply. If it is a Reschedule or Cancel button, send one system reply saying the booking is unchanged and a person will deal with the request. **Ends.** |
 | 11 | Is it the person button? | Yes: hand over with reason `requested`. **Ends.** |
-| 12 | Wait for the batching window to close; a later message that reaches this step joins the batch, and any reply not yet sent is discarded | |
+| 12 | Wait for the batching window to close; a later message that reaches this step joins the batch, and any reply not yet sent is discarded | As built in M3 unit U2: the send job holds an unsent assistant reply back while a newer customer message waits, and the turn that reaches this step discards it. At most two in a row are discarded in a session; the third is sent (decisions row 38). A batch is the open session's messages |
 | 13 | Does the batch hold no text? A Reschedule or Cancel button counts as text. | Yes: send the unsupported-type reply; count it; on the third consecutive such batch hand over with `unsupported-content`. **Ends.** |
 | 14 | Degraded mode? | Yes: mark the session `awaiting-retry`; send the fallback under the 15-minute rule. **Ends.** |
 | 15 | Call the model (machine 8 on failure); run the handover triggers and output checks; send the reply | A Reschedule or Cancel button is given to the model as that request (US-B4) |
@@ -219,6 +219,13 @@ When a session ends: an attached handover moves as in machine 2; an
 `awaiting-retry` mark is dropped; and the session record of US-C19 is
 written.
 
+As built in M3 unit U2: a session is ended when its conversation is next
+touched after the 24 hours, by a message or by a turn, not by a timer. At
+that moment its customer messages that nobody dealt with are marked as
+dealt with and are not answered, and its assistant replies that never
+reached the channel are discarded (`design/notes/m3-u2-sessions.md`, S3,
+S10, W2; decisions row 40). The three effects above belong to later units.
+
 **Invariant S1.** A session is handed over if and only if a handover in
 `waiting` or `in-progress` is attached to it.
 
@@ -381,7 +388,7 @@ Pre-send checks depend only on the message class
 
 | Class | Consent | Opt-out | Quiet hours | Reply window closed |
 | --- | --- | --- | --- | --- |
-| Assistant reply | — | — | — | Cannot occur: it answers an inbound message |
+| Assistant reply | — | — | — | Cannot occur: it answers an inbound message. It can, when a worker was stopped for a day: as built in M3 unit U2 the turn then marks the batch and makes no reply (decisions row 40) |
 | System reply | — | — | — | Cannot occur |
 | Staff message | — | Blocked if the contact's only messages in the session are opt-out requests | — | Not sent; dashboard explains |
 | Service notice: holding message | — | Blocked if opted out after the request | — | Not sent |

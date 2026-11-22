@@ -1,8 +1,9 @@
 # Design note: sessions, the reply window and the batch (M3 unit U2)
 
 2026-11-23 · issue #301 · written before the code, as the M2 retro asks
-for any rule about people · not yet built · second version, after a
-review of the first (`docs/reviews/2026-11-23-m3-u2-design-review.md`)
+for any rule about people · second version, after a review of the first
+(`docs/reviews/2026-11-23-m3-u2-design-review.md`) · built in the same
+pull request; "As built" at the end says where the code differs
 
 This note says what U2 builds, case by case, so that the cases can be
 argued with before there is code to defend. Where it departs from the
@@ -167,7 +168,8 @@ customer and is never discarded.
 Storing a message discards nothing. Two rules do the work:
 
 - **The send job holds back** an unsent assistant reply while the
-  session has a newer customer message that no turn has dealt with.
+  session has a newer customer message that no turn has dealt with, and
+  looks again every 5 seconds while that is all there is to send.
 - **The turn decides.** When a turn starts on a batch, it discards the
   session's unsent assistant replies and counts their messages as not
   dealt with again, so that its one reply covers all of them.
@@ -326,5 +328,29 @@ Not tested: the deadlock of section 0; P1 to P3, which are M2's rules.
 - First-reply time and fees on the session (#76, b): M5, with the
   metrics.
 - The list of session states in `packages/core/src/names.ts` (#278): two
-  names, `active` and `ended`, added with a check against the state
-  machines.
+  names, `active` and `ended`, added. The check of shared names does not
+  read them yet.
+
+## As built
+
+Where the code differs from the sections above, or adds what they left
+open:
+
+- **Jobs.** A webhook queues one job for each conversation it stored a
+  message for, not one for each message, due 3 seconds after the
+  webhook's time.
+- **"Newer" for the send job** is by stored time: a customer's message
+  stored after the reply was. Both times are read under the conversation's
+  lock, so their order is the order the two happened in.
+- **W2 is decided on `contacts.last_inbound_at`,** the earlier of the
+  channel's time and ours, not on the stored time of the newest message
+  of the batch.
+- **Tests named in this note and not written:** S5 is shown by two
+  webhooks made to wait on the lock, not by `pg_locks` of each; the stop
+  "after a D6 store" is covered only by D6's own test at the database;
+  nothing tests the cross-webhook deadlock.
+- **M2's tests** store their messages as of 11 seconds earlier, so that a
+  turn starts as soon as a worker looks; two of them changed meaning and
+  were rewritten: a customer's second message no longer waits behind a
+  reply that is being retried, it replaces it; and a burst may now leave
+  discarded replies behind.

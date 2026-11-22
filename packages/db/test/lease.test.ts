@@ -208,7 +208,9 @@ describe("storing a result", () => {
       taking = take(after(LEASE_MS)).then((result) => {
         taken = result;
       });
-      // A webhook storing a new message for the same conversation goes straight through.
+      // A bare insert of a row for the same conversation goes straight through: the
+      // foreign key's lock does not conflict with this one. `storeInbound` no longer
+      // does: it takes the conversation's lock on purpose (sessions.test.ts).
       const started = Date.now();
       await withTenant(app, a.tenantId, (tx) =>
         tx.query(
