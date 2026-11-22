@@ -4,229 +4,287 @@ date: 2026-11-23
 decision-makers: "agent (proposal), maintainer (approval)"
 ---
 
-# A pack is one typed object in its own package, listed in a registry the programs read at start-up
+# A pack is one typed object, listed in a registry; M3 builds three of its parts and reserves the rest
 
 ## Context and Problem Statement
 
 ADR 0012 decided **what** belongs to the core and what to the booking
-pack. It did not decide **how** a pack hands its parts to the core, and
-the Gate 2 review called that the project's central bet with no record
-(findings S32 and V9; #200, #237). Until now nothing needed the answer:
-the pack is a list of names and a test.
+pack. It did not decide **how** a pack hands its parts over. The Gate 2
+structure review listed "the pack interface and registration" among
+decisions with no record (finding S32, #200), and until now nothing
+needed the answer: the pack is a list of names and a test.
 
-M3 needs it. The turn (U7), the output checks (U9), the fixed texts (U8),
-the buttons (U5, U10) and the handover record (U11) are each a place
-where the booking pack will later put something of its own: a tool, a
-claim kind, a text, a button, a reason. If those units are built with no
-such place, M5 reopens every one of them. If they are built around a
-guess, M5 reworks the guess. This record makes the guess once, in the
-open, and says how much of it M3 builds.
+M3 builds the turn (U7), the output checks (U9), the fixed texts (U8),
+buttons in the channel (U5) and perhaps the handover record (U11). Each
+is a place where the booking pack will later put something of its own.
+Built with no thought for that, M5 reopens each of them. Built around a
+full interface designed today, M5 reworks a guess: one real pack exists
+and it is not written.
+
+The first draft of this record took the second road and shaped six parts
+at once. Its review found most of them under-decided or wrong
+(`docs/reviews/2026-11-23-adr-0014-review.md`). This version decides
+less: how a pack is registered, the three parts an M3 unit actually
+exercises, and a short list of rules that keep M3 from closing the door
+on the others.
 
 ## Decision Drivers
 
-- NFR-M1: the trial pack `faq-only` is added at the end of M5 with no
-  file changed under `packages/core`.
-- ADR 0012's rules for pack code: it never holds the cross-tenant role,
-  never calls the channel or the model, and never sends a message except
-  by creating one for the core to check and send.
-- One real pack exists. Each part of the interface is paid for by that
-  pack or by an M3 unit, not by a pack someone might write.
-- The boundary test must go on passing: the core names nothing of
-  bookings, and no word list can be the only guard.
-- What is registered must be knowable without running anything: a
-  reviewer, the production guard and the eval harness all need the list.
+- NFR-M1: the trial pack `faq-only` is completed at the end of M5 with
+  no file changed under `packages/core`.
+- ADR 0012: the pack interface "must not grow machinery that only a
+  hypothetical second pack would use". The same holds for machinery only
+  a not-yet-written first pack would use.
+- ADR 0012's rules for pack code: no cross-tenant role, no call to the
+  channel or the model, no message sent except through the core's checks.
+- ADR 0003, as amended: SQL is written in `packages/db` only.
+- The boundary test must go on passing, and must be changed on purpose,
+  not by accident of a package's name.
+- What is registered must be knowable without running anything.
 
 ## Considered Options
 
-- A. A pack is one typed object, exported by its package and listed in a
-  registry package that the programs import
-- B. Packs are found at run time, by a setting or by scanning a folder
-- C. The core raises events and packs subscribe to them
+- A. One typed object per pack, listed in a registry package; the whole
+  interface shaped now
+- B. The same registration, but only the parts M3 exercises are shaped
+  now; the others are named, with the rules M3 must keep for them
+- C. No interface in M3: M3's units are built with whatever seams they
+  need, and the interface is written in M5 with the pack
+- D. The parts' types live in `packages/core`, with no package for the
+  interface
+- E. Packs are found at run time, or subscribe to events the core raises
 
 ## Decision Outcome
 
-Chosen option: **A**, because every part a pack supplies is then visible
-to the type checker and to a reader, a pack that is not listed cannot
-run, and nothing is loaded that the image was not built with. B buys
-packs that can be added without a build, which nobody has asked for and
-which is a way for code to arrive unreviewed. C hides the order in which
-things happen, and the order of checks is the part of this system that
-must not be hidden.
+Chosen option: **B**. A was the first draft and decided things nobody
+can check yet. C leaves each M3 unit to invent its own seam, and the
+plan already commits U7 and U9 to prove a tool and a claim kind through
+one; without a record they would be five private guesses. D would put
+types that speak of prompts and tools into a package the architecture
+keeps free of both. E hides what runs and in what order.
 
-### The shape
+In this record **"the core side"** means every package and program that
+is not under `packages/packs`: `packages/core`, `db`, `channel`, the
+`ai` package M3 adds, and the programs. `packages/core` alone is written
+as such.
 
-Three places, each with one job:
+### Registration
 
-| Place | Holds | May import |
-| --- | --- | --- |
-| `packages/pack` | The interface: the type `Pack` and the types of its parts. No pack's name | `core` |
-| `packages/packs/<name>` | One pack. Its default export is a `Pack` | `pack`, `core`, and through what it is handed at run time, the database |
-| `packages/packs/registry` | The list of packs in this build, by name | Each pack |
+| Place | Package name | Holds | May import |
+| --- | --- | --- | --- |
+| `packages/pack-interface` | `@polyglot-sales-agent/pack-interface` | The type `Pack` and the types of its parts. No pack's name | `packages/core` |
+| `packages/packs/<name>` | `@polyglot-sales-agent/pack-<name>` | One pack. Its default export is a `Pack` | The interface, `packages/core` |
+| `packages/packs/registry` | `@polyglot-sales-agent/packs-registry` | A map from name to `Pack`, and nothing else | Each pack, the interface |
 
-`apps/api`, `apps/worker` and `apps/ops` import the registry and nothing
-else under `packages/packs`. `core` imports none of the three. The
-registry sits under `packages/packs` because it must name the packs, and
-that folder is the one the boundary test does not scan for the pack's
-words.
+- `packages/core` imports none of the three. `packages/ai`, `apps/api`,
+  `apps/worker` and `apps/ops` may import the interface. `db` and the
+  channel packages do not.
+- **Only a program's entry point imports the registry,** and passes it
+  to the code it starts. Everything below takes the registry as an
+  argument, so a test passes its own, holding a pack written in that
+  test's files. No shared test pack is kept anywhere.
+- A tenant is on exactly one pack, the value of `tenants.pack`, as the
+  glossary and US-D6 already have it. Nothing in v1.0 changes a tenant's
+  pack after it is created, and this record adds no way to.
+- Work for a tenant whose pack is not in the registry is a failed job:
+  retried and then dead, with its alert, like any job that cannot be
+  done (NFR-R5). The customer gets no reply. It can happen only through
+  bad data, given the next point.
+- **`faq-only`** is accepted by `ops` today, is a value of `tenants.pack`
+  in the data model and the API, and is used by six test fixtures; it
+  has no package. It is registered in M3 as a pack with a name and
+  nothing else, which is what the registry needs to match what exists.
+  Its prompt fragment and its evals are still added at the end of M5,
+  and NFR-M1 is still measured then, on `packages/core`. What that trial
+  loses is the act of adding a line to the registry. The other course,
+  removing the name from `ops`, the fixtures and two documents until M5,
+  was the first draft's; it changes a built command for the sake of a
+  cleaner trial. **This is put to the maintainer as row 37.**
 
-A tenant is on exactly one pack, the value of `tenants.pack`, set when
-the tenant is created. A program looks the pack up by that name for each
-piece of work; a name the registry does not hold is an error at start-up
-for the operator's command and a refused job for the worker, never a
-silent fall back to no pack.
+### The three parts M3 builds
 
-### The parts
-
-A pack is a plain object. Every part but its name is optional, and a
-pack with only a name is a valid pack. Sketched, not final:
+A pack with only a name is valid. Sketched, not final:
 
 ```ts
 type Pack = {
-  name: string;                      // equals tenants.pack
-  promptFragments?: PromptFragment[]; // versioned text, loaded like the core's
+  name: string;                        // equals tenants.pack
+  promptFragment?: PromptFragment;
   tools?: Tool[];
   claimKinds?: ClaimKind[];
-  fixedTexts?: FixedText[];
-  buttons?: Button[];
-  handoverReasons?: string[];
-  // Named here so that their place is reserved; shaped in M5:
-  // migrations, settings, routes, jobs, templates, profile additions,
-  // session outcome, metrics, evals
 };
 ```
 
-| Part | What the pack supplies | What the core does with it | First built |
+| Part | The pack supplies | The core side does | Built in |
 | --- | --- | --- | --- |
-| Prompt fragment | Text with a version, describing the pack's task | The loader puts it after the core's prompt, inside its own delimiters; the trace records both versions | U4, U7 |
-| Tool | A name, a description, a schema for its arguments, and a function | Offers it to the model; validates the arguments; calls the function with a context (below); gives the result to the model as data and to the output checks | U7, with a tool that exists only in tests; M5 for a real one |
-| Claim kind | A name and a function that says whether a claimed value matches what is stored | Runs it for each claim of that kind. A claim of a kind nobody registered fails. The scan for values with no claim stays the core's | U9, with a kind that exists only in tests |
-| Fixed text | A key and its wording per language | Stores and sends it as a system reply, like its own; the key is prefixed with the pack's name | U8 |
-| Button | An action name and a function | Builds the payload (`<pack>:<action>:<reference>`), checks on a tap that the reference belongs to the conversation it came from, and calls the function at the steps below | U5 for the payload and the check; U10 and U11 for the steps, with a button that exists only in tests |
-| Handover reason | Names of reasons only this pack raises | Accepts them beside its own closed list; stores the name; shows it | U11, if it is built; otherwise M4 |
+| Prompt fragment | A file in the pack's own folder, in the form of the core's prompts: text, and a `meta.yaml` with its version | The loader adds it to the system prompt after the core's text. It is instruction written by this repository, not data, and is not wrapped as data. A pack with none adds nothing. The trace records both versions | U4 (loader), U7 |
+| Tool | A name unique in the pack, a description, a schema for its arguments, whether it changes state, and a function | Offers it to the model; validates the arguments; checks the lease; opens the transaction if the tool changes state; calls the function; writes the `tool_calls` row; gives the result to the model as data and to the output checks. "A state-changing tool succeeded" is known from the tool's own flag and its result | U7, with a tool written in its tests |
+| Claim kind | A name unique in the pack and not one of the core's, and a function that says whether a claim of that kind holds | Runs it for each claim of that kind. A claim of a kind nobody registered fails. Finding values in a reply, normalising them, and the scan for values with no claim stay the core side's: a pack cannot add a kind of value to look for | U9, with a kind written in its tests |
 
-The context a pack's function receives is made by the core for one piece
-of work and holds: the tenant's database scope (never the cross-tenant
-one), the conversation, contact and session it concerns, the clock, and
-three things it may ask for: a fixed text or template to be sent, a
-handover to be opened with a reason, a consent record to be written. It
-holds no channel, no model client and no credentials. What a function
-asks for is a request: the core's send policy, permission machine and
-order of checks decide what happens.
+What a pack's function is given, in M3:
 
-### Where the order of checks meets a pack
+- A **tool** gets its validated arguments, the identifiers of the
+  tenant, conversation, contact and session, and the time. It returns a
+  result or a refusal.
+- A **claim kind** gets the claim, the normalised value, and the tool
+  results of this session with their times. It returns yes or no. It is
+  given nothing it could change.
+- **Neither is given a database handle, a channel, a model client or a
+  credential.** No pack has a table in M3, and how a pack will read and
+  write its own tables cannot be settled without amending ADR 0003: SQL
+  outside `packages/db`, or a pack's SQL inside a package the boundary
+  test scans. That is M5's decision, made with the first real table.
 
-The order of checks names the booking pack's buttons in three steps
-(ADR 0012, known exceptions). In code those steps name no button:
+Because a tenant's pack decides its tools and claim kinds, the output
+schema's lists of both are built per tenant, not fixed.
 
-| Step | In the document | In code |
+### What is reserved, and the rules M3 keeps for it
+
+None of these is built or shaped in M3. Each has a rule so that an M3
+unit does not have to be reopened for it.
+
+| Later part | The rule M3 keeps | Shaped in |
 | --- | --- | --- |
-| 6 | The Confirm button of a reminder | A tap on a button whose pack marked it "handled by code in every state". The pack's function runs. **Ends.** |
-| 10 | In a handed-over session, a Reschedule or Cancel tap gets "booking unchanged" | In a handed-over session, a tap on a pack's button: the pack's function is told the session is handed over and answers with a fixed text or nothing |
-| 13 | A Reschedule or Cancel tap counts as text | A tap on a pack's button that is not handled by code counts as text, and reaches the model as the button's label |
+| Fixed texts of a pack | Every fixed-text key has an owner part: `core.<key>` now, `<pack>.<key>` later. U8 stores no text in a way that assumes one owner. Placeholders and a text that carries a pack's button are not designed | M5 |
+| Buttons of a pack | Every button payload begins with an owner: `core.` for the stop, start, person and opt-in buttons, a pack's name later. Names are lower-case letters, digits and hyphens; what follows the owner and the action is the owner's. In M3 a tap whose owner is not `core` is stored, gets no reply, counts towards the rate limit, and ends. The channel's limit on a payload's length is not known: U5 reads it from Meta's pages | M5 |
+| A pack's part in the order of checks | Steps 6, 10, 13 and 15 name the booking pack's buttons in the document. The code M3 writes for steps 10, 13 and 15 names no button but the core's own, and step 6 is not built. What a handed-over session answers to a pack's button, what the model is given for one, and whether one counts as text are decided with the Confirm, Reschedule and Cancel buttons | M5 |
+| Handover reasons of a pack | `late-change` stays in `packages/core/src/names.ts` as the one known exception, as ADR 0012's amendment has it. U11, if it is built, raises only the core's reasons and adds no database constraint that would stop a pack's reason being stored later | M5 |
+| Session outcome | U2 creates `sessions.pack_outcome` as the data model has it, a text the core side does not read. Nothing writes it | M5 |
+| Consent asked for by a pack; templates; jobs; migrations; settings; routes; metrics; dashboard sections; a pack's evals | Nothing in M3 | M5 |
 
-The contact-permission machine's event "contact books in chat" is, in
-code, "a pack asked for a consent record", with the subject the pack
-names. The handover reason `late-change` is the booking pack's and
-leaves `packages/core/src/names.ts` in the unit that builds the handover
-record (#278, E8); the check of shared names then reads a pack's list
-as well as the core's.
+### How this maps onto the parts listed before
 
-### What M3 builds, and what it does not
+The architecture lists nine parts and ADR 0012 adds four. Against this
+record:
 
-M3 builds the three packages, the six parts in the table, and the
-context. It builds them for its own units' sake and proves each with a
-**pack that exists only in test files**: one tool, one claim kind, one
-fixed text, one button, one reason. The booking pack in M3 is its name,
-its word list and an empty `Pack`. A tenant on it is answered from the
-business profile with no tools.
+| Listed before | Here |
+| --- | --- |
+| Tools; prompt fragments | Built in M3 |
+| (not listed) claim kinds | Built in M3. ADR 0012 gave the booking pack claim kinds without making them a part |
+| Buttons; templates; scheduled events and timers; session labels; migrations; settings; routes; dashboard sections; evals | Reserved, M5. "Session labels" is the session outcome; "scheduled events" and "timers" are a pack's jobs |
+| Profile schema | Superseded by ADR 0012: the business profile is the core's. Whether a pack adds to it is M5's |
+| (not listed) fixed texts; handover reasons; consent requests; metrics | Reserved, M5. Each is a thing ADR 0012 or the design gives the pack without naming a part for it |
 
-M3 does not build migrations, settings, routes, jobs, templates, profile
-additions, session outcome, metrics or evals for packs. ADR 0012 lists
-what the core does with each; their types are written in M5, with the
-pack that needs them.
+The architecture's table is not rewritten here; it carries a note
+pointing to this record.
 
 ### Consequences
 
-- Good, because M3's units have one answer to "where would the pack put
-  its part", and it is checked by a test in each unit.
-- Good, because the list of what runs is a file.
-- Good, because the three known exceptions of ADR 0012 that are rules
-  (steps 6, 10 and 13; the consent event; `late-change`) each have a
-  stated way out, and two are taken in M3.
-- Bad, because six parts are shaped by a pack that has not been written.
-  A tool that exists only in tests exercises the loop and says nothing
-  about whether booking fits the context it is given. M5 will change
-  some of this, and this record is amended when it does.
-- Bad, because a pack's function runs in the core's process with the
-  tenant's database scope: a faulty pack can read and write every table
-  of its tenant, the core's included. Row-level security holds it to one
-  tenant and nothing holds it to its own tables. Packs are first-party
-  code in this repository, reviewed like the core; this is not a way to
-  run someone else's code.
+- Good, because U4, U7 and U9 build to one stated seam, and a test in
+  each uses it.
+- Good, because the list of what can run is a file, and tests do not
+  depend on it.
+- Good, because the parts nobody can check yet are not decided yet.
+- Bad, because three parts are still shaped before the pack that will
+  use them is written. A tool written in a test exercises the loop and
+  says nothing about whether booking fits what a tool is given. With no
+  database handle, the booking pack's tools cannot be written against
+  this interface as it stands: M5 must widen it.
+- Bad, because M5 carries most of the interface, and the rules reserved
+  above are promises a later unit can break without a test noticing.
+  Only the owner part of keys and payloads, and the absence of the
+  pack's words in the core side, are checked by code.
 - Bad, because adding a pack is a change to the registry, so "no core
-  change" (NFR-M1) is true of `packages/core` and not of the repository.
-- Neutral, because one pack per tenant is kept. Two packs for one tenant
-  would need rules for whose prompt, whose tools and whose buttons, and
-  nothing asks for it.
+  change" is true of `packages/core` and not of the repository.
+- Neutral, because one pack per tenant is kept, not decided here.
 
 ### Confirmation
 
-- **Import tests,** extended in the unit that creates the packages (U4):
-  `core` imports nothing of the three places; `pack` imports no pack;
-  the programs import the registry only. The boundary test's word scan
-  covers `packages/pack` as it covers the core.
-- **A test pack in each unit that builds a part** (U7, U8, U9, U10,
-  U11): the part is used through the interface and through nothing else.
-- **A registry test:** every name `apps/ops` accepts for a new tenant is
-  in the registry, and each pack's `name` equals its key. Today `ops`
-  accepts `faq-only`, which has no package. U4 takes that name out of
-  what `ops` accepts until M5 adds the pack; adding it now as an empty
-  pack would empty the trial of NFR-M1.
-- **The trial pack, end of M5,** remains the real check (NFR-M1), and
-  `cod-confirm` in v1.1 the first one against a different use case.
+The boundary test (`packages/packs/booking/src/boundary.test.ts`) is
+changed in U4, on purpose, in these places:
+
+- Its pinned list of scanned folders gains `packages/pack-interface` and
+  `packages/ai`. Both are scanned for the pack's words like the rest.
+- Its import rule, today "no file imports anything named `pack-…`",
+  becomes three: `packages/core`, `db` and the channel packages import
+  neither the interface nor the registry; no scanned file imports a pack
+  by name or by path; only the entry points of `api` and `worker` import
+  the registry. The package-dependency rule changes to match.
+- `apps/ops` is outside the scan today because it names the packs. Once
+  it reads them from the registry, whether it can be scanned is looked
+  at in U4.
+- A new test: the registry's keys are exactly the names `ops` accepts,
+  each pack's `name` equals its key, and the registry file holds nothing
+  but the map.
+
+In U7 and U9, a test registers a pack written in that test and shows the
+part working through the registry passed in. The fragment is shown in
+U7. The trial pack at the end of M5 remains the real check (NFR-M1), and
+`cod-confirm` in v1.1 the first against a different use case.
+
+Nothing in this record was run. It was checked against the documents and
+the code it names.
 
 ## Pros and Cons of the Options
 
-### A. One typed object per pack, listed in a registry
+### A. Registry, and the whole interface now
 
-- Good, because the compiler checks every part.
-- Good, because it is the least machinery: an object and a map.
-- Bad, because a new pack needs a build and a change outside its folder.
+- Good, because every unit would know every part.
+- Bad, because its first draft could not say what a button's reference
+  is, what a pack may do with the database, or what the model is given
+  for a tap, without contradicting a document that M5 owns.
 
-### B. Packs found at run time
+### B. Registry, the three parts M3 exercises, rules for the rest
 
-- Good, because a deployment could add a pack without a new image.
-- Bad, because what runs then depends on a setting or on what is on
-  disk, which the production guard would have to police.
-- Bad, because nothing needs it: every pack is in this repository.
+- Good, because what is decided is used and tested in the same
+  milestone.
+- Bad, because the rules for reserved parts are prose.
 
-### C. The core raises events and packs subscribe
+### C. No interface until M5
 
-- Good, because the core would know nothing about packs at all.
-- Bad, because the order of checks would be spread over subscribers, and
-  whether a step "ends" would depend on who was listening.
-- Bad, because a tool, a claim kind and a route are not events.
+- Good, because nothing is guessed.
+- Bad, because the plan's tool loop and claim checker are still built in
+  M3, each with a seam of its own making, and M5 reconciles them.
+
+### D. Types in `packages/core`
+
+- Good, because there is one package fewer.
+- Bad, because `packages/core` is pure rules with no model, prompt or
+  tool in it, and the pack's types name all three.
+
+### E. Found at run time, or subscribed to events
+
+- Good, because a deployment could add a pack without a build, or the
+  core side could know nothing of packs.
+- Bad, because what runs would depend on a setting or on what is on
+  disk; because the order of checks would be spread over subscribers;
+  and because nothing asks for either.
 
 ## More Information
 
-- ADR 0012, with its amendment of 2026-11-20; `architecture.md`, "What a
-  pack provides"; state machines, sections 1 and 6.
-- Findings S32 (#200) and V9 (#237); #278; #253 (V8 / S4); #295.
-- `docs/plans/m3-ai-core.md`, unit U1.
+- ADR 0012 and its amendment of 2026-11-20; ADR 0003 and its amendment;
+  `architecture.md`, "What a pack provides" and "Processing one turn";
+  state machines, sections 1 and 6; guardrail policy, sections 2 to 4
+  and 7; data model, `messages.button_payload`.
+- Findings S32 (#200) and V9 (#237); #278; #253 (V8 / S4); #295; #222;
+  #240.
+- `docs/plans/m3-ai-core.md`, unit U1, changed with this record: U4
+  creates the packages and changes the boundary test, and U5 follows
+  this record's rule for payloads.
 
-### What this record does not settle
+**What would reopen this:** a part M3 builds that the booking pack
+cannot use in M5 without changing its shape; a second pack per tenant;
+packs written outside this repository.
 
-- **The types themselves.** The sketch above is not an API. Each part's
-  type is written, and reviewed, in the unit that first uses it.
-- **Pack migrations, and how a pack's tables are kept apart from the
-  core's** in one schema. M5.
-- **Whether a pack's reasons, texts and buttons can collide** with
-  another pack's. With one pack per tenant and a prefix on keys and
-  payloads they cannot at run time; nothing checks it at build time yet.
-- **The documents ADR 0012 lists as still naming bookings** (the API's
-  descriptions, the glossary's metrics, three sentences in the design):
-  M5, with the code they describe. #253 stays open for them.
-- **The other decisions #200 lists with no ADR** (email sending,
-  credential encryption, the phone hash, polling, the dashboard's
-  framework, packaging, the mocks, the licence): each in the milestone
-  that builds it; #200 stays open.
+### Not settled here
+
+- The types themselves: each is written and reviewed in the unit that
+  first uses it.
+- Everything in the "reserved" table, and with it #222 (whose button a
+  tap is), #240 (rules across claim kinds and about the turn), and the
+  slot and calendar-date rules of the guardrail policy.
+- How a pack reaches its own tables (ADR 0003), and how its migrations
+  are kept apart from the core's.
+- The places ADR 0012 lists where documents still name bookings, the
+  state machines among them: M5, with the code they describe. #253 and
+  #237 stay open for them. The package diagram does have the edge from
+  `api` to `pack` that both findings report missing; it lacks the
+  registry, the edge from the interface to `packages/core`, and `ops`.
+- The boundary test's word list and "a name, not an idea" (#295): the
+  list does not change here; M5.
+- The other decisions #200 lists with no ADR: each in the milestone that
+  builds it; #200 stays open.
+- `AGENTS.md` section 4 does not list the two new packages; it is
+  brought up to date in U4, when they exist.
+- The threat model's entries on what pack code can reach (T39, T48) are
+  not changed, because M3 gives pack code nothing to reach. M5 revisits
+  them with the database question.

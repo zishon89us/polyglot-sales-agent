@@ -216,9 +216,11 @@ test before v1.0.0 does (risk R-T3).
 **Dependency rule.** `core` imports nothing from this repository. No package
 imports from `apps`. The core never imports a pack; packs are registered with
 `worker` and with `api` at start-up, since a pack supplies both tools and
-routes (ADR 0012). How a pack is registered, and the registry package the
-programs import, are decided in ADR 0014; the diagram above does not draw
-the registry. An import-boundary test in CI enforces all three.
+routes (ADR 0012), and with `ops`, which names the packs a tenant can be
+created on. How a pack is registered is decided in ADR 0014. The diagram
+above has the edge from `api` to `pack`; it does not draw the registry
+package, the edge from the interface to `core`, or `ops`. An
+import-boundary test in CI enforces all three.
 
 ### What a pack provides
 
@@ -237,6 +239,10 @@ the registry. An import-boundary test in CI enforces all three.
 `faq-only` provides a profile schema, one prompt fragment and evals, and
 nothing else. If adding it requires a change under `packages/core`, the
 interface above is wrong (NFR-M1).
+
+ADR 0014 says which of these parts are built in M3 (tools, prompt
+fragments, and claim kinds, which this table lacks) and which wait for
+M5; where it differs from this table, it is the later record.
 
 ADR 0012 adds four parts to this list: migrations for the pack's own tables,
 a settings schema, an API route plug-in, and timers. It also says what the

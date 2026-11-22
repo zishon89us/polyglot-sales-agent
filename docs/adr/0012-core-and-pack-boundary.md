@@ -239,3 +239,18 @@ Made while switching the test on (issue #271). The decision is unchanged.
 - **Honest limit.** A word list catches a name, not an idea: core code
   could still be shaped around appointments without using any of these
   words. The trial pack at the end of M5 remains the real check.
+
+## Amendment, 2026-11-23: see ADR 0014
+
+How a pack is registered, and which parts of the interface are built in
+M3, are decided in ADR 0014. Two things in this record read differently
+after it:
+
+- "What a pack plugs into" lists thirteen parts with the architecture.
+  ADR 0014 builds three in M3 (tools, prompt fragments, and claim kinds,
+  which were given to the pack above without being a part) and leaves
+  the others to M5, with a rule for each.
+- The amendment of 2026-11-20 said the hooks for the known exceptions
+  were due "(M3 and M5)". They are due in M5: M3 builds none of the
+  steps that would name a pack's button, and `late-change` stays where
+  it is until then.

@@ -5,7 +5,7 @@ stop, or a thing only the maintainer can do. Answer with the row's number
 and "yes", "no", or a few words; a "no" tells the agent what to change.
 "If no" says what a no would cost, as far as the agent can tell.
 
-Last brought up to date: 2026-11-22, with the M3 plan (rows 29 to 35) and its first unit (row 36;
+Last brought up to date: 2026-11-22, with the M3 plan (rows 29 to 35) and its first units (rows 36 and 37;
 a row keeps its number for good, so new rows take the next numbers
 wherever they sit on the page). At the end of M2 a second agent
 checked the first version against the repository and found it left out a
@@ -40,6 +40,7 @@ an earlier draft.
 | 34 | **A tenant's settings and the test "is this tenant answering"** in M3 (question 7): business hours, support contact, notification address, loaded by an operator's command | The settings and the test; credential checks and their emails stay in M4, so the test is weaker than the design's | Steps 4a, 5 and 8 of the order of checks treat every tenant as answering until M4 |
 | 35 | **Add to the stories file's table of criteria delivered later** the parts of M3 criteria that need bookings, templates or real tools (question 8) | US-C4, 4 and 14 and the booking clause of 10; US-C5, 1 for a template; US-C8, 4 for a real tool; US-C15, 9 | Say which of them M3 should deliver, and how without the booking pack |
 | 36 | **May what a customer types inside a message go to the model as written, a phone number or a name included?** `AGENTS.md` section 7 says never to send a phone number or a contact's name to the model; the architecture says the system adds none, and ADR 0005 adds that it cannot remove what a customer typed. NFR-V7's wording should say which (#77; set out in `plans/m3-u0-findings.md`, not in the M3 plan). A yes accepts that numbers and names a customer types, their own or another person's, go to the model provider, where `compliance.md` argues for sending only the text needed to answer | Nothing is changed. Proposed: NFR-V7 reads "no phone number or name of the contact, from the contact's record or the channel's profile, is put into a prompt; the messages of the session are sent as written", and `AGENTS.md` section 7 is reworded by you to match | Typed numbers and names must be found and removed before the model sees a message, which is new work for U7 and will sometimes remove what the customer meant to say |
+| 37 | **Register `faq-only` now as a pack with a name and nothing else** (ADR 0014)? `ops` already accepts the name, the data model and the API list it, six test fixtures use it, and it has no package | Proposed. Its prompt fragment and evals are still added at the end of M5, and NFR-M1 is still measured then on `packages/core`; the trial no longer includes adding a line to the registry | The name is taken out of `ops`, the fixtures and two documents until M5, so that the trial adds the pack whole |
 
 ## Made in M2; a yes closes them
 
@@ -59,7 +60,7 @@ an earlier draft.
 | 18 | `messages.handled_at` marks a customer's message that a turn has dealt with, until sessions and batches exist; a message to send has a count of calls and of unknown outcomes; `unconfirmed` and `expired` are codes on a failed message, not statuses (`design/data-model.md`, decisions 18 and 19) | As asked | The columns change before M3 builds on them |
 | 19 | **NFR-S2 as reworded, and US-C1 criterion 4 with it.** A request with a missing or bad signature is refused and nothing is stored, but not always with 401: an oversized body gets 413, a source that keeps sending bad signatures gets 429, a malformed or too-slow request gets another 4xx or a closed connection, some of these before the signature can be read. Criterion 4 still says "HTTP 401 is returned" | The NFR was reworded; the criterion was not. A yes means the criterion is reworded to match | Say which answers are acceptable |
 | 20 | NFR-O1 as reworded: the worker is probed by a command that reads its heartbeat, since it serves no HTTP | As asked | Say how it should be probed |
-| 21 | The pack boundary test went on without the three known exceptions being routed through pack hooks first, as the plan had said: one is a pinned name in the core, two are in documents only because their steps are not built. Four folders are outside "the core" for the test: the packs, `apps/ops`, and the two stand-ins (ADR 0012, amendment) | As listed | The hooks are built first, in M3 |
+| 21 | The pack boundary test went on without the three known exceptions being routed through pack hooks first, as the plan had said: one is a pinned name in the core, two are in documents only because their steps are not built. Four folders are outside "the core" for the test: the packs, `apps/ops`, and the two stand-ins (ADR 0012, amendment) | As listed | The hooks are built first. ADR 0014 now leaves them to M5: M3 builds none of the steps that would name a pack's button |
 
 ## Only the maintainer can do
 
