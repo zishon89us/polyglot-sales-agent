@@ -431,8 +431,8 @@ M0 Inception met its exit criteria on 2026-11-16; see
   for M5, with a rule M3 keeps for each. No pack code gets a database
   handle in M3. The first draft shaped six parts; its review made 33
   findings, seven of them High (a button's reference undefined and
-  against the data model; a database scope against ADR 0003; four steps
-  rewritten with behaviour lost), and the record was rewritten to decide
+  against the data model; a database scope against ADR 0003; three steps
+  rewritten with behaviour lost and a fourth left out), and the record was rewritten to decide
   less (`reviews/2026-11-23-adr-0014-review.md`). Row 37 asks about
   `faq-only`. The plan's U4 now creates the two packages. No code.
 

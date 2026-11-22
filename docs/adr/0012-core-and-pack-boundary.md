@@ -251,6 +251,7 @@ after it:
   which were given to the pack above without being a part) and leaves
   the others to M5, with a rule for each.
 - The amendment of 2026-11-20 said the hooks for the known exceptions
-  were due "(M3 and M5)". They are due in M5: M3 builds none of the
-  steps that would name a pack's button, and `late-change` stays where
-  it is until then.
+  were due "(M3 and M5)". They are due in M5. M3 builds steps 10, 13
+  and 15 without the pack's part: a tap that is not on one of the core's
+  own buttons ends before them. Step 6 is not built, and `late-change`
+  stays where it is until then.

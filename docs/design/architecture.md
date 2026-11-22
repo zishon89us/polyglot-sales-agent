@@ -220,7 +220,7 @@ routes (ADR 0012), and with `ops`, which names the packs a tenant can be
 created on. How a pack is registered is decided in ADR 0014. The diagram
 above has the edge from `api` to `pack`; it does not draw the registry
 package, the edge from the interface to `core`, or `ops`. An
-import-boundary test in CI enforces all three.
+import-boundary test in CI enforces the three rules of this paragraph.
 
 ### What a pack provides
 

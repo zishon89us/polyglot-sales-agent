@@ -50,8 +50,8 @@ on the others.
   now; the others are named, with the rules M3 must keep for them
 - C. No interface in M3: M3's units are built with whatever seams they
   need, and the interface is written in M5 with the pack
-- D. The parts' types live in `packages/core`, with no package for the
-  interface
+- D. The parts' types live in `packages/core` or in `packages/ai`, with
+  no package for the interface
 - E. Packs are found at run time, or subscribe to events the core raises
 
 ## Decision Outcome
@@ -60,13 +60,14 @@ Chosen option: **B**. A was the first draft and decided things nobody
 can check yet. C leaves each M3 unit to invent its own seam, and the
 plan already commits U7 and U9 to prove a tool and a claim kind through
 one; without a record they would be five private guesses. D would put
-types that speak of prompts and tools into a package the architecture
-keeps free of both. E hides what runs and in what order.
+types that speak of prompts and tools into `packages/core`, which the
+architecture keeps free of both, or into `packages/ai`, which every pack
+would then import whole, provider client and all. E hides what runs and in what order.
 
 In this record **"the core side"** means every package and program that
 is not under `packages/packs`: `packages/core`, `db`, `channel`, the
 `ai` package M3 adds, and the programs. `packages/core` alone is written
-as such.
+as such, and "the core's" below means the core side's.
 
 ### Registration
 
@@ -76,11 +77,21 @@ as such.
 | `packages/packs/<name>` | `@polyglot-sales-agent/pack-<name>` | One pack. Its default export is a `Pack` | The interface, `packages/core` |
 | `packages/packs/registry` | `@polyglot-sales-agent/packs-registry` | A map from name to `Pack`, and nothing else | Each pack, the interface |
 
-- `packages/core` imports none of the three. `packages/ai`, `apps/api`,
-  `apps/worker` and `apps/ops` may import the interface. `db` and the
-  channel packages do not.
-- **Only a program's entry point imports the registry,** and passes it
-  to the code it starts. Everything below takes the registry as an
+- Pack names are lower-case letters, digits and hyphens. `core`,
+  `interface` and `registry` are not pack names; the registry's test
+  refuses them.
+- **In M3 `booking` and `faq-only` are both packs with a name and
+  nothing else.** `packages/packs/booking` gains a default export beside
+  its word list; `packages/packs/faq-only` is a new package (see below,
+  and row 37).
+- `packages/core` imports none of the three. `packages/ai`, `apps/api`
+  and `apps/worker` may import the interface. `db` and the channel
+  packages do not; where a channel package needs the owner of a button's
+  payload it takes it from `packages/core`.
+- **Only `main.ts` of `api` and of `worker` imports the registry,** and
+  passes it to the code it starts. `ops` does not import it: it keeps
+  its own list of accepted names, as built, and a test in `apps/ops`
+  compares that list with the registry's keys. Everything below takes the registry as an
   argument, so a test passes its own, holding a pack written in that
   test's files. No shared test pack is kept anywhere.
 - A tenant is on exactly one pack, the value of `tenants.pack`, as the
@@ -88,18 +99,21 @@ as such.
   pack after it is created, and this record adds no way to.
 - Work for a tenant whose pack is not in the registry is a failed job:
   retried and then dead, with its alert, like any job that cannot be
-  done (NFR-R5). The customer gets no reply. It can happen only through
-  bad data, given the next point.
-- **`faq-only`** is accepted by `ops` today, is a value of `tenants.pack`
-  in the data model and the API, and is used by six test fixtures; it
-  has no package. It is registered in M3 as a pack with a name and
-  nothing else, which is what the registry needs to match what exists.
+  done (NFR-R5). The customer gets no reply. It happens through bad data
+  or a build that left a pack out.
+- **`faq-only`** is accepted by `ops` today and is a value of
+  `tenants.pack` in the data model and the API; it has no package. A
+  tenant an operator creates on it today would, once the worker looks
+  packs up, be nothing but dead jobs. It is registered in M3 as a pack
+  with a name and nothing else.
   Its prompt fragment and its evals are still added at the end of M5,
   and NFR-M1 is still measured then, on `packages/core`. What that trial
   loses is the act of adding a line to the registry. The other course,
-  removing the name from `ops`, the fixtures and two documents until M5,
-  was the first draft's; it changes a built command for the sake of a
-  cleaner trial. **This is put to the maintainer as row 37.**
+  removing the name from `ops`, the data model and the API until M5, was
+  the first draft's; it changes a built command for the sake of a
+  cleaner trial. (Six test fixtures also use the name. They write it by
+  SQL and are handed a registry by their test, so neither course touches
+  them.) **This is put to the maintainer as row 37.**
 
 ### The three parts M3 builds
 
@@ -116,8 +130,8 @@ type Pack = {
 
 | Part | The pack supplies | The core side does | Built in |
 | --- | --- | --- | --- |
-| Prompt fragment | A file in the pack's own folder, in the form of the core's prompts: text, and a `meta.yaml` with its version | The loader adds it to the system prompt after the core's text. It is instruction written by this repository, not data, and is not wrapped as data. A pack with none adds nothing. The trace records both versions | U4 (loader), U7 |
-| Tool | A name unique in the pack, a description, a schema for its arguments, whether it changes state, and a function | Offers it to the model; validates the arguments; checks the lease; opens the transaction if the tool changes state; calls the function; writes the `tool_calls` row; gives the result to the model as data and to the output checks. "A state-changing tool succeeded" is known from the tool's own flag and its result | U7, with a tool written in its tests |
+| Prompt fragment | The name of a prompt. The prompt itself lives under `prompts/`, in a folder named for the pack, in the form `AGENTS.md` section 6 gives every prompt | The loader adds it to the system prompt after the core's text. It is instruction written by this repository, not data, and is not wrapped as data; the output check on repeated instruction text covers it. A pack with none adds nothing. The trace records the fragment's name and version beside the core prompt's, in columns U6 adds to `ai_traces` | U4 (loader), U6, U7 |
+| Tool | A name unique in the pack, a description, a schema for its arguments, whether it changes state, and a function | Offers it to the model; validates the arguments; runs every tool in a transaction that first checks the lease, as the architecture has it; calls the function; writes the `tool_calls` row; gives the result to the model as data and to the output checks. "A state-changing tool succeeded" is known from the tool's own flag and its result | U7, with a tool written in its tests |
 | Claim kind | A name unique in the pack and not one of the core's, and a function that says whether a claim of that kind holds | Runs it for each claim of that kind. A claim of a kind nobody registered fails. Finding values in a reply, normalising them, and the scan for values with no claim stay the core side's: a pack cannot add a kind of value to look for | U9, with a kind written in its tests |
 
 What a pack's function is given, in M3:
@@ -145,11 +159,12 @@ unit does not have to be reopened for it.
 | Later part | The rule M3 keeps | Shaped in |
 | --- | --- | --- |
 | Fixed texts of a pack | Every fixed-text key has an owner part: `core.<key>` now, `<pack>.<key>` later. U8 stores no text in a way that assumes one owner. Placeholders and a text that carries a pack's button are not designed | M5 |
-| Buttons of a pack | Every button payload begins with an owner: `core.` for the stop, start, person and opt-in buttons, a pack's name later. Names are lower-case letters, digits and hyphens; what follows the owner and the action is the owner's. In M3 a tap whose owner is not `core` is stored, gets no reply, counts towards the rate limit, and ends. The channel's limit on a payload's length is not known: U5 reads it from Meta's pages | M5 |
+| Buttons of a pack | Every button payload begins with an owner: `core.` for the core's own buttons (stop, start or opt-in, person: U5 says whether start and opt-in are one), a pack's name later. What follows the owner and the action is the owner's. In M3 a tap whose payload has another owner, no owner, or an action the core does not have is stored, gets no reply, counts towards the rate limit, and ends where step 6 would be, before steps 7 to 15: it does not join a waiting session and is not a customer message for the handover machine. U10 builds this and writes it into the order of checks. Whether the channel returns a payload as it was sent, and its limit on length, are not known: U5 reads both from Meta's pages. U5's check of whose conversation a tap came from (#222, first half) is unchanged | M5 |
 | A pack's part in the order of checks | Steps 6, 10, 13 and 15 name the booking pack's buttons in the document. The code M3 writes for steps 10, 13 and 15 names no button but the core's own, and step 6 is not built. What a handed-over session answers to a pack's button, what the model is given for one, and whether one counts as text are decided with the Confirm, Reschedule and Cancel buttons | M5 |
 | Handover reasons of a pack | `late-change` stays in `packages/core/src/names.ts` as the one known exception, as ADR 0012's amendment has it. U11, if it is built, raises only the core's reasons and adds no database constraint that would stop a pack's reason being stored later | M5 |
 | Session outcome | U2 creates `sessions.pack_outcome` as the data model has it, a text the core side does not read. Nothing writes it | M5 |
-| Consent asked for by a pack; templates; jobs; migrations; settings; routes; metrics; dashboard sections; a pack's evals | Nothing in M3 | M5 |
+| Consent asked for by a pack | U10 creates `consent_records` with `subject_type` and `subject_id` as the data model has them; in M3 only the core's own events write a record | M5 |
+| Templates; templates; jobs; migrations; settings; routes; metrics; dashboard sections; a pack's evals | Nothing in M3 | M5 |
 
 ### How this maps onto the parts listed before
 
@@ -169,8 +184,8 @@ pointing to this record.
 
 ### Consequences
 
-- Good, because U4, U7 and U9 build to one stated seam, and a test in
-  each uses it.
+- Good, because U4, U7 and U9 build to one stated seam, with a test of
+  the registry in U4 and of a part in U7 and U9.
 - Good, because the list of what can run is a file, and tests do not
   depend on it.
 - Good, because the parts nobody can check yet are not decided yet.
@@ -181,8 +196,9 @@ pointing to this record.
   this interface as it stands: M5 must widen it.
 - Bad, because M5 carries most of the interface, and the rules reserved
   above are promises a later unit can break without a test noticing.
-  Only the owner part of keys and payloads, and the absence of the
-  pack's words in the core side, are checked by code.
+  The absence of the pack's words in the core side is checked by code
+  today; a test of the owner part is for U5 (payloads) and U8 (keys) to
+  add; the rest is checked by review.
 - Bad, because adding a pack is a change to the registry, so "no core
   change" is true of `packages/core` and not of the repository.
 - Neutral, because one pack per tenant is kept, not decided here.
@@ -190,21 +206,23 @@ pointing to this record.
 ### Confirmation
 
 The boundary test (`packages/packs/booking/src/boundary.test.ts`) is
-changed in U4, on purpose, in these places:
+changed on purpose, in these places, by U4 unless said:
 
-- Its pinned list of scanned folders gains `packages/pack-interface` and
-  `packages/ai`. Both are scanned for the pack's words like the rest.
+- Its pinned list of scanned folders gains `packages/pack-interface`,
+  and `packages/ai` in whichever unit creates that folder. Both are
+  scanned for the pack's words like the rest.
 - Its import rule, today "no file imports anything named `pack-…`",
   becomes three: `packages/core`, `db` and the channel packages import
   neither the interface nor the registry; no scanned file imports a pack
-  by name or by path; only the entry points of `api` and `worker` import
-  the registry. The package-dependency rule changes to match.
-- `apps/ops` is outside the scan today because it names the packs. Once
-  it reads them from the registry, whether it can be scanned is looked
-  at in U4.
-- A new test: the registry's keys are exactly the names `ops` accepts,
-  each pack's `name` equals its key, and the registry file holds nothing
-  but the map.
+  by name or by path; only `main.ts` of `api` and of `worker` imports
+  the registry. The rule has to tell `pack-interface` from `pack-<name>`
+  by its name, which is why `interface` is not a pack's name. The
+  package-dependency rule changes to match.
+- `apps/ops` stays outside the scan: it still names the packs.
+- New tests. In the registry's folder: each pack's `name` equals its
+  key, no key is a reserved name, and the file holds nothing but the
+  map. In `apps/ops`: its list of accepted names equals the registry's
+  keys.
 
 In U7 and U9, a test registers a pack written in that test and shows the
 part working through the registry passed in. The fragment is shown in
@@ -235,11 +253,13 @@ the code it names.
 - Bad, because the plan's tool loop and claim checker are still built in
   M3, each with a seam of its own making, and M5 reconciles them.
 
-### D. Types in `packages/core`
+### D. Types in `packages/core` or `packages/ai`
 
 - Good, because there is one package fewer.
-- Bad, because `packages/core` is pure rules with no model, prompt or
-  tool in it, and the pack's types name all three.
+- Bad, in `packages/core`, because it is pure rules with no model,
+  prompt or tool in it, and the pack's types name all three.
+- Bad, in `packages/ai`, because a pack would depend on the package that
+  holds the provider's client in order to name a tool's type.
 
 ### E. Found at run time, or subscribed to events
 
