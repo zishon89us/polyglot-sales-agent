@@ -161,7 +161,10 @@ async function conversationFor(
 }
 
 // A status only ever moves a message forward. `read` may arrive before
-// `delivered`, and `sent` may arrive while the send is still being recorded.
+// `delivered`. A status is matched on the channel's identifier, which a
+// message has only once the worker has recorded that its call was accepted,
+// so the `sending` cases below cannot match today (#290: a status that
+// arrives before that record is lost).
 // A failure's code is kept with it.
 const FORWARD = `
   UPDATE messages SET status = $2, sending_at = NULL,

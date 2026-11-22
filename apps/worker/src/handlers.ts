@@ -122,7 +122,7 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
       try {
         // "newer-message": the customer wrote again meanwhile. That message
         // queued a job of its own, which answers everything together.
-        await finishTurn(
+        const end = await finishTurn(
           options.app,
           tenantId,
           conversationId,
@@ -131,6 +131,10 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
           reply,
           options.clock?.(),
         );
+        if (end === "session-over") {
+          // The session's 24 hours passed while the reply was being made.
+          options.report?.("turn-skipped", end);
+        }
         return undefined;
       } catch (error) {
         // Nothing was stored. Free the conversation, so that the retry need not wait for the lease to run out.
