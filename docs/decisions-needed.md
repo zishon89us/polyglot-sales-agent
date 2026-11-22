@@ -5,7 +5,7 @@ stop, or a thing only the maintainer can do. Answer with the row's number
 and "yes", "no", or a few words; a "no" tells the agent what to change.
 "If no" says what a no would cost, as far as the agent can tell.
 
-Last brought up to date: 2026-11-22, with the M3 plan (rows 29 to 35;
+Last brought up to date: 2026-11-22, with the M3 plan (rows 29 to 35) and its first unit (row 36;
 a row keeps its number for good, so new rows take the next numbers
 wherever they sit on the page). At the end of M2 a second agent
 checked the first version against the repository and found it left out a
@@ -26,7 +26,7 @@ third of what it should hold; this is the corrected page
 ## Raised by the M3 plan; nothing is built on them yet
 
 Each is a question of `plans/m3-ai-core.md`, where it is set out in full.
-These seven rows were added after the second agent's check of this page;
+These rows were added after the second agent's check of this page;
 the check of the plan (`reviews/2026-11-22-m3-plan-check.md`) read rows of
 an earlier draft.
 
@@ -39,6 +39,7 @@ an earlier draft.
 | 33 | **Build buttons and captions in the channel in M3** (question 6)? M2 built text only, and M3's opt-out, opt-in and person buttons need them | A unit of its own, from Meta's pages read and dated then | The button criteria of US-C7 and the caption of US-C12 move to a later milestone, and M3 has keywords only |
 | 34 | **A tenant's settings and the test "is this tenant answering"** in M3 (question 7): business hours, support contact, notification address, loaded by an operator's command | The settings and the test; credential checks and their emails stay in M4, so the test is weaker than the design's | Steps 4a, 5 and 8 of the order of checks treat every tenant as answering until M4 |
 | 35 | **Add to the stories file's table of criteria delivered later** the parts of M3 criteria that need bookings, templates or real tools (question 8) | US-C4, 4 and 14 and the booking clause of 10; US-C5, 1 for a template; US-C8, 4 for a real tool; US-C15, 9 | Say which of them M3 should deliver, and how without the booking pack |
+| 36 | **May what a customer types inside a message go to the model as written, a phone number or a name included?** `AGENTS.md` section 7 says never to send a phone number or a contact's name to the model; the architecture says the system adds none, and ADR 0005 adds that it cannot remove what a customer typed. NFR-V7's wording should say which (#77; set out in `plans/m3-u0-findings.md`, not in the M3 plan). A yes accepts that numbers and names a customer types, their own or another person's, go to the model provider, where `compliance.md` argues for sending only the text needed to answer | Nothing is changed. Proposed: NFR-V7 reads "no phone number or name of the contact, from the contact's record or the channel's profile, is put into a prompt; the messages of the session are sent as written", and `AGENTS.md` section 7 is reworded by you to match | Typed numbers and names must be found and removed before the model sees a message, which is new work for U7 and will sometimes remove what the customer meant to say |
 
 ## Made in M2; a yes closes them
 
@@ -53,7 +54,7 @@ an earlier draft.
 | 13 | The application role, which serves the internet, has no access at all to the operator's record. ADR 0011 had allowed insert and read (#293) | As asked | One grant is added |
 | 14 | A tenant's name is not written to the operator's record, because a business's name can be a person's; the tenant is recorded by its identifier (#293) | As asked. The database refuses any recorded value with a space, an `@` or a `+` | An argument is added and the database's rule on recorded values is loosened |
 | 15 | The rest of how `ops` behaves (ADR 0011, amendment): `ops log show` and `ops channel connect` were added; commands that only read are recorded too; the first row of the record is committed before the command acts; a command done but half recorded exits with status 3; a time zone written with a plus sign is not taken; `ops service degraded` and `ops events list-unparsed` are not built | As listed | Say which |
-| 16 | No query builder: SQL is fixed text in one package, and only that package imports the database driver (ADR 0003, amendment) | As asked | A query builder is chosen and the statements rewritten: about fifty calls on 2026-11-21 |
+| 16 | No query builder: SQL is fixed text in one package, and only that package imports the database driver (ADR 0003, amendment) | As asked | A query builder is chosen and the statements rewritten: 83 calls on 2026-11-22 (an earlier "about fifty" came from a search that missed typed calls) |
 | 17 | Database time limits: 2 s to connect, 4 s a statement, 3 s for a lock, 10 s idle in a transaction (#288) | As asked | Other numbers; one constant each |
 | 18 | `messages.handled_at` marks a customer's message that a turn has dealt with, until sessions and batches exist; a message to send has a count of calls and of unknown outcomes; `unconfirmed` and `expired` are codes on a failed message, not statuses (`design/data-model.md`, decisions 18 and 19) | As asked | The columns change before M3 builds on them |
 | 19 | **NFR-S2 as reworded, and US-C1 criterion 4 with it.** A request with a missing or bad signature is refused and nothing is stored, but not always with 401: an oversized body gets 413, a source that keeps sending bad signatures gets 429, a malformed or too-slow request gets another 4xx or a closed connection, some of these before the signature can be read. Criterion 4 still says "HTTP 401 is returned" | The NFR was reworded; the criterion was not. A yes means the criterion is reworded to match | Say which answers are acceptable |
