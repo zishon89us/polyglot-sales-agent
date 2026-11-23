@@ -526,6 +526,9 @@ M0 Inception met its exit criteria on 2026-11-16; see
   documents that state them; a client could be made without the
   function that bounds and checks it; the provider test did not read
   the whole repository. All three are fixed, with most of the Low ones.
+  **The fixes are checked by the author only:** the second agent's
+  check was stopped before it reported and is still to be run. #325
+  stays a draft until then. What the unit leaves is #326.
 
 ## Next
 

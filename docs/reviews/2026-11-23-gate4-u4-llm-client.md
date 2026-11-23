@@ -378,8 +378,10 @@ Three mutants (M79, M80, M90) did not apply because my search pattern was wrong;
 
 ## Author's response
 
-Everything below is in the same pull request (#325). The fixes were then
-checked by another agent: `2026-11-23-gate4-u4-llm-client-verification.md`.
+Everything below is in the same pull request (#325). **The fixes have
+been checked by the author only.** A check by another agent was started
+and stopped before it reported; it is still to be run, and the pull
+request stays a draft until it has been.
 The mutants the review found alive were run again by the author after the
 fixes; the result is beside each.
 
