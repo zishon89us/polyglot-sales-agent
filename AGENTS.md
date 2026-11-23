@@ -220,7 +220,7 @@ a lifecycle phase.
 │   ├── core/  ai/  channel/  channel-whatsapp/  channel-mock/  db/
 │   ├── pack-interface/      # the type of a pack (ADR 0014)
 │   └── packs/booking/  packs/faq-only/  packs/registry/
-├── prompts/                  # versioned prompt files, one folder per prompt and per version
+├── prompts/                  # versioned prompt files, one folder per prompt
 ├── evals/                    # datasets, graders, runner, baseline results
 ├── infra/                    # infrastructure-as-code
 ├── docs/

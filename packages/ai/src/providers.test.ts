@@ -1,9 +1,10 @@
 // No provider's library outside its adapter (ADR 0005, "Confirmation";
 // design note docs/design/notes/m3-u4-llm-client.md, section 6).
 //
-// This is a list of names. A library it does not know, or a plain HTTP
-// call to a provider, passes: it shows that the known ones are kept in one
-// place, not that no model is called from elsewhere.
+// This is a list of names. A library it does not know, a name put together
+// from parts, or a plain HTTP call to a provider, passes: it shows that the
+// known ones are kept in one place, not that no model is called from
+// elsewhere.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -41,8 +42,10 @@ const PROVIDER_PACKAGES = [
   "@ai-sdk/",
 ];
 
-/** Whether a package's name is one of the list's. */
-function isProvider(name: string): boolean {
+/** Whether what is imported is one of the list's: by its name, or by a path into where it is installed. */
+function isProvider(imported: string): boolean {
+  const installed = imported.lastIndexOf("node_modules/");
+  const name = installed < 0 ? imported : imported.slice(installed + "node_modules/".length);
   return PROVIDER_PACKAGES.some((listed) =>
     listed.endsWith("/")
       ? name.startsWith(listed)
@@ -54,7 +57,7 @@ function isProvider(name: string): boolean {
 function imported(source: string): string[] {
   const found: string[] = [];
   for (const match of source.matchAll(
-    /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g,
+    /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(?:\/\*[^*]*\*\/\s*)?["'`]([^"'`\n]+)["'`]/g,
   )) {
     found.push(match[1] as string);
   }
@@ -66,60 +69,65 @@ const ADAPTERS = "packages/ai/src/adapters/";
 /** The one package that may depend on one. */
 const MAY_DEPEND = "packages/ai";
 
-function workspaceFolders(): string[] {
-  const inside = (top: string): string[] =>
-    readdirSync(`${root}${top}`, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
-      .map((entry) => `${top}/${entry.name}`);
-  return [...inside("apps"), ...inside("packages"), ...inside("packages/packs")].filter(
-    (folder) => folder !== "packages/packs",
+/** Folders that hold none of this repository's code: what is installed, and the history. */
+const NOT_OURS = ["node_modules", ".git"];
+
+/** Every file of the repository, from its root down, as a path from the root. */
+function everyFile(): string[] {
+  return readdirSync(root, { recursive: true, encoding: "utf8" }).filter(
+    (path) => !path.split("/").some((part) => NOT_OURS.includes(part)),
   );
 }
 
 describe("a provider's library is imported only by its adapter", () => {
-  test("no source file outside the adapters' folder imports one", () => {
+  test("no source file of the repository outside the adapters' folder imports one", () => {
     const importers: string[] = [];
-    let read = 0;
-    for (const top of ["apps", "packages", "tools"]) {
-      for (const name of readdirSync(`${root}${top}`, { recursive: true, encoding: "utf8" })) {
-        const path = `${top}/${name}`;
-        if (
-          /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(name) &&
-          !/(^|\/)node_modules\//.test(path) &&
-          !path.startsWith(ADAPTERS) &&
-          // This file plants the lines it looks for.
-          path !== "packages/ai/src/providers.test.ts"
-        ) {
-          read += 1;
-          if (imported(readFileSync(`${root}${path}`, "utf8")).some(isProvider)) {
-            importers.push(path);
-          }
+    const read: string[] = [];
+    for (const path of everyFile()) {
+      if (
+        /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(path) &&
+        !path.startsWith(ADAPTERS) &&
+        // This file plants the lines it looks for.
+        path !== "packages/ai/src/providers.test.ts"
+      ) {
+        read.push(path);
+        if (imported(readFileSync(`${root}${path}`, "utf8")).some(isProvider)) {
+          importers.push(path);
         }
       }
     }
     expect(importers).toEqual([]);
-    // The walk read the product's files, this one among them.
-    expect(read).toBeGreaterThan(80);
+    // The walk starts at the root, so a folder added later (the evals, the
+    // infrastructure) is read without being named here.
+    for (const expected of [
+      "vitest.config.ts",
+      "tools/names-check.ts",
+      "apps/worker/src/main.ts",
+      "packages/ai/src/bounded.ts",
+      "packages/db/src/index.ts",
+    ]) {
+      expect(read).toContain(expected);
+    }
+    expect(read.some((path) => path.includes("node_modules"))).toBe(false);
   });
 
-  test("no package but packages/ai depends on one, and the root does not", () => {
-    const folders = workspaceFolders();
-    for (const expected of ["apps/api", "apps/worker", "packages/ai"]) {
-      expect(folders).toContain(expected);
+  test("no package but packages/ai depends on one, the root included", () => {
+    const manifests = everyFile().filter((path) => /(^|\/)package\.json$/.test(path));
+    for (const expected of ["package.json", "apps/api/package.json", "packages/ai/package.json"]) {
+      expect(manifests).toContain(expected);
     }
-    // The packs' own folders are walked too. (Named by its ending: a file of
-    // this package may not hold a path into the packs.)
-    expect(folders.filter((folder) => folder.endsWith("/faq-only"))).toHaveLength(1);
-    for (const folder of [".", ...folders]) {
-      const manifest = JSON.parse(readFileSync(`${root}${folder}/package.json`, "utf8")) as Record<
+    // One for each workspace package and one for the root.
+    expect(manifests.length).toBeGreaterThanOrEqual(15);
+    for (const path of manifests) {
+      const manifest = JSON.parse(readFileSync(`${root}${path}`, "utf8")) as Record<
         string,
         Record<string, string> | undefined
       >;
       const names = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
         .flatMap((kind) => Object.keys(manifest[kind] ?? {}))
         .filter(isProvider);
-      if (folder !== MAY_DEPEND) {
-        expect(names, folder).toEqual([]);
+      if (path !== `${MAY_DEPEND}/package.json`) {
+        expect(names, path).toEqual([]);
       }
     }
   });
@@ -140,6 +148,9 @@ describe("a provider's library is imported only by its adapter", () => {
       'import { bedrock } from "@ai-sdk/amazon-bedrock";',
       'export { Ollama } from "ollama";',
       'import type { Message } from\n  "@anthropic-ai/sdk";',
+      'const sdk = await import(/* webpackIgnore: true */ "openai");',
+      'import x from "../../node_modules/openai/index.mjs";',
+      'import x from "../node_modules/@anthropic-ai/sdk/index.js";',
     ]) {
       expect(imported(line).some(isProvider), line).toBe(true);
     }

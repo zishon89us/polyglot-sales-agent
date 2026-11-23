@@ -6,12 +6,11 @@ import {
   MODEL_HEALTH_TIMEOUT_MS,
   MODEL_OUTPUT_TOKENS_CEILING,
 } from "@polyglot-sales-agent/core";
-import { readOutput } from "./output.ts";
+import { keepable, readOutput } from "./output.ts";
 import {
   type AdapterAnswer,
   type Health,
   type LlmAdapter,
-  type LlmClient,
   type LlmRequest,
   type LlmResult,
   PROVIDER_ERROR_CODES,
@@ -29,7 +28,10 @@ const REAL_TIMERS: Timers = {
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
-function whole(value: unknown, ceiling: number): boolean {
+/** The longest name of a model that is passed on. */
+const MODEL_NAME_MAX = 200;
+
+function whole(value: unknown, ceiling: number): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= ceiling;
 }
 
@@ -50,11 +52,19 @@ function usageOf(answer: { usage: TokenUse; model: string }): TokenUse {
     typeof answer.usage !== "object" ||
     answer.usage === null ||
     !count(answer.usage.inputTokens) ||
-    !count(answer.usage.outputTokens) ||
-    typeof answer.model !== "string" ||
-    answer.model === ""
+    !count(answer.usage.outputTokens)
   ) {
-    throw new AdapterFault("returned no token counts or no model name");
+    throw new AdapterFault("returned no token counts");
+  }
+  // The name goes into results and, later, a trace: it is a name, not a place for text.
+  if (
+    typeof answer.model !== "string" ||
+    answer.model === "" ||
+    [...answer.model].length > MODEL_NAME_MAX ||
+    !keepable(answer.model) ||
+    answer.model.includes("\n")
+  ) {
+    throw new AdapterFault("returned no model name, or one that is not a name");
   }
   return { inputTokens: answer.usage.inputTokens, outputTokens: answer.usage.outputTokens };
 }
@@ -84,6 +94,55 @@ function resultOf(answer: AdapterAnswer, request: LlmRequest): LlmResult {
   return read.ok
     ? { kind: "ok", output: read.output, usage, model: answer.model }
     : { kind: "invalid-output", code: read.code, usage, model: answer.model };
+}
+
+function healthOf(answer: Health): Health {
+  if (typeof answer === "object" && answer !== null) {
+    if (answer.ok === true) {
+      return { ok: true };
+    }
+    if (
+      answer.ok === false &&
+      (answer.failure === "timeout" || answer.failure === "provider-error")
+    ) {
+      return { ok: false, failure: answer.failure };
+    }
+  }
+  throw new AdapterFault("returned a health that is neither ok nor one of the two failures");
+}
+
+/** What is wrong with a request, as its caller made it: a caller's mistake, found before any call. */
+function requestFault(request: LlmRequest): Error | undefined {
+  if (typeof request !== "object" || request === null) {
+    return new TypeError("a request is an object");
+  }
+  if (!whole(request.timeoutMs, MODEL_CALL_TIMEOUT_CEILING_MS)) {
+    return new RangeError(`timeoutMs is a whole number from 1 to ${MODEL_CALL_TIMEOUT_CEILING_MS}`);
+  }
+  if (!whole(request.maxOutputTokens, MODEL_OUTPUT_TOKENS_CEILING)) {
+    return new RangeError(
+      `maxOutputTokens is a whole number from 1 to ${MODEL_OUTPUT_TOKENS_CEILING}`,
+    );
+  }
+  if (
+    typeof request.system !== "string" ||
+    !Array.isArray(request.prompts) ||
+    !Array.isArray(request.messages) ||
+    !Array.isArray(request.tools) ||
+    !request.tools.every(
+      (tool: unknown) =>
+        typeof tool === "object" &&
+        tool !== null &&
+        typeof (tool as { name: unknown }).name === "string",
+    ) ||
+    !Array.isArray(request.claimKinds) ||
+    !request.claimKinds.every((kind: unknown) => typeof kind === "string")
+  ) {
+    return new TypeError(
+      "a request has its system text, its prompts, its messages, its tools by name and its claim kinds",
+    );
+  }
+  return undefined;
 }
 
 /**
@@ -116,7 +175,8 @@ function within<Answer, Result>(
     };
     let pending: Promise<Answer>;
     try {
-      pending = start(controller.signal);
+      // An adapter that answers at once, with no promise, has still answered.
+      pending = Promise.resolve(start(controller.signal));
     } catch (error) {
       settle(() => reject(error));
       return;
@@ -136,48 +196,66 @@ function within<Answer, Result>(
 }
 
 /**
+ * What the rest of the code calls a model through. It is a class with a
+ * private part so that nothing else can be one: not an adapter, not an
+ * object written by hand, and not a copy of a client with a method
+ * replaced (a copy by `{...client}` has none of its methods). Only
+ * `bounded` makes one. Whatever is added around a call later, the trace
+ * of M3 unit U6 for one, is added in this file.
+ */
+export class LlmClient {
+  readonly #adapter: LlmAdapter;
+  readonly #timers: Timers;
+
+  private constructor(adapter: LlmAdapter, timers: Timers) {
+    this.#adapter = adapter;
+    this.#timers = timers;
+  }
+
+  /** @internal Use `bounded`. */
+  static around(adapter: LlmAdapter, timers: Timers): LlmClient {
+    return new LlmClient(adapter, timers);
+  }
+
+  /** One attempt, bounded in time, its answer checked against the structure. */
+  generate(request: LlmRequest): Promise<LlmResult> {
+    let fault: Error | undefined;
+    let timeoutMs = 0;
+    try {
+      fault = requestFault(request);
+      // Read once: what was checked is what is used.
+      timeoutMs = fault === undefined ? request.timeoutMs : 0;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (fault !== undefined || !whole(timeoutMs, MODEL_CALL_TIMEOUT_CEILING_MS)) {
+      return Promise.reject(fault ?? new RangeError("timeoutMs changed while it was read"));
+    }
+    return within<AdapterAnswer, LlmResult>(
+      this.#timers,
+      timeoutMs,
+      (signal) => this.#adapter.generate(request, signal),
+      (answer) => resultOf(answer, request),
+      { kind: "timeout" },
+    );
+  }
+
+  /** Whether the provider can be reached. Bounded like a call. */
+  health(): Promise<Health> {
+    return within<Health, Health>(
+      this.#timers,
+      MODEL_HEALTH_TIMEOUT_MS,
+      (signal) => this.#adapter.health(signal),
+      healthOf,
+      { ok: false, failure: "timeout" },
+    );
+  }
+}
+
+/**
  * Makes a client of an adapter. Every call is bounded in time, and every
  * answer is checked against the structure before anything else sees it.
  */
 export function bounded(adapter: LlmAdapter, timers: Timers = REAL_TIMERS): LlmClient {
-  const client = {
-    generate(request: LlmRequest): Promise<LlmResult> {
-      // A caller's mistake, not the provider's: refused before any call.
-      if (!whole(request.timeoutMs, MODEL_CALL_TIMEOUT_CEILING_MS)) {
-        return Promise.reject(
-          new RangeError(`timeoutMs is a whole number from 1 to ${MODEL_CALL_TIMEOUT_CEILING_MS}`),
-        );
-      }
-      if (!whole(request.maxOutputTokens, MODEL_OUTPUT_TOKENS_CEILING)) {
-        return Promise.reject(
-          new RangeError(
-            `maxOutputTokens is a whole number from 1 to ${MODEL_OUTPUT_TOKENS_CEILING}`,
-          ),
-        );
-      }
-      return within<AdapterAnswer, LlmResult>(
-        timers,
-        request.timeoutMs,
-        (signal) => adapter.generate(request, signal),
-        (answer) => resultOf(answer, request),
-        { kind: "timeout" },
-      );
-    },
-    health(): Promise<Health> {
-      return within<Health, Health>(
-        timers,
-        MODEL_HEALTH_TIMEOUT_MS,
-        (signal) => adapter.health(signal),
-        (answer) =>
-          answer.ok === true
-            ? { ok: true }
-            : {
-                ok: false,
-                failure: answer.failure === "timeout" ? "timeout" : "provider-error",
-              },
-        { ok: false, failure: "timeout" },
-      );
-    },
-  };
-  return client as unknown as LlmClient;
+  return LlmClient.around(adapter, timers);
 }

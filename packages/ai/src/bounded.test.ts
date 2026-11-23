@@ -217,13 +217,17 @@ describe("a call that does not answer in time", () => {
     process.on("unhandledRejection", note);
     try {
       for (const then of ["answer", "reject"] as const) {
-        const { client, timers } = scripted([{ kind: "hang", then }]);
+        const { client, timers, adapter } = scripted([{ kind: "hang", then, value: GOOD }]);
         const pending = client.generate(REQUEST);
         await settled();
+        expect(adapter.endedLate).toBe(0);
         timers.pass(MODEL_CALL_TIMEOUT_MS);
+        // A good answer that comes late is still a timeout.
         expect(await pending, then).toEqual({ kind: "timeout" });
         await settled();
         await new Promise((resolve) => setImmediate(resolve));
+        // The adapter did end, after the client had given up on it.
+        expect(adapter.endedLate, then).toBe(1);
       }
     } finally {
       process.off("unhandledRejection", note);
@@ -262,10 +266,16 @@ describe("a fault that is not the provider's", () => {
   });
 
   test("F1: a call the script has no step for is thrown through to the test, by name", async () => {
-    const { client } = scripted([{ kind: "answer", value: GOOD }]);
+    const { client, adapter } = scripted([{ kind: "answer", value: GOOD }]);
     await client.generate(REQUEST);
+    expect(adapter.overran).toBe(0);
+    adapter.assertDone();
     await expect(client.generate(REQUEST)).rejects.toBeInstanceOf(FakeScriptOver);
     await expect(client.generate(REQUEST)).rejects.toThrow("call 3");
+    // Were those errors swallowed by the code under test, the count still says so.
+    expect(adapter.remaining()).toBe(0);
+    expect(adapter.overran).toBe(2);
+    expect(() => adapter.assertDone()).toThrow("2 calls had no step");
   });
 
   test("an adapter that breaks its own contract is a fault, not an answer", async () => {
@@ -308,6 +318,47 @@ describe("a fault that is not the provider's", () => {
       await expect(bounded(returns(answer), timers).generate(REQUEST)).rejects.toBeInstanceOf(
         AdapterFault,
       );
+    }
+    // A model's name is a name: one line, short, with nothing that cannot be stored.
+    for (const model of ["m\u0000", "m\nthe customer said hello", "m".repeat(201), 7]) {
+      const named = {
+        kind: "answer",
+        value: GOOD,
+        truncated: false,
+        usage: { inputTokens: 1, outputTokens: 1 },
+        model,
+      };
+      await expect(bounded(returns(named), timers).generate(REQUEST)).rejects.toBeInstanceOf(
+        AdapterFault,
+      );
+    }
+    // An adapter that answers at once, with no promise, has still answered.
+    const direct = {
+      generate: () => ({ kind: "provider-error", code: "unavailable" }),
+      health: () => ({ ok: true }),
+    } as unknown as LlmAdapter;
+    expect(await bounded(direct, timers).generate(REQUEST)).toEqual({
+      kind: "provider-error",
+      code: "unavailable",
+    });
+    expect(await bounded(direct, timers).health()).toEqual({ ok: true });
+    // A health that is neither ok nor one of the two failures is a fault too.
+    for (const health of [
+      null,
+      undefined,
+      {},
+      { ok: "yes" },
+      { ok: false },
+      { ok: false, failure: "the provider said no" },
+    ]) {
+      const adapter = {
+        generate: async () => undefined,
+        health: async () => health,
+      } as unknown as LlmAdapter;
+      await expect(
+        bounded(adapter, timers).health(),
+        JSON.stringify(health),
+      ).rejects.toBeInstanceOf(AdapterFault);
     }
     // Not saying whether the answer was cut is not the same as saying it was not.
     const unsaid = {
@@ -359,6 +410,38 @@ describe("a fault that is not the provider's", () => {
     expect(timers.waiting()).toBe(0);
   });
 
+  test("a request that is not one is refused before the adapter is called, and by a rejection, never a throw", async () => {
+    const { client, adapter, timers } = scripted([]);
+    for (const request of [
+      null,
+      undefined,
+      "request",
+      { ...REQUEST, tools: undefined },
+      { ...REQUEST, tools: [{ description: "no name" }] },
+      { ...REQUEST, tools: ["find"] },
+      { ...REQUEST, claimKinds: "price" },
+      { ...REQUEST, claimKinds: [1] },
+      { ...REQUEST, messages: undefined },
+      { ...REQUEST, prompts: undefined },
+      { ...REQUEST, system: undefined },
+    ]) {
+      const pending = client.generate(request as unknown as LlmRequest);
+      await expect(pending, JSON.stringify(request)).rejects.toBeInstanceOf(TypeError);
+    }
+    // A bound read once: what was checked is what is used.
+    let reads = 0;
+    const shifting = {
+      ...REQUEST,
+      get timeoutMs() {
+        reads += 1;
+        return reads === 1 ? 50 : 1e9;
+      },
+    };
+    await expect(client.generate(shifting)).rejects.toBeInstanceOf(RangeError);
+    expect(adapter.calls).toEqual([]);
+    expect(timers.waiting()).toBe(0);
+  });
+
   test("C6: each ceiling itself is allowed", async () => {
     const { client } = scripted([
       { kind: "answer", value: GOOD },
@@ -388,6 +471,7 @@ describe("health", () => {
     expect(await client.health()).toEqual({ ok: true });
     expect(await client.health()).toEqual({ ok: false, failure: "provider-error" });
     expect(await client.health()).toEqual({ ok: false, failure: "timeout" });
+    expect(adapter.healthRemaining()).toBe(0);
     expect(await client.health()).toEqual({ ok: true });
     expect(adapter.healthCalls).toBe(4);
   });
@@ -428,6 +512,13 @@ describe("the scripted adapter", () => {
     await client.generate(second);
     expect(adapter.remaining()).toBe(1);
     expect(adapter.calls).toEqual([REQUEST, second]);
+    expect(() => adapter.assertDone()).toThrow("1 steps");
+    // What was asked is kept as it was: a caller that changes its request afterwards changes no record.
+    const messages = [{ role: "customer" as const, text: "third" }];
+    await client.generate({ ...REQUEST, messages });
+    messages.push({ role: "customer", text: "added after the call" });
+    expect(adapter.calls[2]?.messages).toEqual([{ role: "customer", text: "third" }]);
+    adapter.assertDone();
   });
 
   test("F4: the same script gives the same results, call after call", async () => {

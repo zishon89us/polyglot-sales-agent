@@ -163,19 +163,33 @@ describe("loading a prompt by name and version", () => {
     }
   });
 
-  test("P4: a folder or a file that a link leads out of the folder of prompts is refused", () => {
+  test("P4: a link is refused, whether it leads out of the folder of prompts or stays inside it", () => {
+    const refusal = "is a link, or is reached through one";
     const outside = folder();
     // The whole prompt is a link to a folder elsewhere.
     const root = mkdtempSync(join(tmpdir(), "psa-prompts-"));
     made.push(root);
     symlinkSync(join(outside, "reply"), join(root, "reply"), "dir");
-    expect(problem(() => loadPrompt(root, "reply", 1))).toContain("outside the folder of prompts");
+    expect(problem(() => loadPrompt(root, "reply", 1))).toContain(refusal);
     // Only the text is a link.
     const other = folder();
     rmSync(join(other, "reply", "1", "prompt.md"));
     symlinkSync(join(outside, "reply", "1", "prompt.md"), join(other, "reply", "1", "prompt.md"));
-    expect(problem(() => loadPrompt(other, "reply", 1))).toContain("outside the folder of prompts");
-    // A link that stays inside is a file like another.
+    expect(problem(() => loadPrompt(other, "reply", 1))).toContain(refusal);
+    // Only the record, or only the changelog.
+    for (const file of [
+      ["reply", "1", "meta.yaml"],
+      ["reply", "CHANGELOG.md"],
+    ]) {
+      const linked = folder();
+      rmSync(join(linked, ...file));
+      symlinkSync(join(outside, ...file), join(linked, ...file));
+      expect(
+        problem(() => loadPrompt(linked, "reply", 1)),
+        file.join("/"),
+      ).toContain(refusal);
+    }
+    // A link that stays inside would give one version's text under another's name.
     const inside = folder();
     mkdirSync(join(inside, "reply", "2"));
     symlinkSync(join(inside, "reply", "1", "prompt.md"), join(inside, "reply", "2", "prompt.md"));
@@ -184,7 +198,26 @@ describe("loading a prompt by name and version", () => {
       META.replace("version: 1", "version: 2"),
     );
     writeFileSync(join(inside, "reply", "CHANGELOG.md"), `${LOG}\n## 2\n\nSecond.\n`);
-    expect(loadPrompt(inside, "reply", 2).text).toBe(TEXT);
+    expect(problem(() => loadPrompt(inside, "reply", 2))).toContain(refusal);
+    // A whole version that is a link to another version.
+    const version = folder();
+    symlinkSync(join(version, "reply", "1"), join(version, "reply", "7"), "dir");
+    expect(problem(() => loadPrompt(version, "reply", 7))).toContain(refusal);
+    // A folder beside the root whose name begins like the root's is not inside it.
+    const sibling = `${inside}-other`;
+    mkdirSync(join(sibling, "reply", "1"), { recursive: true });
+    made.push(sibling);
+    writeFileSync(join(sibling, "reply", "1", "prompt.md"), TEXT);
+    const prefix = folder();
+    rmSync(join(prefix, "reply", "1", "prompt.md"));
+    symlinkSync(join(sibling, "reply", "1", "prompt.md"), join(prefix, "reply", "1", "prompt.md"));
+    expect(problem(() => loadPrompt(prefix, "reply", 1))).toContain(refusal);
+    // The folder of prompts itself may be reached through a link: it is where the files are.
+    const real = folder();
+    const viaLink = `${real}-link`;
+    symlinkSync(real, viaLink, "dir");
+    made.push(viaLink);
+    expect(loadPrompt(viaLink, "reply", 1).text).toBe(TEXT);
   });
 
   test("P5: a record that is missing, not YAML, or not one plain map is refused, and the error names the file", () => {
@@ -200,6 +233,14 @@ describe("loading a prompt by name and version", () => {
           "model: not-evaluated",
           "model: *o",
         ),
+      ],
+      ["a tag on the version", META.replace("version: 1", "version: !!str 1")],
+      ["a tag that makes a number of it", META.replace("version: 1", "version: !!float 1")],
+      ["a tag nothing knows", META.replace("owner: Zeeshan", "owner: !custom Zeeshan")],
+      ["a tag on a text", META.replace("owner: Zeeshan", "owner: !!js/function 'function(){}'")],
+      [
+        "a key twice inside the parameters",
+        META.replace("parameters: {}", "parameters:\n  a: 1\n  a: 2"),
       ],
       ["a list", "- name: reply\n"],
       ["a text", "reply\n"],
@@ -270,7 +311,22 @@ describe("loading a prompt by name and version", () => {
     );
     expect(refusedWith("owner", "owner: [a, b]")).toContain("owner is text of 1 to 100");
     expect(refusedWith("owner", "owner: owner@example.com")).toContain("not an address");
-    expect(refusedWith("owner", 'owner: "a\\tb"')).toContain("owner has a control character");
+    expect(refusedWith("owner", 'owner: "a\\tb"')).toContain("owner is one line of text");
+    // A text folded over lines keeps a line break at its end; one line is one line.
+    expect(
+      refusedWith("intended_use", "intended_use: >\n  Answers a customer\n  from the data."),
+    ).toContain("intended_use is one line of text");
+    expect(
+      loadPrompt(
+        folder({
+          meta: meta(
+            replaced("intended_use", "intended_use: >-\n  Answers a customer\n  from the data."),
+          ),
+        }),
+        "reply",
+        1,
+      ).meta.intendedUse,
+    ).toBe("Answers a customer from the data.");
     expect(refusedWith("model", "model: null")).toContain("model is text of 1 to 100");
     expect(refusedWith("model", "model: true")).toContain("model is text of 1 to 100");
     expect(refusedWith("intended_use", `intended_use: ${"x".repeat(501)}`)).toContain(
@@ -308,6 +364,9 @@ describe("loading a prompt by name and version", () => {
       "### 1\n",
       " ## 1\n",
       "##1\n",
+      "## 1.5\n",
+      "## 1abc\n",
+      "## 1-rc\n",
     ]) {
       expect(
         problem(() => loadPrompt(folder({ log }), "reply", 1)),
@@ -315,6 +374,7 @@ describe("loading a prompt by name and version", () => {
       ).toBe('prompts/reply/CHANGELOG.md: has no heading "## 1"');
     }
     expect(loadPrompt(folder({ log: "## 1 (2026-11-23)\n" }), "reply", 1).version).toBe(1);
+    expect(loadPrompt(folder({ log: "# Log\r\n\r\n## 1\r\n" }), "reply", 1).version).toBe(1);
   });
 
   test("P7: a prompt file that is empty, not UTF-8, too long or with a control character is refused", () => {
@@ -436,6 +496,34 @@ describe("assembling the system text", () => {
     expect(assemblePrompt(core(), undefined, "Z9".repeat(32)).text).toContain("Z9".repeat(32));
   });
 
+  test("a prompt that did not come from the loader keeps the loader's rules, or is refused", () => {
+    const loaded = core();
+    for (const text of [
+      `{{user_name}} ${CANARY_PLACEHOLDER}`,
+      `a${String.fromCharCode(9)}b ${CANARY_PLACEHOLDER}`,
+      `${"x".repeat(PROMPT_FILE_MAX)} ${CANARY_PLACEHOLDER}`,
+      "",
+    ]) {
+      expect(problem(() => assemblePrompt({ ...loaded, text }, undefined, CANARY))).toContain(
+        "prompts/reply/1/prompt.md",
+      );
+      expect(
+        problem(() => assemblePrompt(loaded, { ...fragment(), text: text || " " }, CANARY)),
+      ).toContain("prompts/test-pack/1/prompt.md");
+    }
+  });
+
+  test("a canary that the prompt's own text already holds is refused: a reply could repeat it without leaking anything", () => {
+    expect(
+      problem(() =>
+        assemblePrompt(core(`Say ${CANARY} never. ${CANARY_PLACEHOLDER}\n`), undefined, CANARY),
+      ),
+    ).toBe("the canary is already in the prompt's own text");
+    expect(problem(() => assemblePrompt(core(), fragment(`Also ${CANARY}.\n`), CANARY))).toBe(
+      "the canary is already in the prompt's own text",
+    );
+  });
+
   test("P15: the same inputs give the same text, byte for byte", () => {
     const first = assemblePrompt(core(), fragment(), CANARY);
     const second = assemblePrompt(core(), fragment(), CANARY);
@@ -455,6 +543,8 @@ describe("the scan of prompts/ for a contact's details (NFR-V6)", () => {
       "call ٠٥٥٥٠١٠٠",
       "call ۰۵۵۵ ۰۱۰۰",
       "account 12.34.56.78",
+      "call 555\t0100",
+      "version 1.2.3.4.5.6.7",
     ]) {
       expect(contactDetailsIn(text), text).toHaveLength(1);
     }
@@ -470,6 +560,11 @@ describe("the scan of prompts/ for a contact's details (NFR-V6)", () => {
       "version 12 of 9,999",
       "write @zishon89us",
       "six digits: 555 010",
+      "open 10:30-11:30 and 14:00-18:00",
+      "open 09:00\u201317:00",
+      "prices such as 150.00, 200.00 and 15.000",
+      "about 1,200,000 code points",
+      "open \u0660\u0669:\u0660\u0660-\u0661\u0667:\u0660\u0660",
     ]) {
       expect(contactDetailsIn(text), text).toEqual([]);
     }
@@ -481,7 +576,8 @@ describe("the scan of prompts/ for a contact's details (NFR-V6)", () => {
   test("no file under prompts/ holds one", () => {
     const root = fileURLToPath(new URL("../../../prompts/", import.meta.url));
     const files = readdirSync(root, { recursive: true, encoding: "utf8", withFileTypes: true })
-      .filter((entry) => entry.isFile())
+      // A link is read too: the loader refuses one, and the scan does not look away from one.
+      .filter((entry) => entry.isFile() || entry.isSymbolicLink())
       .map((entry) => join(entry.parentPath, entry.name));
     // At least the README: the scan has something to read.
     expect(files.some((file) => file.endsWith("README.md"))).toBe(true);

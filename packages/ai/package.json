@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@polyglot-sales-agent/core": "workspace:*",
-    "@polyglot-sales-agent/pack-interface": "workspace:*",
     "yaml": "2.9.1"
   }
 }

@@ -186,6 +186,20 @@ const THE_REGISTRY = new RegExp(
   }`,
 );
 
+/**
+ * A way round: a string that begins as the interface or the registry and
+ * then goes up or into what is installed, and so can end anywhere. It is
+ * counted as an import of a pack.
+ */
+const A_WAY_ROUND = quoted(
+  "[^\"'`]*(?:pack-interface|packs-registry|packs/registry)/[^\"'`]*(?:\\.\\.|node_modules)[^\"'`]*",
+);
+const reachesAPack = (text: string): boolean => A_PACK.test(text) || A_WAY_ROUND.test(text);
+
+// What none of these rules can see: a name put together from parts
+// ("@polyglot-sales-agent/" + "pack-…"), a path written with backslashes,
+// and a folder's name in another case on a disk that ignores case.
+
 /** The folders that may not know a pack exists at all (ADR 0014, "Registration"). */
 const KNOWS_NO_PACK = [
   "packages/core",
@@ -216,10 +230,14 @@ function dependencies(directory: string): string[] {
   const manifest = JSON.parse(readFileSync(`${root}${directory}/package.json`, "utf8")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
   };
   return [
     ...Object.keys(manifest.dependencies ?? {}),
     ...Object.keys(manifest.devDependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+    ...Object.keys(manifest.peerDependencies ?? {}),
   ];
 }
 
@@ -227,7 +245,7 @@ describe("what the core side may import of the packs (ADR 0012, ADR 0014)", () =
   test("B3: no file of the core side, tests included, imports a pack, and no package depends on one", () => {
     expect(
       sources()
-        .filter((file) => A_PACK.test(file.text))
+        .filter((file) => reachesAPack(file.text))
         .map((file) => file.path),
     ).toEqual([]);
     for (const directory of CORE) {
@@ -241,6 +259,13 @@ describe("what the core side may import of the packs (ADR 0012, ADR 0014)", () =
   });
 
   test("B2: the core, the database package and the channel packages import neither the interface nor the registry", () => {
+    // The list is this one: a folder taken out of it is seen here.
+    expect(KNOWS_NO_PACK).toEqual([
+      "packages/core",
+      "packages/db",
+      "packages/channel",
+      "packages/channel-whatsapp",
+    ]);
     for (const folder of KNOWS_NO_PACK) {
       expect(CORE, folder).toContain(folder);
     }
@@ -259,6 +284,9 @@ describe("what the core side may import of the packs (ADR 0012, ADR 0014)", () =
   });
 
   test("B4: only main.ts of the api and of the worker may import the registry, and only those two packages may depend on it", () => {
+    // The two lists are these: a third file or a third package is seen here.
+    expect(MAY_IMPORT_REGISTRY).toEqual(["apps/api/src/main.ts", "apps/worker/src/main.ts"]);
+    expect(MAY_DEPEND_ON_REGISTRY).toEqual(["apps/api", "apps/worker"]);
     for (const file of MAY_IMPORT_REGISTRY) {
       expect(
         sources().map((source) => source.path),
@@ -322,6 +350,18 @@ describe("what the core side may import of the packs (ADR 0012, ADR 0014)", () =
       expect(THE_REGISTRY.test(line), line).toBe(true);
       expect(A_PACK.test(line), line).toBe(false);
       expect(THE_INTERFACE.test(line), line).toBe(false);
+    }
+    // A string that begins as the interface or the registry and then leaves it reaches a pack.
+    for (const line of [
+      'import x from "../packs/registry/../booking/src/index.ts";',
+      'import x from "@polyglot-sales-agent/packs-registry/node_modules/@polyglot-sales-agent/pack-booking";',
+      'import x from "@polyglot-sales-agent/pack-interface/../pack-booking";',
+      'import x from "../../pack-interface/../packs/booking/src/index.ts";',
+    ]) {
+      expect(reachesAPack(line), line).toBe(true);
+    }
+    for (const line of [...theInterface, ...registry, ...neither]) {
+      expect(A_WAY_ROUND.test(line), line).toBe(false);
     }
     for (const line of neither) {
       expect(A_PACK.test(line) || THE_INTERFACE.test(line) || THE_REGISTRY.test(line), line).toBe(

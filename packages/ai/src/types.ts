@@ -146,16 +146,3 @@ export interface LlmAdapter {
   generate(request: LlmRequest, signal: AbortSignal): Promise<AdapterAnswer>;
   health(signal: AbortSignal): Promise<Health>;
 }
-
-declare const checked: unique symbol;
-
-/**
- * What the rest of the code calls. Made only by `bounded`: an adapter is
- * not one, so the time bound and the check of the answer cannot be left
- * out.
- */
-export interface LlmClient {
-  readonly [checked]: true;
-  generate(request: LlmRequest): Promise<LlmResult>;
-  health(): Promise<Health>;
-}

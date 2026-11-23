@@ -135,8 +135,10 @@ Proposed by the agent with the code.
   what the provider said, unchecked, or a typed failure. One function,
   `bounded`, makes a client of an adapter: it keeps the time and checks
   the answer against the structure. The rest of the code takes a client,
-  so the bound and the check cannot be left out. "A wrapper around every
-  adapter writes the trace" still holds; it goes outside this one.
+  which is a class nothing else can construct, copy with a method
+  replaced or write by hand, so the bound and the check cannot be left
+  out. "A wrapper around every adapter writes the trace" still holds; it
+  is added in the same file as `bounded`, not built by a caller.
 - **The request carries the assembled text,** with the names and versions
   of the prompts it was made from, not "a prompt name and version": the
   adapter does not read files.
@@ -151,7 +153,8 @@ Proposed by the agent with the code.
 - **The structure has four parts:** reply, claims, flags, tool calls. An
   answer asks for tools or replies, not both. The seven flags and the
   core's four claim kinds are named in `packages/core/src/names.ts`.
-- **Confirmation, as built in U4:** the import-boundary test is a list of
-  known providers' packages; a library it does not know, or a plain HTTP
-  call, passes. Each typed failure is driven through the scripted
+- **Confirmation, as built in U4:** the import-boundary test walks the
+  repository from its root with a list of known providers' packages; a
+  library it does not know, a name put together from parts, or a plain
+  HTTP call, passes. Each typed failure is driven through the scripted
   adapter. The trace and prompt-assembly tests are U6's and U7's.

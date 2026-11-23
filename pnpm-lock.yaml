@@ -129,9 +129,6 @@ importers:
       '@polyglot-sales-agent/core':
         specifier: workspace:*
         version: link:../core
-      '@polyglot-sales-agent/pack-interface':
-        specifier: workspace:*
-        version: link:../pack-interface
       yaml:
         specifier: 2.9.1
         version: 2.9.1

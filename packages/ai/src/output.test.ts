@@ -97,6 +97,14 @@ describe("an answer that keeps the structure", () => {
     expect(Object.isFrozen(copied)).toBe(true);
     expect(Object.isFrozen(copied.list)).toBe(true);
     expect(Object.isFrozen(copied.list[1])).toBe(true);
+    // The list of calls and each call are frozen too.
+    expect(Object.isFrozen(result.output.toolCalls)).toBe(true);
+    expect(Object.isFrozen(result.output.toolCalls[0])).toBe(true);
+    // The copy has no prototype: a key is only what the model wrote, and
+    // `toString` on it is not a function unless the model wrote one.
+    expect(Object.getPrototypeOf(copied)).toBeNull();
+    expect(Object.getPrototypeOf(copied.list[1])).toBeNull();
+    expect((copied as Record<string, unknown>)["toString"]).toBeUndefined();
   });
 
   test("all seven flags are known, and may come with a reply or with a request for tools", () => {
@@ -388,6 +396,89 @@ describe("an answer that does not", () => {
     expect(read(good({ ...badFlag, ...badClaim }))).toEqual(refused("flag"));
     expect(read(asks(badCall, badFlag))).toEqual(refused("flag"));
     expect(read(asks(badCall, badClaim))).toEqual(refused("claim"));
+    // Too many of a later kind does not come before a fault of an earlier one.
+    const many = Array.from({ length: CLAIMS_MAX + 1 }, () => ({
+      kind: "price",
+      item: "1",
+      value: "1",
+    }));
+    expect(read(good({ ...badFlag, claims: many }))).toEqual(refused("flag"));
+    const calls = Array.from({ length: TOOL_CALLS_PER_ROUND_MAX + 1 }, (_, index) =>
+      call({ id: `c${index}` }),
+    );
+    expect(read(asks(calls, badFlag))).toEqual(refused("flag"));
+    expect(read(asks(calls, { claims: many }))).toEqual(refused("claim"));
+  });
+
+  test("a value is read once: one that answers differently the second time cannot pass as what it first said", () => {
+    const twice = (first: unknown, second: unknown): unknown[] => {
+      const list: unknown[] = [];
+      let reads = 0;
+      Object.defineProperty(list, 0, {
+        enumerable: true,
+        get: () => {
+          reads += 1;
+          return reads === 1 ? first : second;
+        },
+      });
+      return list;
+    };
+    // An accessor on a list is not plain data at all.
+    expect(read(good({ flags: twice("emergency", "asks-to-stop") }))).toEqual(refused("shape"));
+    expect(
+      read(
+        good({
+          claims: twice(
+            { kind: "price", item: "1", value: "1" },
+            { kind: "price", item: {}, value: "1" },
+          ),
+        }),
+      ),
+    ).toEqual(refused("shape"));
+    // Nor is a list with something on it besides its items, or a list of another kind.
+    const extra: unknown[] = [];
+    (extra as unknown as Record<string, unknown>)["note"] = "x";
+    expect(read(good({ flags: extra }))).toEqual(refused("shape"));
+    expect(read(good({ claims: extra }))).toEqual(refused("shape"));
+    expect(read(asks(extra))).toEqual(refused("shape"));
+    class Many extends Array<string> {}
+    expect(read(good({ flags: Many.from(["emergency"]) }))).toEqual(refused("shape"));
+    const inArguments = [1, 2];
+    (inArguments as unknown as Record<string, unknown>)["extra"] = "x";
+    expect(read(asks([call({ arguments: { list: inArguments } })]))).toEqual(refused("tool-call"));
+  });
+
+  test("it never throws: a value that will not be looked at is a fault of shape", () => {
+    const refuses = new Proxy(
+      {},
+      {
+        getPrototypeOf: () => {
+          throw new Error("no");
+        },
+        ownKeys: () => {
+          throw new Error("no");
+        },
+      },
+    );
+    const { proxy: revoked, revoke } = Proxy.revocable({}, {});
+    revoke();
+    const throwing = good();
+    Object.defineProperty(throwing, "more", {
+      enumerable: true,
+      get: () => {
+        throw new Error("no");
+      },
+    });
+    for (const value of [
+      refuses,
+      revoked,
+      throwing,
+      good({ claims: refuses }),
+      good({ flags: revoked }),
+    ]) {
+      expect(read(value)).toEqual(refused("shape"));
+    }
+    expect(read(asks([call({ arguments: refuses })]))).toEqual(refused("tool-call"));
   });
 
   test("nothing is repaired: an answer one fault from good is refused whole", () => {

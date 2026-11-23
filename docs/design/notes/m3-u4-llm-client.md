@@ -1,7 +1,9 @@
 # Design note: the model client, its scripted stand-in, the prompt loader and the pack packages (M3 unit U4)
 
 2026-11-23 · issue #303 · written before the code · second version, after
-a review of the first (`docs/reviews/2026-11-23-m3-u4-design-review.md`)
+a review of the first (`docs/reviews/2026-11-23-m3-u4-design-review.md`) ·
+built in the same pull request; "As built" at the end says where the
+code differs
 
 U4 builds the seam every later unit calls a model through, with no model
 behind it: the interface of ADR 0005, a scripted client for the tests, a
@@ -243,7 +245,7 @@ A change to one therefore touches a path the eval plan gates.
 | A reply's length (O7) | 1,200 code points | Several short paragraphs |
 | Output tokens on one call | 4,096 | Below |
 | Rounds of tool calls in one reply | 4 | A fifth answer that again asks for tools is a failed output check: the fallback, and nothing counted against the provider |
-| Tool calls in one round | 4 | Section 3 |
+| Tool calls in one round | 4, each with an identifier of at most 100 code points and arguments of at most 2,000 as JSON, 5 levels deep | Section 3 |
 | Claims in one answer | 30 | A week of opening hours is 14 values; a list of prices beside it fits |
 | A batch's customer text | 8,000 code points | Below |
 | A prompt file | 20,000 code points | Paid on every call |
@@ -333,8 +335,8 @@ client in unit, integration and end-to-end tests (ADR 0005).
 | # | Case | Result |
 | --- | --- | --- |
 | F1 | More calls than steps | A thrown error that says so. Through `bounded` it reaches the caller (C5), so a test that did not expect a call fails |
-| F2 | Steps left over | `remaining()` is not 0; a test asserts it |
-| F3 | What was asked | `calls` holds each request, so a test can read what the model was given |
+| F2 | Steps left over, or a call beyond the script whose error something swallowed | `assertDone()` fails; a test ends with it. `remaining()` alone cannot tell a script used up from one overrun |
+| F3 | What was asked | `calls` holds a copy of each request as it was at the call |
 | F4 | The same script twice, calls made one after another | The same results: no clock, no randomness. Calls that overlap take steps in the order they start, which a test should not rely on |
 | F5 | `health()` | Scripted the same way, by its own list; `ok` when the list is empty |
 
@@ -389,15 +391,15 @@ canary)`:
 | P1 | A prompt that is there and well formed | Its text and its `meta` |
 | P2 | A name or a version that is not there | An error that names both; no fallback to another version |
 | P3 | A name that is not 1 to 40 of a to z, digits and hyphens, starting with a letter; a version that is not a whole number from 1 to 9,999 | Refused before the disk is touched: no `..`, no path |
-| P4 | A folder or file that, followed through links, is outside `root` | Refused |
+| P4 | A file, or a folder on the way to it, that is a link, whether it leads outside `root` or stays inside | Refused. `root` itself may be reached through a link |
 | P5 | `meta.yaml` missing; not YAML; with a key twice, an anchor, an alias or a second document; missing a key or with another; a value of the wrong kind; `version` written as `"1"`, `01`, `1.0`, `1e0` or `0x1`; a name or version that is not its folder's | An error that names the file and the key |
-| P6 | `CHANGELOG.md` missing, or with no heading for this version (`## <version>`) | Refused |
+| P6 | `CHANGELOG.md` missing, or with no heading for this version (`## <version>`, alone on its line or followed by a space) | Refused |
 | P7 | A prompt file that is empty, not UTF-8, over 20,000 code points, or with a control character other than a line break | Refused |
 | P8 | The core prompt, assembled | Its text with the canary in place of the one placeholder, written exactly `{{canary}}` |
 | P9 | A core prompt with no placeholder, or with two | Refused: the canary check (O6) would be blind |
 | P10 | `{{` or `}}` anywhere else in a prompt or a fragment, `{{ canary }}` with spaces included | Refused: nothing else is ever filled in, so no customer's or owner's text can enter the instructions (T13). An example that needs two braces together writes them apart; the README says so |
 | P11 | A canary that is not 16 to 64 of the letters a to z, A to Z and digits | Refused |
-| P12 | A pack with a fragment | The core's text, an empty line, the fragment's text. No line is written by code. The result lists both names and versions, for the trace (U6) |
+| P12 | A pack with a fragment | The core's text, two line breaks, the fragment's text. No line is written by code. The result lists both names and versions, for the trace (U6) |
 | P13 | A pack with no fragment | The core's text alone |
 | P14 | A fragment with a placeholder | Refused, by P10 |
 | P15 | The same inputs twice | The same text, byte for byte |
@@ -468,3 +470,72 @@ cost (U6); the reply prompt, the turn's loop, tools, what of a session a
 call is given, where the canary comes from (U7); the output checks and
 what a claim must equal (U9); acting on any flag (U8, U10, U11); the
 session's token budget (U12); retries and degraded mode (U15).
+
+## As built
+
+Where the code differs from the sections above, or adds what they left
+open. Most of it answers the code review
+(`docs/reviews/2026-11-23-gate4-u4-llm-client.md`).
+
+- **A client is a class, not an interface** (section 2). `LlmClient` has
+  a private part, so that nothing else can be one: not an adapter, not an
+  object written by hand, and not a copy of a client with a method
+  replaced. `bounded` is still the only way to make one. Whatever is put
+  around a call later, U6's trace for one, is therefore added inside
+  `packages/ai/src/bounded.ts`, not built by its caller. A file of
+  compile-time checks holds each of these.
+- **A request is checked before the call too:** its system text, prompts,
+  messages, tools by name and claim kinds must be there, or the call is
+  refused with a `TypeError` before the adapter is asked (and paid).
+- **What an adapter returns is checked:** token counts, a model's name of
+  one line and at most 200 code points, a failure's code from the list,
+  a health that is ok or one of the two failures. Anything else is an
+  `AdapterFault`, thrown like C5.
+- **`readOutput` reads a value once and never throws** (section 3). Every
+  part is first copied into objects and lists made there; a list must be
+  an ordinary array with an item at every place and nothing else on it.
+  A value that will not be looked at is `shape`, or `tool-call` where it
+  is a tool call's arguments. The copy of the arguments has no
+  prototype.
+- **A tab or a carriage return in an answer is `shape`** (S5), like any
+  control character but a line break. This is a known cost of the same
+  kind as the unknown flag: a model that writes a tab in a list loses the
+  customer that answer. U17 counts how often.
+- **The limits of one answer cannot all be met at once** (section 4). The
+  worked example speaks of a reply and its claims. Four tool calls with
+  arguments at their limit are 8,000 code points, far more than the
+  output limit holds at any price per code point: such an answer is
+  `truncated`.
+- **A tool call's identifier is at most 100 code points** (section 3); it
+  is in the glossary's row and was missing from section 4's table.
+- **The channel's limit** (T3): the repository's own stand-in for the
+  channel refuses a text over 4,096 characters. That is the stand-in's
+  number, not one read from Meta's page for this unit; 8,000 is above it.
+- **The loader refuses every link** (P4), not only one that leaves the
+  folder: a link inside it would give one version's text under another's
+  name. It also refuses a tag in `meta.yaml` (`!!str 1`), and takes
+  `owner`, `model` and `intended_use` as one line each.
+- **`assemblePrompt` keeps the loader's rules itself,** so a prompt that
+  did not come from `loadPrompt` is checked all the same, and refuses a
+  canary that the prompt's own text already holds.
+- **The scan of `prompts/`** also leaves alone a clock time, an amount
+  with two or three decimals and a number with its thousands marked,
+  which a prompt's examples are made of. It reads a file that is a link.
+- **The provider test walks the repository from its root,** so a folder
+  added later is read without being named. It still knows only its list
+  of names.
+- **The boundary test** (B3, B4): a string that begins as the interface
+  or the registry and then goes up or into what is installed is counted
+  as a pack. Its three lists are pinned. It cannot see a name put
+  together from parts, a path with backslashes, or another case of a
+  folder's name.
+- **`apps/ops` has the registry as a development dependency,** for the
+  test of R6 alone. B4's "only the api and the worker may depend on it"
+  is about the folders the boundary test scans, and `apps/ops` is not
+  one of them.
+- **`packages/ai` does not depend on the interface package yet.** Nothing
+  in it uses a pack's type until the turn (U7).
+- **`prompts/**` is checked out with line feeds** (`.gitattributes`): the
+  loader refuses a carriage return in a prompt.
+- **Not written:** a test on a disk that ignores case, or on Windows; a
+  test that `prompts/` reaches the image (U7, with the first prompt).

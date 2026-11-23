@@ -519,7 +519,13 @@ M0 Inception met its exit criteria on 2026-11-16; see
   `packages/packs/registry`, `faq-only` and `booking` as packs with a
   name, `packages/ai`, and the boundary test's three import rules. No
   provider, no prompt and nothing a customer sees: the reply is still
-  the echo. No eval score exists (rows 31 and 32).
+  the echo. No eval score exists (rows 31 and 32). A third agent
+  reviewed the code (`reviews/2026-11-23-gate4-u4-llm-client.md`): 18
+  findings, none High, three Medium, and 24 of 130 mutants alive, five
+  of them equivalent. The Medium ones: nothing tied the limits to the
+  documents that state them; a client could be made without the
+  function that bounds and checks it; the provider test did not read
+  the whole repository. All three are fixed, with most of the Low ones.
 
 ## Next
 

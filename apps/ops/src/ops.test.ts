@@ -576,7 +576,10 @@ describe("a command that fails, or is written wrongly", () => {
   test("the packs a tenant can be created on are the registry's, and the program itself does not import it (ADR 0014)", () => {
     expect([...PACKS].sort()).toEqual(Object.keys(REGISTRY).sort());
     // `ops` keeps its own list: only this test knows the registry.
-    for (const file of readdirSync(new URL(".", import.meta.url), { encoding: "utf8" })) {
+    for (const file of readdirSync(new URL(".", import.meta.url), {
+      encoding: "utf8",
+      recursive: true,
+    })) {
       if (file.endsWith(".ts") && !file.endsWith(".test.ts")) {
         const source = readFileSync(new URL(file, import.meta.url), "utf8");
         expect(source, file).not.toMatch(/packs-registry|packs\/registry|pack-(booking|faq-only)/);
