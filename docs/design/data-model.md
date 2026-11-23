@@ -69,13 +69,13 @@ Not drawn: `audit_log`, `jobs`, `channel_routes`, `unroutable_events`,
 | --- | --- |
 | `name` | |
 | `pack` | Exactly one (`booking`, `faq-only`) |
-| `time_zone`, `default_language`, `template_languages`, `currency` | Required settings |
-| `support_contact`, `notification_email` | Required settings. Business contact details, not customer data |
-| `business_hours`, `opening_hours` | Per weekday, zero or more periods |
+| `time_zone`, `default_language`, `template_languages`, `currency` | Required settings. `currency` is built in M3 unit U3, null until a profile is loaded, and is a code the platform's own list holds; `template_languages` is not built |
+| `support_contact`, `notification_email` | Required settings. Business contact details, not customer data. Built in U3: the first is a phone number in international form or an email address, and is given to the model; the second is not |
+| `business_hours`, `opening_hours` | Per weekday, zero or more periods. Built in U3 as a list of `{weekday, opens, closes}`, as the API design has them, with `opening_hours_updated_at`. The application role may change these six settings of its own row and nothing else of it |
 | *(none for bookings)* | The booking settings are **not** columns here. They are the booking pack's, held in `pack_settings` (below; ADR 0012) |
 | `quiet_start`, `quiet_end` (nullable pair) | Quiet hours |
 | `escalation_minutes`, `message_retention_months` | |
-| `answering` | Derived and stored: required settings present and credentials verified (state machines, section 9) |
+| `answering` | Not built. As of U3 a function says which required settings are missing and whether a channel is connected; it is not stored. Derived and stored: required settings present and credentials verified (state machines, section 9) |
 | `not_answering_notified_at` | So the owner and operator are emailed once per outage |
 
 Allowed ranges are the glossary's settings table, enforced by check
@@ -301,10 +301,14 @@ data side.
 
 ### `services` — tenant-owned
 
-`name`, `description`, `price_minor`, `active`, `updated_at` are the core's.
+`name`, `description`, `price_minor`, `active`, `updated_at` are the core's
+(built in M3 unit U3; a name is unique within a tenant whatever its case;
+lengths are the API design's).
 `duration_minutes` and `capacity` belong to the booking pack and are held in
 its own table, `booking_service_settings`, keyed by service (ADR 0012). A
-service with bookings is deactivated, not deleted.
+service with bookings is deactivated, not deleted. Until a pack has rows
+that point at one, the operator's loader deletes a service that a profile
+file no longer names.
 
 ### `booking_service_settings` — tenant-owned, booking pack
 
@@ -316,7 +320,8 @@ row when the owner adds a service.
 ### `policies` — tenant-owned
 
 `title`, `body`, `updated_at`. Owner-entered text; delimited as data when
-given to the model.
+given to the model. Built in M3 unit U3; a title is unique within a tenant
+whatever its case.
 
 ### `blocked_periods` — tenant-owned
 
@@ -416,7 +421,10 @@ job, claiming and running jobs, and the worker's heartbeat with its
 readiness probe. In the request path, as built in M2: recording an event
 for a number no tenant has (`unroutable_events`), recording a body that
 could not be read (`unparsed_events`) with its `operator-alert` job, and
-the API's readiness check. Nothing else may use the cross-tenant role.
+the API's readiness check. Nothing else may use the cross-tenant role. It
+has no privilege on `services` or `policies` and cannot change a tenant's
+settings: the operator's `profile` commands work as the application role
+inside one tenant's scope (ADR 0011, amendment of 2026-11-23).
 
 What enforces it today is narrower than "which modules": a test fails if
 any source file outside `packages/db` names the database driver, imports

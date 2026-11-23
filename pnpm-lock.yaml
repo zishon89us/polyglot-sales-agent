@@ -82,6 +82,9 @@ importers:
 
   apps/ops:
     dependencies:
+      '@polyglot-sales-agent/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@polyglot-sales-agent/db':
         specifier: workspace:*
         version: link:../../packages/db

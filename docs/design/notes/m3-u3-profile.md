@@ -1,7 +1,9 @@
 # Design note: the business profile, a tenant's settings, and what the model is given (M3 unit U3)
 
 2026-11-23 · issue #302 · written before the code · second version, after
-a review of the first (`docs/reviews/2026-11-23-m3-u3-design-review.md`)
+a review of the first (`docs/reviews/2026-11-23-m3-u3-design-review.md`) ·
+built in the same pull request; "As built" at the end says where the
+code differs
 
 U3 stores what a business says about itself, gives an operator a way to
 load it (no dashboard exists before M4), and builds the one function that
@@ -282,3 +284,38 @@ column; the operator's usage text.
   past midnight belongs to: U9.
 - Step 8 of the order of checks, and a profile for the development
   set-up: U10.
+
+## As built
+
+Where the code differs from the sections above, or adds what they left
+open:
+
+- **The two fixtures** (`packages/core/fixtures/`): a salon with twelve
+  services and five policies measures 1,515 code points in English and
+  1,271 in Arabic. The budget of 40,000 is about twenty-six such
+  businesses.
+- **L11, what is recorded where.** The operator's log holds the tenant,
+  the file's SHA-256 and how many services and policies the file has: its
+  first row is written before anything is done, so it cannot hold what
+  was changed. The counts of added, changed and removed are in the
+  tenant's audit log, with the name the operator gave and the same hash,
+  and are printed.
+- **A name with a line break or a tab in it** is not refused: white space
+  in a name or a title is made one space. Only a description and a body
+  keep a line break.
+- **`profile show` prints each text in quotes,** as `ops` prints every
+  name: a line break shows as its code, and so do the joiners and
+  direction marks that the loader allows. Text in Urdu or Hindi is
+  therefore safe on the screen and harder to read there.
+- **L10** is tested by a profile read while another transaction has
+  changed all three tables and not committed. That the read is one
+  statement is by reading the code; no test would fail if it became two.
+- **L9** is tested by a load made to wait on the tenant's row, not by two
+  loads at once.
+- **`ops` depends on `packages/core`** as well as on the database package:
+  the file's rules are the core's.
+- **Not written:** a test that the application role needs no table but
+  the three to read a profile (M9 is shown by the query's text and by
+  searching the profile for a seeded contact's number, identifier and
+  words); a test of exit code 3 for the two new commands, which share the
+  path every command takes.

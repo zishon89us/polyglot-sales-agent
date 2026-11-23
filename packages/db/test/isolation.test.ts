@@ -34,7 +34,10 @@ const PRIVILEGES = {
     conversations: "INSERT,SELECT,UPDATE",
     jobs: "DELETE",
     messages: "INSERT,SELECT,UPDATE",
+    policies: "DELETE,INSERT,SELECT,UPDATE",
+    services: "DELETE,INSERT,SELECT,UPDATE",
     sessions: "INSERT,SELECT,UPDATE",
+    // To read; what it may change is by column, below.
     tenants: "SELECT",
   },
   psa_cross: {
@@ -104,6 +107,8 @@ describe("the seed covers every tenant-owned table", () => {
       "contacts",
       "conversations",
       "messages",
+      "policies",
+      "services",
       "sessions",
       "tenants",
     ]);
@@ -454,8 +459,10 @@ describe("privileges", () => {
        WHERE attacl IS NOT NULL AND attrelid IN
          (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)`,
     );
-    // The two tables with privileges by column: `jobs` (ADR 0004, amendment) and
-    // `operator_log`, where the cross-tenant role may not choose a row's identifier or time.
+    // The three tables with privileges by column: `jobs` (ADR 0004, amendment);
+    // `operator_log`, where the cross-tenant role may not choose a row's identifier or time;
+    // and `tenants`, of which the application role may change its own row's settings and
+    // nothing else: not its name, its pack, its time zone or its language.
     const of = (table: string) =>
       columns.rows
         .filter((row) => row.table === table)
@@ -464,7 +471,18 @@ describe("privileges", () => {
     expect([...new Set(columns.rows.map((row) => row.table))].sort()).toEqual([
       "jobs",
       "operator_log",
+      "tenants",
     ]);
+    expect(of("tenants")).toEqual(
+      [
+        "business_hours",
+        "currency",
+        "notification_email",
+        "opening_hours",
+        "opening_hours_updated_at",
+        "support_contact",
+      ].sort(),
+    );
     expect(of("jobs")).toEqual(
       ["id", "payload", "run_at", "state", "subject_id", "tenant_id", "type"].sort(),
     );

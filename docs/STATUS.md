@@ -482,8 +482,12 @@ M0 Inception met its exit criteria on 2026-11-16; see
   contradicted the glossary; a wrong statement about what `ops` records).
   The note was rewritten (`reviews/2026-11-23-m3-u3-design-review.md`).
   Rows 41 and 42 ask about the limits and about what of a business
-  reaches the model. **The rewritten note has not been reviewed again;**
-  the review of the code checks it. No code yet.
+  reaches the model. Then the code: migration 0007 (`services`,
+  `policies`, six settings on a tenant), the rules a profile file must
+  keep, the one function that hands a profile to a turn, and the
+  operator's `profile load` and `profile show`, which work as the
+  tenant's own role so that the cross-tenant role gains nothing. Nothing
+  a customer sees has changed.
 
 ## Next
 

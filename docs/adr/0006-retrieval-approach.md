@@ -107,3 +107,24 @@ budget; the editor rejects data beyond the budget with a clear message (M5).
   budget. Vector search can then be added behind the same profile-building
   step.
 - The size budget is unset until M3 (it depends on OQ-9).
+
+## Amendment, 2026-11-23 (M3 unit U3; finding A43, #228; decisions rows 41 and 42)
+
+Proposed by the agent with the code that builds the profile; the
+maintainer's answer to rows 41 and 42 confirms or changes it.
+
+- **No last-updated time in the prompt.** "Specifics" says each item is
+  given with its last-updated time. It is not: the review of the design
+  pointed out that this puts dates in front of the model that no claim
+  kind covers. The times are stored, and are for the owner's screen.
+- **The support contact is part of the profile;** business hours and the
+  notification address are not.
+- **The budget is provisional and in code points:** 40,000 of text, with
+  at most 100 services and 30 policies. No model is chosen, so no token
+  could be counted. Two fixture profiles of a small business measure
+  1,515 (English) and 1,271 (Arabic). The unit that measures the models
+  sets the budget that stays, in tokens.
+- **"The editor says so"** is the operator's loader until there is an
+  editor (M5): a file over the budget is refused whole.
+- **The calendar** that the guardrail policy adds to a prompt is not part
+  of the profile and not built: dates are a pack's (ADR 0014).

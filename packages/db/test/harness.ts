@@ -206,6 +206,15 @@ export async function seedTenant(
        VALUES ($1, 'seeded', 'contact', $2)`,
       [tenantId, contactId],
     );
+    await tx.query(
+      `INSERT INTO services (tenant_id, name, description, price_minor)
+       VALUES ($1, $2, 'a description', 1500)`,
+      [tenantId, `Service ${label}`],
+    );
+    await tx.query("INSERT INTO policies (tenant_id, title, body) VALUES ($1, $2, 'a body')", [
+      tenantId,
+      `Policy ${label}`,
+    ]);
     return { tenantId, channelAccountId, contactId, conversationId, sessionId, receivingNumberId };
   });
 }
