@@ -475,12 +475,20 @@ M0 Inception met its exit criteria on 2026-11-16; see
   its design note (`design/notes/m3-u3-profile.md`): what a business
   stores about itself, what of it the model is given and what is not,
   whether a tenant is answering, and an operator's command to load a
-  profile from a file. Row 41 asks about the size limits. No code yet.
+  profile from a file. A second agent reviewed the note: 32 findings,
+  five High (the cross-tenant role would have gained the right to write
+  every tenant's prices; a rule on characters that refused correct Urdu,
+  Hindi and Bengali text; a support contact and a currency that
+  contradicted the glossary; a wrong statement about what `ops` records).
+  The note was rewritten (`reviews/2026-11-23-m3-u3-design-review.md`).
+  Rows 41 and 42 ask about the limits and about what of a business
+  reaches the model. **The rewritten note has not been reviewed again;**
+  the review of the code checks it. No code yet.
 
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 41 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 42 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U2, U3, U4 and U5, with U0 still open for four
    answers. U3 builds on rows 34 and 36 as well, and U4 on row 37. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
@@ -536,7 +544,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 41 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 42 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 
