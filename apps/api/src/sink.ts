@@ -38,18 +38,35 @@ function split(events: readonly ChannelEvent[]): {
         errorCode: event.errorCode,
       });
     } else {
+      const content = event.content;
       messages.push({
         channelMessageId: event.channelMessageId,
         phone: event.from.phone,
         userId: event.from.userId,
-        kind: event.content.type === "text" ? "text" : event.content.channelType,
-        body: event.content.type === "text" ? event.content.body : null,
         sentAt: event.sentAt,
+        ...(content.type === "text"
+          ? { kind: "text", body: content.body, captionOf: content.captionOf ?? null }
+          : content.type === "button"
+            ? {
+                kind: "button",
+                body: null,
+                buttonPayload: content.payload,
+                inReplyTo: content.inReplyTo,
+              }
+            : {
+                // A channel's name for a type is never stored under one of
+                // this system's own names for a kind.
+                kind: OWN_KINDS.includes(content.channelType) ? "unknown" : content.channelType,
+                body: null,
+              }),
       });
     }
   }
   return { messages, statuses };
 }
+
+/** The kinds this system gives a message itself (data model, `messages.kind`). */
+const OWN_KINDS: readonly string[] = ["text", "button", "template"];
 
 /** All the events of one webhook for one receiving number, in the order they came. */
 function byNumber(batches: readonly EventBatch[]): Map<string, ChannelEvent[]> {

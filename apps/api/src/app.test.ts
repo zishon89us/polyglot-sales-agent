@@ -192,6 +192,92 @@ describe("a validly signed event", () => {
     expect(await messagesOf("a")).toMatchObject([{ kind: "image", body: null }]);
   });
 
+  describe("taps and captions (M3 unit U5), from the webhook to the row", () => {
+    const later = (name: string): Buffer =>
+      readFileSync(`${FIXTURES.replace("2026-11-18", "2026-11-24")}${name}`);
+    const stored = async () =>
+      (
+        await withTenant(app, tenant.a, (tx) =>
+          tx.query(
+            "SELECT kind, body, button_payload, in_reply_to, caption_of FROM messages ORDER BY created_at",
+          ),
+        )
+      ).rows;
+    const changed = (name: string, change: (message: Record<string, unknown>) => void): Buffer => {
+      const body = JSON.parse(later(name).toString("utf8"));
+      change(body.entry[0].changes[0].value.messages[0]);
+      return Buffer.from(JSON.stringify(body));
+    };
+
+    test("a tap on a reply button and one on a template's button", async () => {
+      expect((await signed(later("inbound-button-reply.json"))).statusCode).toBe(200);
+      expect((await signed(later("inbound-template-button.json"))).statusCode).toBe(200);
+      expect(await stored()).toEqual([
+        {
+          kind: "button",
+          body: null,
+          button_payload: "core.stop",
+          in_reply_to: "wamid.SYNTHETIC0201",
+          caption_of: null,
+        },
+        {
+          kind: "button",
+          body: null,
+          button_payload: "core.start",
+          in_reply_to: "wamid.SYNTHETIC0201",
+          caption_of: null,
+        },
+      ]);
+    });
+
+    test("a caption is the customer's text; a picture without one is still unread", async () => {
+      await signed(later("inbound-image-caption.json"));
+      await signed(later("inbound-image-no-caption.json"));
+      expect(await stored()).toMatchObject([
+        { kind: "text", body: "Can you do this style on Thursday?", caption_of: "image" },
+        { kind: "image", body: null, caption_of: null },
+      ]);
+    });
+
+    test("a tap that cannot be read is stored as unread, with nothing of what it carried", async () => {
+      await signed(
+        changed("inbound-button-reply.json", (m) => {
+          m["interactive"] = { type: "button_reply", button_reply: { id: "core stop" } };
+        }),
+      );
+      await signed(
+        changed("inbound-template-button.json", (m) => {
+          m["button"] = { payload: "" };
+        }),
+      );
+      expect(await stored()).toEqual([
+        {
+          kind: "interactive",
+          body: null,
+          button_payload: null,
+          in_reply_to: null,
+          caption_of: null,
+        },
+        {
+          kind: "quick-reply",
+          body: null,
+          button_payload: null,
+          in_reply_to: null,
+          caption_of: null,
+        },
+      ]);
+    });
+
+    test("a channel's own type named like one of this system's kinds is stored as unknown", async () => {
+      await signed(
+        changed("inbound-image-no-caption.json", (m) => {
+          m["type"] = "template";
+        }),
+      );
+      expect(await stored()).toMatchObject([{ kind: "unknown", body: null }]);
+    });
+  });
+
   test("one webhook for two tenants' numbers stores each tenant's part in its own tenant", async () => {
     expect((await signed(fixture("two-numbers.json"))).statusCode).toBe(200);
     expect(await messagesOf("a")).toMatchObject([{ channel_message_id: "wamid.SYNTHETIC0005" }]);

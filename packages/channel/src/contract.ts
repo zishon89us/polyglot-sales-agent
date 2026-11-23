@@ -8,6 +8,7 @@ import {
   type ChannelEvent,
   DELIVERY_STATUSES,
   type Headers,
+  type SendButton,
   type SendFrom,
 } from "./index.ts";
 
@@ -20,6 +21,10 @@ export interface ContractSubject {
   readonly channel: Channel;
   /** A webhook, signed as the channel would, carrying one text message and one status. */
   signed(): SignedWebhook;
+  /** A signed webhook carrying one tap on a button with this payload, answering this message. */
+  signedTap(payload: string, inReplyTo: string): SignedWebhook;
+  /** A signed webhook carrying one picture with these words typed under it. */
+  signedCaption(body: string): SignedWebhook;
   /** The name of the header that carries the signature. */
   readonly signatureHeader: string;
   /** Where a send would be accepted, for the send tests. */
@@ -109,6 +114,124 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
         }
       },
     );
+
+    test("says what it can carry", async () => {
+      const { limits } = (await subject()).channel;
+      const counts = [limits.textMax];
+      if (limits.buttons !== null) {
+        const { max, bodyMax, titleMax, payloadMax } = limits.buttons;
+        counts.push(max, bodyMax, titleMax, payloadMax);
+        expect(bodyMax).toBeLessThanOrEqual(limits.textMax);
+        expect(payloadMax).toBeLessThanOrEqual(256);
+      }
+      for (const count of counts) {
+        expect(Number.isInteger(count) && count > 0).toBe(true);
+      }
+    });
+
+    test("a tap on a button is read as what the button carried and the message it answers, not as text", async () => {
+      const { channel, signedTap } = await subject();
+      const { rawBody, headers } = signedTap("core.stop", "sent-message-1");
+      expect(channel.verifyWebhook(rawBody, headers)).toBe(true);
+      const parsed = channel.parseWebhook(rawBody);
+      const events = parsed.ok ? parsed.batches.flatMap((batch) => batch.events) : [];
+      expect(events).toHaveLength(1);
+      events.forEach(check);
+      expect(events[0]).toMatchObject({
+        kind: "message",
+        content: { type: "button", payload: "core.stop", inReplyTo: "sent-message-1" },
+      });
+      expect(Object.keys((events[0] as { content: object }).content).sort()).toEqual([
+        "inReplyTo",
+        "payload",
+        "type",
+      ]);
+    });
+
+    test("words typed under a picture are read as a text that says it was a caption", async () => {
+      const { channel, signedCaption } = await subject();
+      const { rawBody, headers } = signedCaption("Can you do this style?");
+      expect(channel.verifyWebhook(rawBody, headers)).toBe(true);
+      const parsed = channel.parseWebhook(rawBody);
+      const events = parsed.ok ? parsed.batches.flatMap((batch) => batch.events) : [];
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        kind: "message",
+        content: { type: "text", body: "Can you do this style?", captionOf: "image" },
+      });
+    });
+
+    test("a text that is empty or longer than the channel carries is refused before any call", async () => {
+      const { channel, from } = await subject();
+      const to = { phone: "+15550142", userId: null };
+      for (const body of ["", "x".repeat(channel.limits.textMax + 1)]) {
+        expect(await channel.sendText(from, to, body)).toEqual({
+          accepted: false,
+          retryable: false,
+          mayHaveArrived: false,
+          code: "bad-body",
+        });
+      }
+      expect(await channel.sendText(from, to, "x".repeat(channel.limits.textMax))).toMatchObject({
+        accepted: true,
+      });
+    });
+
+    test("a message with buttons is sent within the channel's limits and refused outside them", async () => {
+      const { channel, from } = await subject();
+      const to = { phone: "+15550142", userId: null };
+      const refused = (code: string) => ({
+        accepted: false,
+        retryable: false,
+        mayHaveArrived: false,
+        code,
+      });
+      const one: SendButton[] = [{ payload: "core.stop", title: "Stop" }];
+      const allowed = channel.limits.buttons;
+      if (allowed === null) {
+        expect(await channel.sendButtons(from, to, "hello", one)).toEqual(refused("no-buttons"));
+        return;
+      }
+      const full: SendButton[] = Array.from({ length: allowed.max }, (_, index) => ({
+        payload: `core.b${index}${"x".repeat(allowed.payloadMax - 7)}`,
+        title: `${index}${"t".repeat(allowed.titleMax - 1)}`,
+      }));
+      expect(full[0]?.payload).toHaveLength(allowed.payloadMax);
+      expect(await channel.sendButtons(from, to, "b".repeat(allowed.bodyMax), full)).toEqual({
+        accepted: true,
+        channelMessageId: expect.stringMatching(/\S/),
+      });
+      const bad: readonly (readonly SendButton[])[] = [
+        [],
+        [...full, { payload: "core.more", title: "More" }],
+        [{ payload: "core.stop", title: "t".repeat(allowed.titleMax + 1) }],
+        [{ payload: "core.stop", title: "" }],
+        [{ payload: `core.${"x".repeat(allowed.payloadMax)}`, title: "Stop" }],
+        [{ payload: "core stop", title: "Stop" }],
+        [{ payload: "", title: "Stop" }],
+        ...(allowed.max > 1
+          ? [
+              [
+                { payload: "core.stop", title: "Same" },
+                { payload: "core.start", title: "Same" },
+              ],
+              [
+                { payload: "core.stop", title: "Stop" },
+                { payload: "core.stop", title: "Start" },
+              ],
+            ]
+          : []),
+      ];
+      for (const buttons of bad) {
+        expect(
+          await channel.sendButtons(from, to, "hello", buttons),
+          JSON.stringify(buttons),
+        ).toEqual(refused("bad-buttons"));
+      }
+      for (const body of ["", "b".repeat(allowed.bodyMax + 1)]) {
+        expect(await channel.sendButtons(from, to, body, one)).toEqual(refused("bad-body"));
+      }
+    });
 
     test("a send is answered with an identifier, or with a failure that says whether to retry", async () => {
       const { channel, from } = await subject();

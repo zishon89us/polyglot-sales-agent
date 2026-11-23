@@ -11,14 +11,33 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type {
   Channel,
   ChannelEvent,
+  ChannelLimits,
   ChannelUser,
   EventBatch,
   Headers,
   ParsedWebhook,
+  SendButton,
   SendFrom,
   SendResult,
 } from "@polyglot-sales-agent/channel";
-import { DELIVERY_STATUSES, singleHeader } from "@polyglot-sales-agent/channel";
+import {
+  BUTTON_PAYLOAD,
+  CHANNEL_MESSAGE_ID,
+  checkButtonMessage,
+  checkText,
+  DELIVERY_STATUSES,
+  refusedUnsent,
+  singleHeader,
+} from "@polyglot-sales-agent/channel";
+
+/**
+ * This channel's own limits. Two buttons, where WhatsApp has three: a
+ * caller that assumed another channel's numbers is caught by a test.
+ */
+export const MOCK_LIMITS: ChannelLimits = {
+  textMax: 2_000,
+  buttons: { max: 2, bodyMax: 500, titleMax: 16, payloadMax: 100 },
+};
 
 export const MOCK_SIGNATURE_HEADER = "x-mock-signature";
 export const MOCK_ACCESS_TOKEN = "mock-access-token";
@@ -29,6 +48,8 @@ export interface SentMessage {
   readonly from: SendFrom;
   readonly to: ChannelUser;
   readonly body: string;
+  /** The buttons it carried; none for a plain text. */
+  readonly buttons: readonly SendButton[];
 }
 
 export interface MockChannel extends Channel {
@@ -74,7 +95,14 @@ function revive(raw: unknown): ChannelEvent {
     throw new Error("bad");
   }
   const from = item["from"] as { phone?: unknown; userId?: unknown } | null;
-  const content = item["content"] as { type?: unknown; body?: unknown; channelType?: unknown };
+  const content = item["content"] as {
+    type?: unknown;
+    body?: unknown;
+    channelType?: unknown;
+    captionOf?: unknown;
+    payload?: unknown;
+    inReplyTo?: unknown;
+  };
   const sentAt = new Date(item["sentAt"] as string);
   const phone = from?.phone ?? null;
   const userId = from?.userId ?? null;
@@ -87,12 +115,41 @@ function revive(raw: unknown): ChannelEvent {
     throw new Error("bad");
   }
   if (content?.type === "text" && typeof content.body === "string") {
+    const captionOf = content.captionOf;
+    if (captionOf !== undefined && captionOf !== "image" && captionOf !== "video") {
+      throw new Error("bad");
+    }
     return {
       kind: "message",
       channelMessageId: id,
       from: { phone, userId },
       sentAt,
-      content: { type: "text", body: content.body },
+      content:
+        captionOf === undefined
+          ? { type: "text", body: content.body }
+          : { type: "text", body: content.body, captionOf },
+    };
+  }
+  if (content?.type === "button") {
+    const inReplyTo = content.inReplyTo ?? null;
+    // As the real channel does: a tap whose payload cannot be kept is an
+    // unread message, and what is not an identifier is no identifier.
+    return {
+      kind: "message",
+      channelMessageId: id,
+      from: { phone, userId },
+      sentAt,
+      content:
+        typeof content.payload === "string" && BUTTON_PAYLOAD.test(content.payload)
+          ? {
+              type: "button",
+              payload: content.payload,
+              inReplyTo:
+                typeof inReplyTo === "string" && CHANNEL_MESSAGE_ID.test(inReplyTo)
+                  ? inReplyTo
+                  : null,
+            }
+          : { type: "unsupported", channelType: "tap" },
     };
   }
   if (content?.type === "unsupported" && typeof content.channelType === "string") {
@@ -131,7 +188,7 @@ function parseWebhook(rawBody: Buffer): ParsedWebhook {
 export function createMockChannel(): MockChannel {
   const sent: SentMessage[] = [];
   let failure: SendResult | undefined;
-  return {
+  const channel: MockChannel = {
     name: "mock",
     maxWebhookBytes: 1024 * 1024,
     sent,
@@ -153,21 +210,44 @@ export function createMockChannel(): MockChannel {
       return timingSafeEqual(Buffer.from(given, "hex"), signature(rawBody));
     },
     parseWebhook,
+    limits: MOCK_LIMITS,
     async sendText(from, to, body) {
-      if (failure !== undefined) {
-        const result = failure;
-        failure = undefined;
-        return result;
-      }
-      if (from.accessToken !== MOCK_ACCESS_TOKEN) {
-        return { accepted: false, retryable: false, mayHaveArrived: false, code: "not-authorised" };
-      }
-      if (to.phone === null && to.userId === null) {
-        return { accepted: false, retryable: false, mayHaveArrived: false, code: "no-recipient" };
-      }
-      const channelMessageId = `mock.${sent.length + 1}`;
-      sent.push({ channelMessageId, from, to, body });
-      return { accepted: true, channelMessageId };
+      const refusal = checkText(MOCK_LIMITS, body);
+      return refusal === undefined ? deliver(from, to, body, []) : refusedUnsent(refusal);
+    },
+    async sendButtons(from, to, body, buttons) {
+      const refusal = checkButtonMessage(MOCK_LIMITS, body, buttons);
+      return refusal === undefined
+        ? deliver(
+            from,
+            to,
+            body,
+            buttons.map((button) => ({ payload: button.payload, title: button.title })),
+          )
+        : refusedUnsent(refusal);
     },
   };
+  /** What both sends do once the message itself is in order. */
+  function deliver(
+    from: SendFrom,
+    to: ChannelUser,
+    body: string,
+    buttons: readonly SendButton[],
+  ): SendResult {
+    if (failure !== undefined) {
+      const result = failure;
+      failure = undefined;
+      return result;
+    }
+    if (from.accessToken !== MOCK_ACCESS_TOKEN) {
+      return refusedUnsent("not-authorised");
+    }
+    if (to.phone === null && to.userId === null) {
+      return refusedUnsent("no-recipient");
+    }
+    const channelMessageId = `mock.${sent.length + 1}`;
+    sent.push({ channelMessageId, from, to, body, buttons });
+    return { accepted: true, channelMessageId };
+  }
+  return channel;
 }

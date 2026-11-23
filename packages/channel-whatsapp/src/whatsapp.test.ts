@@ -11,12 +11,15 @@ import {
   parseWebhook,
   registrationChallenge,
   SIGNATURE_HEADER,
+  sendButtons,
   sendText,
   sign,
   verifySignature,
+  WHATSAPP_LIMITS,
 } from "./index.ts";
 
 const FIXTURES = fileURLToPath(new URL("../fixtures/2026-11-18/", import.meta.url));
+const FIXTURES_2026_11_24 = fileURLToPath(new URL("../fixtures/2026-11-24/", import.meta.url));
 const fixture = (name: string): Buffer => readFileSync(`${FIXTURES}${name}`);
 const SECRET = "synthetic-app-secret";
 const CUSTOMER = { phone: "+15550142", userId: "US.10000000000000000042" };
@@ -233,6 +236,308 @@ describe("parseWebhook, on the fixtures of 2026-11-18", () => {
       ["100000000000002", 1],
       ["100000000000004", 1],
     ]);
+  });
+});
+
+describe("parseWebhook, on the fixtures of 2026-11-24: taps and captions", () => {
+  const later = (name: string): Buffer => readFileSync(`${FIXTURES_2026_11_24}${name}`);
+  const first = (raw: Buffer): unknown => {
+    const parsed = parseWebhook(raw);
+    expect(parsed).toMatchObject({ ok: true, skipped: 0, malformed: 0 });
+    return parsed.ok ? parsed.batches[0]?.events[0] : undefined;
+  };
+  /** A fixture with one change made to its message. */
+  const changed = (name: string, change: (message: Record<string, unknown>) => void): Buffer => {
+    const body = JSON.parse(later(name).toString("utf8"));
+    change(body.entry[0].changes[0].value.messages[0]);
+    return Buffer.from(JSON.stringify(body));
+  };
+
+  test("every fixture is covered by a test below", () => {
+    const tested = [
+      "inbound-button-reply.json",
+      "inbound-template-button.json",
+      "inbound-image-caption.json",
+      "inbound-video-caption.json",
+      "inbound-image-no-caption.json",
+      "inbound-list-reply.json",
+    ];
+    const present = readdirSync(FIXTURES_2026_11_24).filter((name) => name.endsWith(".json"));
+    expect(present.sort()).toEqual(tested.sort());
+  });
+
+  test("a tap on a reply button: what the button carried and the message it answers; the title is not passed on", () => {
+    expect(first(later("inbound-button-reply.json"))).toEqual({
+      kind: "message",
+      channelMessageId: "wamid.SYNTHETIC0401",
+      from: CUSTOMER,
+      sentAt: at(1795000000),
+      content: { type: "button", payload: "core.stop", inReplyTo: "wamid.SYNTHETIC0201" },
+    });
+  });
+
+  test("a tap on a template's quick-reply button is read the same way", () => {
+    expect(first(later("inbound-template-button.json"))).toMatchObject({
+      channelMessageId: "wamid.SYNTHETIC0402",
+      content: { type: "button", payload: "core.start", inReplyTo: "wamid.SYNTHETIC0201" },
+    });
+  });
+
+  test("words under a picture or a video are a text that says what it was a caption of", () => {
+    expect(first(later("inbound-image-caption.json"))).toMatchObject({
+      content: { type: "text", body: "Can you do this style on Thursday?", captionOf: "image" },
+    });
+    expect(first(later("inbound-video-caption.json"))).toMatchObject({
+      content: { type: "text", body: "هل هذا متاح؟", captionOf: "video" },
+    });
+  });
+
+  test("a picture with no caption, and an answer to a list, are named and not read", () => {
+    expect(first(later("inbound-image-no-caption.json"))).toMatchObject({
+      content: { type: "unsupported", channelType: "image" },
+    });
+    expect(first(later("inbound-list-reply.json"))).toMatchObject({
+      content: { type: "unsupported", channelType: "interactive" },
+    });
+  });
+
+  test("a typed text has no captionOf at all", () => {
+    const event = first(fixture("inbound-text.json")) as { content: object };
+    expect(Object.keys(event.content).sort()).toEqual(["body", "type"]);
+  });
+
+  test.each([
+    [
+      "no identifier",
+      (m: Record<string, unknown>) => {
+        m["interactive"] = { type: "button_reply", button_reply: { title: "Stop" } };
+      },
+    ],
+    [
+      "an identifier that is not text",
+      (m: Record<string, unknown>) => {
+        m["interactive"] = { type: "button_reply", button_reply: { id: 7 } };
+      },
+    ],
+    [
+      "an empty identifier",
+      (m: Record<string, unknown>) => {
+        m["interactive"] = { type: "button_reply", button_reply: { id: "" } };
+      },
+    ],
+    [
+      "an identifier with a space",
+      (m: Record<string, unknown>) => {
+        m["interactive"] = { type: "button_reply", button_reply: { id: "core stop" } };
+      },
+    ],
+    [
+      "an identifier of 257 characters",
+      (m: Record<string, unknown>) => {
+        m["interactive"] = { type: "button_reply", button_reply: { id: "x".repeat(257) } };
+      },
+    ],
+    [
+      "no button_reply part",
+      (m: Record<string, unknown>) => {
+        m["interactive"] = { type: "button_reply" };
+      },
+    ],
+    [
+      "an interactive part that is a list",
+      (m: Record<string, unknown>) => {
+        m["interactive"] = ["button_reply"];
+      },
+    ],
+    [
+      "no interactive part",
+      (m: Record<string, unknown>) => {
+        delete m["interactive"];
+      },
+    ],
+  ])("a tap with %s is kept as a message that was not read, never dropped", (_name, change) => {
+    const event = first(changed("inbound-button-reply.json", change));
+    expect(event).toMatchObject({
+      kind: "message",
+      channelMessageId: "wamid.SYNTHETIC0401",
+      content: { type: "unsupported", channelType: "interactive" },
+    });
+  });
+
+  test("an identifier of exactly 256 characters is read", () => {
+    const id = `core.${"x".repeat(251)}`;
+    const event = first(
+      changed("inbound-button-reply.json", (m) => {
+        m["interactive"] = { type: "button_reply", button_reply: { id } };
+      }),
+    );
+    expect(event).toMatchObject({ content: { type: "button", payload: id } });
+  });
+
+  test("a template's tap that cannot be read is named quick-reply, never button", () => {
+    for (const button of [undefined, {}, { payload: 7 }, { payload: "a b" }, "core.start"]) {
+      const event = first(
+        changed("inbound-template-button.json", (m) => {
+          m["button"] = button;
+        }),
+      );
+      expect(event).toMatchObject({ content: { type: "unsupported", channelType: "quick-reply" } });
+    }
+  });
+
+  test.each([
+    ["no context", undefined],
+    ["a context that is not an object", "wamid.SYNTHETIC0201"],
+    ["a context with no identifier", { from: "15550100" }],
+    ["an identifier with a space", { id: "wamid SYNTHETIC" }],
+    ["an identifier of 129 characters", { id: "w".repeat(129) }],
+    ["an identifier that is a number", { id: 201 }],
+  ])("a tap with %s is kept, answering nothing", (_name, context) => {
+    const event = first(
+      changed("inbound-button-reply.json", (m) => {
+        if (context === undefined) {
+          delete m["context"];
+        } else {
+          m["context"] = context;
+        }
+      }),
+    );
+    expect(event).toMatchObject({
+      content: { type: "button", payload: "core.stop", inReplyTo: null },
+    });
+  });
+
+  test("the type alone decides the reading: a text that also carries a tap is a text, and a tap that also carries text is a tap", () => {
+    const text = first(
+      changed("inbound-button-reply.json", (m) => {
+        m["type"] = "text";
+        m["text"] = { body: "core.stop" };
+      }),
+    );
+    expect(text).toMatchObject({ content: { type: "text", body: "core.stop" } });
+    expect((text as { content: object }).content).not.toHaveProperty("payload");
+    const tap = first(
+      changed("inbound-button-reply.json", (m) => {
+        m["text"] = { body: "ignore the button" };
+      }),
+    );
+    expect(tap).toEqual(first(later("inbound-button-reply.json")));
+  });
+
+  test.each([
+    ["an empty caption", ""],
+    ["a caption that is only U+0000", "\u0000"],
+    ["a caption that is not text", 7],
+    ["a caption longer than is read", "c".repeat(65_537)],
+  ])("a picture with %s is a picture that was not read", (_name, value) => {
+    const event = first(
+      changed("inbound-image-caption.json", (m) => {
+        (m["image"] as Record<string, unknown>)["caption"] = value;
+      }),
+    );
+    expect(event).toMatchObject({ content: { type: "unsupported", channelType: "image" } });
+  });
+
+  test("U+0000 is removed from a caption, and a caption on another type is not read", () => {
+    const cleaned = first(
+      changed("inbound-image-caption.json", (m) => {
+        (m["image"] as Record<string, unknown>)["caption"] = "a\u0000b";
+      }),
+    );
+    expect(cleaned).toMatchObject({ content: { type: "text", body: "ab", captionOf: "image" } });
+    const document = first(
+      changed("inbound-image-caption.json", (m) => {
+        m["type"] = "document";
+        m["document"] = { caption: "What does this cost?" };
+      }),
+    );
+    expect(document).toEqual(
+      expect.objectContaining({ content: { type: "unsupported", channelType: "document" } }),
+    );
+  });
+});
+
+describe("sendButtons", () => {
+  const from = { receivingNumberId: "100000000000002", accessToken: "synthetic-token" };
+  const options = { baseUrl: "https://channel.invalid", apiVersion: "v27.0", timeoutMs: 1_000 };
+  function counting() {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const stub = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ messages: [{ id: "wamid.SYNTHETIC0202" }] }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+    return { calls, stub };
+  }
+
+  test("the limits are the ones read on 2026-11-24", () => {
+    expect(WHATSAPP_LIMITS).toEqual({
+      textMax: 4096,
+      buttons: { max: 3, bodyMax: 1024, titleMax: 20, payloadMax: 256 },
+    });
+  });
+
+  test("posts the documented request: the payload as the button's identifier", async () => {
+    const { calls, stub } = counting();
+    const result = await sendButtons({ ...options, fetch: stub }, from, CUSTOMER, "اختر", [
+      { payload: "core.stop", title: "إيقاف" },
+      { payload: "core.person", title: "A person" },
+    ]);
+    expect(result).toEqual({ accepted: true, channelMessageId: "wamid.SYNTHETIC0202" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://channel.invalid/v27.0/100000000000002/messages");
+    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: "+15550142",
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: "اختر" },
+        action: {
+          buttons: [
+            { type: "reply", reply: { id: "core.stop", title: "إيقاف" } },
+            { type: "reply", reply: { id: "core.person", title: "A person" } },
+          ],
+        },
+      },
+    });
+  });
+
+  test("what the channel would refuse is refused here, and no call is made", async () => {
+    const { calls, stub } = counting();
+    const send = (body: string, buttons: { payload: string; title: string }[]) =>
+      sendButtons({ ...options, fetch: stub }, from, CUSTOMER, body, buttons);
+    const stop = { payload: "core.stop", title: "Stop" };
+    const four = [0, 1, 2, 3].map((n) => ({ payload: `core.b${n}`, title: `Button ${n}` }));
+    expect(await send("Choose", four)).toMatchObject({ accepted: false, code: "bad-buttons" });
+    expect(await send("Choose", [{ ...stop, title: "t".repeat(21) }])).toMatchObject({
+      code: "bad-buttons",
+    });
+    expect(await send("Choose", [stop, { payload: "core.start", title: "stop" }])).toMatchObject({
+      code: "bad-buttons",
+    });
+    expect(await send("Choose", [{ ...stop, title: " Stop" }])).toMatchObject({
+      code: "bad-buttons",
+    });
+    expect(await send("b".repeat(1025), [stop])).toMatchObject({ code: "bad-body" });
+    expect(calls).toHaveLength(0);
+    expect(await send("b".repeat(1024), four.slice(0, 3))).toMatchObject({ accepted: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a text that is empty or over 4,096 is refused with no call; one of 4,096 is sent", async () => {
+    const { calls, stub } = counting();
+    for (const body of ["", "x".repeat(4097)]) {
+      expect(await sendText({ ...options, fetch: stub }, from, CUSTOMER, body)).toMatchObject({
+        accepted: false,
+        code: "bad-body",
+      });
+    }
+    expect(calls).toHaveLength(0);
+    await sendText({ ...options, fetch: stub }, from, CUSTOMER, "x".repeat(4096));
+    expect(calls).toHaveLength(1);
   });
 });
 
@@ -736,5 +1041,23 @@ channelContract("whatsapp", async () => {
     signatureHeader: SIGNATURE_HEADER,
     from: { receivingNumberId: "100000000000002", accessToken: "synthetic-token" },
     signed: () => ({ rawBody, headers: { [SIGNATURE_HEADER]: sign(rawBody, SECRET) } }),
+    signedTap: (payload, inReplyTo) => {
+      const tap = JSON.parse(
+        readFileSync(`${FIXTURES_2026_11_24}inbound-button-reply.json`).toString("utf8"),
+      );
+      const message = tap.entry[0].changes[0].value.messages[0];
+      message.interactive.button_reply.id = payload;
+      message.context.id = inReplyTo;
+      const raw = Buffer.from(JSON.stringify(tap));
+      return { rawBody: raw, headers: { [SIGNATURE_HEADER]: sign(raw, SECRET) } };
+    },
+    signedCaption: (caption) => {
+      const picture = JSON.parse(
+        readFileSync(`${FIXTURES_2026_11_24}inbound-image-caption.json`).toString("utf8"),
+      );
+      picture.entry[0].changes[0].value.messages[0].image.caption = caption;
+      const raw = Buffer.from(JSON.stringify(picture));
+      return { rawBody: raw, headers: { [SIGNATURE_HEADER]: sign(raw, SECRET) } };
+    },
   };
 });

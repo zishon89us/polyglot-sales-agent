@@ -259,15 +259,17 @@ null when no worker holds it).
 | `answered_by` | For a customer's message: the reply that answered it. Null while not dealt with, and for one dealt with by no reply. It is how a discarded reply's messages are found again |
 | `direction` | `inbound` or `outbound` |
 | `class` | For outbound: one of the five message classes |
-| `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on) |
+| `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on). The first three are the system's own: a channel's type of one of those names that was not read is stored as `unknown`, and a template's quick reply that could not be read as `quick-reply`. From a customer, `button` is a tap that was read, and has a payload (a constraint; migration 0008) |
 | `channel_sent_at` | For a message from a customer, the time the channel says it was sent. `created_at` is when the row was stored, taken per row, so the messages of one webhook keep their order |
 | `error_code` | For a `failed` message: the channel's code, or one of the worker's own: `unconfirmed` (after some call for it nobody knew whether the channel had it, so the customer may have it; decision 19), `expired` (it waited more than 15 minutes to be sent, and no call for it ended unknown; it may have been called for and refused), `no-channel`, `unsupported-kind`. Letters, digits, `_` and `-`, at most 40 |
 | `handled_at` | For a message from a customer: when a turn dealt with it. Null until then (decision 18) |
 | `send_attempts`, `unknown_outcomes` | For a message to send: how many times the channel was called for it, and how many of those calls ended with nobody knowing whether it was accepted. The second is the resend counter of US-C1 criterion 9 |
 | `sending_at`, `send_not_before` | When the call under way started, set exactly while the status is `sending`; and the earliest time of the next call after a refusal that can be retried |
 | `channel_message_id` | Unique per tenant and direction when not null. This constraint is the deduplication of US-C1. Per direction, so that a customer's message can never be dropped for sharing an identifier with one that was sent |
-| `body` ⚑ | The text. Null for unsupported types, whose content is never stored, and null after retention or deletion |
-| `button_payload` | Opaque to the core: the pack that registered the button reads it (for the booking pack's Confirm: the booking and the start time it was sent for). **The handler must check that the booking belongs to the sending contact** |
+| `body` ⚑ | The text. Null for unsupported types, whose content is never stored, for a tap (a button's title is not the customer's words and is not kept), and null after retention or deletion. For a caption, the words typed under the picture or video |
+| `button_payload` | For a tap from a customer, what the button carried: 1 to 256 printable ASCII characters without spaces. Set exactly for an inbound `button`. Untrusted: it comes from the customer's app. The core reads its owner and its action (`core.stop`); what follows is the owner's (for the booking pack's Confirm: the booking and the start time it was sent for). **The handler must check that the booking belongs to the sending contact** |
+| `in_reply_to` | For a tap: the channel's identifier of the message it answers, as the tap named it, or null. Text, not a link: the message it names may get its identifier later, or never. One function finds, when asked, the message sent in the same conversation under that identifier; none found means "not matched", never "forged" (design note `notes/m3-u5-buttons-captions.md`, section 3) |
+| `caption_of` | `image` or `video` for a text that was typed under one; null otherwise. The media is not fetched and nothing of it is kept |
 | `template_id`, `template_variables` ⚑ | Variables can hold a service name and a time; treated as personal with the message |
 | `status` | `pending`, `held`, `discarded`, `withheld`, `sending`, `sent`, `delivered`, `read`, `failed` |
 | `withheld_reason` | |

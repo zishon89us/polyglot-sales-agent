@@ -10,6 +10,7 @@ export { recordHeartbeat, type WorkerReadiness, workerReadiness } from "./heartb
 export {
   type IncomingMessage,
   type IncomingStatus,
+  messageAnswered,
   PROCESS_CONVERSATION_JOB,
   recordUnparsed,
   recordUnroutable,

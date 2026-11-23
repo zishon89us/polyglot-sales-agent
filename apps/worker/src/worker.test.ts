@@ -203,6 +203,7 @@ describe("a customer's message is answered with an echo", () => {
         from: { receivingNumberId: NUMBER.a, accessToken: MOCK_ACCESS_TOKEN },
         to: { phone: CUSTOMER, userId: null },
         body: "Echo: Do you have a slot on Thursday?",
+        buttons: [],
       },
     ]);
     expect(await outbound()).toEqual([

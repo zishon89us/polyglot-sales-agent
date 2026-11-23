@@ -16,7 +16,13 @@ import {
 } from "@polyglot-sales-agent/channel-whatsapp";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, test } from "vitest";
-import { createMockWhatsApp, inboundTextPayload, MOCK_HOST, type MockOptions } from "./server.ts";
+import {
+  createMockWhatsApp,
+  inboundPayload,
+  inboundTextPayload,
+  MOCK_HOST,
+  type MockOptions,
+} from "./server.ts";
 
 const SECRET = "synthetic-app-secret";
 const TOKEN = "synthetic-access-token";
@@ -53,6 +59,25 @@ async function mock(options: Partial<MockOptions> = {}) {
   return { app, baseUrl, channel, sent, call };
 }
 
+async function product(appSecret: string) {
+  const received: (readonly EventBatch[])[] = [];
+  const app = createApiServer({ trustedProxies: false });
+  await registerWebhook(app, {
+    channel: createWhatsAppChannel({
+      appSecrets: [appSecret],
+      baseUrl: "https://channel.invalid",
+      apiVersion: "v27.0",
+      timeoutMs: 1_000,
+    }),
+    registration: (query) => registrationChallenge(query, "synthetic-verify-token"),
+    sink: {
+      events: async (batches) => void received.push(batches),
+      unparsed: async () => undefined,
+    },
+  });
+  return { received, webhookUrl: `${await listening(app)}/webhooks/whatsapp` };
+}
+
 describe("the WhatsApp channel sending to mock-whatsapp over HTTP", () => {
   test("a text is accepted, given an identifier and recorded as sent", async () => {
     const { channel, sent } = await mock();
@@ -65,6 +90,7 @@ describe("the WhatsApp channel sending to mock-whatsapp over HTTP", () => {
         to: "+15550142",
         recipient: null,
         body: "مرحبا",
+        buttons: [],
       },
     ]);
   });
@@ -249,24 +275,6 @@ describe("the webhooks mock-whatsapp sends", () => {
   });
 
   /** The product's webhook guard, listening, with a sink that records. */
-  async function product(appSecret: string) {
-    const received: (readonly EventBatch[])[] = [];
-    const app = createApiServer({ trustedProxies: false });
-    await registerWebhook(app, {
-      channel: createWhatsAppChannel({
-        appSecrets: [appSecret],
-        baseUrl: "https://channel.invalid",
-        apiVersion: "v27.0",
-        timeoutMs: 1_000,
-      }),
-      registration: (query) => registrationChallenge(query, "synthetic-verify-token"),
-      sink: {
-        events: async (batches) => void received.push(batches),
-        unparsed: async () => undefined,
-      },
-    });
-    return { received, webhookUrl: `${await listening(app)}/webhooks/whatsapp` };
-  }
 
   test("a message typed into the mock arrives at the product's webhook, signed, and is accepted", async () => {
     const { received, webhookUrl } = await product(SECRET);
@@ -437,6 +445,113 @@ describe("the mock's own controls", () => {
     expect(seen).toEqual([]);
   });
 
+  test("a message with buttons is recorded with them, and a tester's tap arrives as a tap that answers it", async () => {
+    const { received, webhookUrl } = await product(SECRET);
+    const { channel, sent, call } = await mock({ webhookUrl });
+    const result = await channel.sendButtons(FROM, CUSTOMER, "Choose", [
+      { payload: "core.stop", title: "Stop" },
+      { payload: "core.person", title: "A person" },
+    ]);
+    expect(result).toEqual({ accepted: true, channelMessageId: "wamid.MOCK000001" });
+    expect(await sent()).toMatchObject([
+      {
+        id: "wamid.MOCK000001",
+        body: "Choose",
+        buttons: [
+          { id: "core.stop", title: "Stop" },
+          { id: "core.person", title: "A person" },
+        ],
+      },
+    ]);
+    const response = await call("/mock/inbound", {
+      phoneNumberId: "100000000000002",
+      from: "+15550142",
+      button: { id: "core.stop", title: "Stop", replyTo: "wamid.MOCK000001" },
+    });
+    expect(await response.json()).toMatchObject({ webhookStatus: 200 });
+    expect(received[0]?.[0]?.events[0]).toMatchObject({
+      kind: "message",
+      content: { type: "button", payload: "core.stop", inReplyTo: "wamid.MOCK000001" },
+    });
+  });
+
+  test("a message typed as a caption arrives as a text that was under a picture", async () => {
+    const { received, webhookUrl } = await product(SECRET);
+    const { call } = await mock({ webhookUrl });
+    await call("/mock/inbound", { phoneNumberId: "100000000000002", caption: "This style?" });
+    expect(received[0]?.[0]?.events[0]).toMatchObject({
+      content: { type: "text", body: "This style?", captionOf: "image" },
+    });
+  });
+
+  test.each([
+    [{ phoneNumberId: "1", text: "hi", caption: "hi" }],
+    [{ phoneNumberId: "1", text: "hi", button: { id: "a.b", title: "B", replyTo: "m" } }],
+    [{ phoneNumberId: "1", caption: "" }],
+    [{ phoneNumberId: "1", button: { title: "B", replyTo: "m" } }],
+    [{ phoneNumberId: "1", button: { id: "a.b", title: "B" } }],
+    [{ phoneNumberId: "1", button: "a.b" }],
+  ])("a customer's message that is not exactly one thing is refused: %j", async (body) => {
+    const { call } = await mock({ webhookUrl: "http://127.0.0.1:9/" });
+    expect((await call("/mock/inbound", body)).status).toBe(400);
+  });
+
+  test("buttons outside the limits read on 2026-11-24 are refused as Meta would refuse them, and nothing is recorded", async () => {
+    const { baseUrl, sent } = await mock();
+    const send = (interactive: unknown) =>
+      fetch(`${baseUrl}/v27.0/100000000000002/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: "+15550142",
+          type: "interactive",
+          interactive,
+        }),
+      });
+    const button = (id: string, title: string) => ({ type: "reply", reply: { id, title } });
+    const withButtons = (buttons: unknown, text: unknown = "Choose", type = "button") => ({
+      type,
+      body: { text },
+      action: { buttons },
+    });
+    const bad = [
+      withButtons([]),
+      withButtons([0, 1, 2, 3].map((n) => button(`a.b${n}`, `Button ${n}`))),
+      withButtons([button("a.b", "t".repeat(21))]),
+      withButtons([button("a.b", "")]),
+      withButtons([button("x".repeat(257), "Stop")]),
+      withButtons([button("", "Stop")]),
+      withButtons([button("a.b", "Same"), button("a.c", "Same")]),
+      withButtons([button("a.b", "One"), button("a.b", "Two")]),
+      withButtons([{ type: "url", reply: { id: "a.b", title: "Stop" } }]),
+      withButtons("a.b"),
+      withButtons([button("a.b", "Stop")], "b".repeat(1025)),
+      withButtons([button("a.b", "Stop")], ""),
+      withButtons([button("a.b", "Stop")], "Choose", "list"),
+      { type: "button", body: { text: "Choose" } },
+    ];
+    for (const interactive of bad) {
+      expect((await send(interactive)).status, JSON.stringify(interactive).slice(0, 80)).toBe(400);
+    }
+    expect(await sent()).toEqual([]);
+    const most = withButtons(
+      [0, 1, 2].map((n) => button(`${n}${"x".repeat(255)}`, `${n}${"t".repeat(19)}`)),
+      "b".repeat(1024),
+    );
+    expect((await send(most)).status).toBe(200);
+    expect(await sent()).toHaveLength(1);
+  });
+
+  test("the test page shows a sent message's buttons and can send a caption", async () => {
+    const { baseUrl } = await mock();
+    const page = await (await fetch(`${baseUrl}/`)).text();
+    expect(page).toContain("message.buttons");
+    expect(page).toContain("replyTo: message.id");
+    expect(page).toContain('name="asCaption"');
+    expect(page).not.toContain("innerHTML");
+  });
+
   test("the test page is served, says what it is, and puts messages on the page as text", async () => {
     const { baseUrl } = await mock();
     const response = await fetch(`${baseUrl}/`);
@@ -477,5 +592,23 @@ channelContract("whatsapp, against mock-whatsapp over HTTP", async () => {
     signatureHeader: SIGNATURE_HEADER,
     from: FROM,
     signed: () => ({ rawBody, headers: { [SIGNATURE_HEADER]: sign(rawBody, SECRET) } }),
+    ...(() => {
+      const who = {
+        phoneNumberId: "100000000000002",
+        from: "15550142",
+        userId: "US.10000000000000000042",
+        id: "wamid.MOCKIN000002",
+        timestamp: 1795000000,
+      };
+      const signedAs = (payload: unknown) => {
+        const raw = Buffer.from(JSON.stringify(payload));
+        return { rawBody: raw, headers: { [SIGNATURE_HEADER]: sign(raw, SECRET) } };
+      };
+      return {
+        signedTap: (id: string, replyTo: string) =>
+          signedAs(inboundPayload(who, { button: { id, title: "Stop", replyTo } })),
+        signedCaption: (caption: string) => signedAs(inboundPayload(who, { caption })),
+      };
+    })(),
   };
 });

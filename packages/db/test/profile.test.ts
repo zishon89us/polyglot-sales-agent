@@ -772,7 +772,12 @@ describe("migration 0007, with rows", () => {
       );
       const client = await scratch.client(MIGRATE_ROLE);
       const all = loadMigrations(MIGRATIONS_DIRECTORY);
-      expect(all.at(-1)?.name).toBe("profile");
+      // Later migrations are taken back first, one at a time, down to 0007.
+      const later = all.length - all.findIndex((migration) => migration.name === "profile") - 1;
+      expect(later).toBeGreaterThanOrEqual(0);
+      for (let step = 0; step < later; step += 1) {
+        await migrateDown(client, all);
+      }
       expect(await migrateDown(client, all)).toBe("profile");
       expect(
         (await owner.query("SELECT to_regclass('services') AS s, to_regclass('policies') AS p"))

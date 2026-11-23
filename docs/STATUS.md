@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 and U2 done; U3 under way)
+## Current milestone: M3 AI core (U1 to U4 done; U5 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -539,6 +539,29 @@ M0 Inception met its exit criteria on 2026-11-16; see
   answer. **These last fixes are checked by the author only.** CI had
   failed on the pull request's title, which was longer than 72
   characters; it is shortened. What the unit leaves is #326.
+
+- 2026-11-24 — #325 merged: U4 is done. **M3 U5** (#304, pull request
+  #327) begun with its design note
+  (`design/notes/m3-u5-buttons-captions.md`): a tap on a button and a
+  caption in the channel interface, and sending a text with buttons.
+  Meta's pages were read that day through a tool, not by eye; no live
+  event has been seen. A second agent reviewed the note
+  (`reviews/2026-11-24-m3-u5-design-review.md`): 15 findings, two High
+  (matching a tap to its message when the tap is stored fails for a
+  message whose identifier is recorded later; a check of where a tap
+  came from protects nothing for the core's own buttons and contradicted
+  the stories). The note was rewritten, and **has not been reviewed
+  again**. Then the code: the interface, both channels, Meta's stand-in
+  and its test page, migration 0008 (three columns on `messages`), the
+  lookup of the message a tap answers, and a test that keeps specific
+  channels out of the core. Two faults were found by the unit's own
+  tests before any review: a length check written as a pattern count
+  over 255, which PostgreSQL refuses only when a row is checked, and a
+  rename of old rows that the migration's owner could not see under the
+  tenant policy. Nothing sends a button and nothing acts on a tap: the
+  reply is still the echo. A document with a typed question stays
+  unread. No eval score exists (rows 31 and 32). Row 46 asks whether
+  start and opt-in are one button.
 
 ## Next
 

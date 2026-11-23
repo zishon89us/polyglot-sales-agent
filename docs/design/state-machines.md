@@ -362,7 +362,7 @@ business-initiated message may be sent.
 | Staff tick consent on a manual booking | Add a consent record, source `staff`. |
 | Opt-out keyword or stop button | Set opted out. Applied by code at step 5 of section 1, **whether or not the tenant is answering**. The confirmation is sent only if the tenant is answering. |
 | Opt-out asked for in free text | Recognised by the model at step 15, so only when the message reaches that step. Set opted out; send the confirmation. A customer whose message cannot reach step 15 can always use the keyword or the button. |
-| Opt-in keyword or opt-in button | Clear opted out; add a consent record, source `opt-in`. Applied by code at step 5. |
+| Opt-in keyword or opt-in button | Clear opted out; add a consent record, source `opt-in`. Applied by code at step 5. The "start button" of step 5 and this "opt-in button" are one button, with the payload `core.start` (decisions row 46, proposed with M3 unit U5) |
 | Request in free text to receive messages again | Recognised by the model at step 15. **Does not clear the opt-out.** Code sends one fixed question with an opt-in button; only a tap on it clears the opt-out. A misread message therefore cannot restart messages. |
 | Contact deleted while opted out | Keep only a one-way hash of the number, marked opted out. |
 | A number whose hash is marked opted out messages again | The new contact starts `opted-out`. |

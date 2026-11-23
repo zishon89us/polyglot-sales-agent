@@ -2,7 +2,12 @@ import { DELIVERY_STATUSES, type EventBatch } from "@polyglot-sales-agent/channe
 import { channelContract } from "@polyglot-sales-agent/channel/contract";
 import { MESSAGE_STATUSES } from "@polyglot-sales-agent/core";
 import { describe, expect, test } from "vitest";
-import { createMockChannel, MOCK_ACCESS_TOKEN, MOCK_SIGNATURE_HEADER } from "./index.ts";
+import {
+  createMockChannel,
+  MOCK_ACCESS_TOKEN,
+  MOCK_LIMITS,
+  MOCK_SIGNATURE_HEADER,
+} from "./index.ts";
 
 const FROM = { receivingNumberId: "mock-number-a", accessToken: MOCK_ACCESS_TOKEN };
 const CUSTOMER = { phone: "+15550142", userId: null };
@@ -35,7 +40,111 @@ channelContract("mock", async () => {
     signatureHeader: MOCK_SIGNATURE_HEADER,
     from: FROM,
     signed: () => channel.webhook(BATCHES),
+    signedTap: (payload, inReplyTo) =>
+      channel.webhook([
+        {
+          receivingNumberId: "mock-number-a",
+          events: [
+            {
+              kind: "message",
+              channelMessageId: "mock-in-2",
+              from: CUSTOMER,
+              sentAt: new Date("2026-11-18T10:01:00.000Z"),
+              content: { type: "button", payload, inReplyTo },
+            },
+          ],
+        },
+      ]),
+    signedCaption: (body) =>
+      channel.webhook([
+        {
+          receivingNumberId: "mock-number-a",
+          events: [
+            {
+              kind: "message",
+              channelMessageId: "mock-in-3",
+              from: CUSTOMER,
+              sentAt: new Date("2026-11-18T10:02:00.000Z"),
+              content: { type: "text", body, captionOf: "image" },
+            },
+          ],
+        },
+      ]),
   };
+});
+
+describe("the mock channel's buttons", () => {
+  test("it carries two, where WhatsApp carries three, so nothing can be written for three", () => {
+    expect(MOCK_LIMITS).toEqual({
+      textMax: 2000,
+      buttons: { max: 2, bodyMax: 500, titleMax: 16, payloadMax: 100 },
+    });
+  });
+
+  test("records the buttons a message was sent with, and none for a text", async () => {
+    const channel = createMockChannel();
+    const buttons = [
+      { payload: "core.stop", title: "Stop" },
+      { payload: "core.person", title: "A person" },
+    ];
+    await channel.sendButtons(FROM, CUSTOMER, "Choose", buttons);
+    await channel.sendText(FROM, CUSTOMER, "hello");
+    expect(channel.sent.map((message) => [message.body, message.buttons])).toEqual([
+      ["Choose", buttons],
+      ["hello", []],
+    ]);
+  });
+
+  test("a refused message is not recorded, and does not use up a failure that was set", async () => {
+    const channel = createMockChannel();
+    channel.failNextSend("rate-limited", true);
+    expect(await channel.sendButtons(FROM, CUSTOMER, "Choose", [])).toMatchObject({
+      code: "bad-buttons",
+    });
+    expect(await channel.sendText(FROM, CUSTOMER, "")).toMatchObject({ code: "bad-body" });
+    expect(channel.sent).toEqual([]);
+    expect(await channel.sendText(FROM, CUSTOMER, "hello")).toMatchObject({ code: "rate-limited" });
+  });
+
+  test.each([
+    ["a payload that is not text", { type: "button", payload: 7, inReplyTo: null }],
+    ["a payload with a space", { type: "button", payload: "core stop", inReplyTo: null }],
+    ["an empty payload", { type: "button", payload: "", inReplyTo: null }],
+    ["a payload of 257 characters", { type: "button", payload: "x".repeat(257), inReplyTo: null }],
+  ])("a tap with %s is kept as a message that was not read", (_name, content) => {
+    const channel = createMockChannel();
+    const { rawBody } = channel.webhook([
+      {
+        receivingNumberId: "mock-number-a",
+        events: [{ ...BATCHES[0]?.events[0], content } as never],
+      },
+    ]);
+    const parsed = channel.parseWebhook(rawBody);
+    expect(parsed.ok && parsed.batches[0]?.events[0]).toMatchObject({
+      content: { type: "unsupported", channelType: "tap" },
+    });
+  });
+
+  test("a tap that names no message, or names one oddly, is kept without it", () => {
+    const channel = createMockChannel();
+    for (const inReplyTo of [null, "has a space", "x".repeat(129), 7]) {
+      const { rawBody } = channel.webhook([
+        {
+          receivingNumberId: "mock-number-a",
+          events: [
+            {
+              ...BATCHES[0]?.events[0],
+              content: { type: "button", payload: "core.stop", inReplyTo },
+            } as never,
+          ],
+        },
+      ]);
+      const parsed = channel.parseWebhook(rawBody);
+      expect(parsed.ok && parsed.batches[0]?.events[0]).toMatchObject({
+        content: { type: "button", payload: "core.stop", inReplyTo: null },
+      });
+    }
+  });
 });
 
 describe("the mock channel", () => {

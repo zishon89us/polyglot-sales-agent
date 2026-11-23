@@ -1,11 +1,17 @@
 import type { Channel } from "@polyglot-sales-agent/channel";
 import { singleHeader } from "@polyglot-sales-agent/channel";
 import { parseWebhook } from "./parse.ts";
-import { type SendOptions, sendText } from "./send.ts";
+import { type SendOptions, sendButtons, sendText, WHATSAPP_LIMITS } from "./send.ts";
 import { SIGNATURE_HEADER, verifySignature } from "./signature.ts";
 
 export { parseWebhook } from "./parse.ts";
-export { DEFAULT_SEND_TIMEOUT_MS, type SendOptions, sendText } from "./send.ts";
+export {
+  DEFAULT_SEND_TIMEOUT_MS,
+  type SendOptions,
+  sendButtons,
+  sendText,
+  WHATSAPP_LIMITS,
+} from "./send.ts";
 export { registrationChallenge, SIGNATURE_HEADER, sign, verifySignature } from "./signature.ts";
 
 export interface WhatsAppOptions extends SendOptions {
@@ -52,6 +58,8 @@ export function createWhatsAppChannel(options: WhatsAppOptions): Channel {
     verifyWebhook: (rawBody, headers) =>
       verifySignature(rawBody, singleHeader(headers, SIGNATURE_HEADER), options.appSecrets),
     parseWebhook,
+    limits: WHATSAPP_LIMITS,
     sendText: (from, to, body) => sendText(options, from, to, body),
+    sendButtons: (from, to, body, buttons) => sendButtons(options, from, to, body, buttons),
   };
 }

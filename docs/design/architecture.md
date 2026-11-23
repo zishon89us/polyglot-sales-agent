@@ -191,7 +191,7 @@ flowchart TB
 | --- | --- |
 | `core` | The rules that hold for every pack, as pure functions: the order of checks, the six core state machines (handover, session, contact messaging permission, outbound message, provider availability, tenant), message classes and their pre-send checks, quiet hours, and the core metric definitions. No database, network, clock or framework import; time is passed in. It contains nothing about bookings (ADR 0012). |
 | `db` | The schema and migrations; typed queries; the function that opens a transaction for a tenant and sets row-level security; the jobs table and its claim, retry and dead-letter logic. |
-| `channel` | The interface a channel implements: verify a webhook, parse it into the system's own event types, send a free-form or template message, submit a template, check credentials. |
+| `channel` | The interface a channel implements: verify a webhook, parse it into the system's own event types, send a free-form or template message, submit a template, check credentials. Since M3 unit U5 a message from a customer is a text (which may say it was a caption), a tap on a button (what the button carried, and the message it answers) or a type that is not read; a channel states its limits, sends a text with buttons, and refuses before any call a message outside those limits. Template sending, template submission and the credentials check are not built |
 | `channel-whatsapp` | The WhatsApp implementation. All knowledge of Meta's payloads lives here. In development and CI it talks over HTTP to the `mock-whatsapp` app, so the same code runs as in a deployment, against another address |
 | `channel-mock` | A second implementation that lives in memory, with a format of its own. It imitates nothing; it is what a test uses when the test is not about WhatsApp, and it is the second implementation that shows the interface fits more than one channel (NFR-M2) |
 | `ai` | `LlmClient` and its adapters; loading versioned prompts; building the business profile; validating structured output; checking claims; writing traces. |
@@ -209,7 +209,7 @@ alternatives.
 | What it replaces | Meta's servers | The whole WhatsApp channel |
 | How it is reached | Over HTTP, by `channel-whatsapp` | In the test's own process |
 | Used by | The tests in `apps/mock-whatsapp`, which run `channel-whatsapp` against it over HTTP and feed its webhooks to the webhook guard; a developer, through its test page; the end-to-end tests, when they exist (U10) | The contract tests, as the second channel that must pass them; tests of the worker and of the webhook path that are not about WhatsApp, when those exist (U7, U8) |
-| What it shows | That the code which will talk to Meta sends and reads what was documented on the fixtures' date | That the interface is enough for a channel with another format. That nothing outside `channel-whatsapp` knows about WhatsApp is not shown by it; the test on imports that would is not written yet (#285) |
+| What it shows | That the code which will talk to Meta sends and reads what was documented on the fixtures' date | That the interface is enough for a channel with another format. That nothing outside `channel-whatsapp` knows about WhatsApp is not shown by it; a test on names now does part of it (`packages/channel/src/boundary.test.ts`, M3 unit U5): outside the channels, only the file of each app that builds a channel and the stand-in for Meta name one (#285) |
 
 Neither proves that Meta behaves as documented. Only the supervised live
 test before v1.0.0 does (risk R-T3).
@@ -314,7 +314,7 @@ decides anything runs in the worker.
 
 | Event | The webhook's transaction writes | Queues | Runs later, in the worker |
 | --- | --- | --- | --- |
-| A message from a customer, of any type | The contact, if new, found as the data model's table "Which contact a message belongs to" says (#284). The conversation, if new. The message, once: its channel identifier is unique per tenant and direction | One `process-conversation` job for the conversation, due at once, if at least one of its messages was new | Every step of "Processing one turn": opt-out, buttons, the reply window, the session, the model. None of them runs in the request |
+| A message from a customer, of any type: a text, a caption (stored as a text that says so), a tap (stored with what the button carried and without a body) or one that is not read | The contact, if new, found as the data model's table "Which contact a message belongs to" says (#284). The conversation, if new. The message, once: its channel identifier is unique per tenant and direction | One `process-conversation` job for the conversation, due at once, if at least one of its messages was new | Every step of "Processing one turn": opt-out, buttons, the reply window, the session, the model. None of them runs in the request |
 | The same message again | Nothing | Nothing | |
 | A delivery status | The status of the outbound message it names, and only forwards: `sent`, then `delivered`, then `read`; `failed` only before delivery. A status for a message nobody sent changes nothing | Nothing | |
 | Anything for a receiving number no tenant has | One row in `unroutable_events` for each event: the channel, the two identifiers and the kind. Written by the cross-tenant role | Nothing | |
