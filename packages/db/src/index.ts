@@ -58,6 +58,13 @@ export {
 } from "./outbound.ts";
 export { findIsolationProblems, tenantColumn, tenantOwnedTables } from "./policy-check.ts";
 export {
+  answering,
+  loadBusinessProfile,
+  type ProfileChange,
+  readBusinessProfile,
+  replaceProfile,
+} from "./profile.ts";
+export {
   APP_ROLE,
   CROSS_ROLE,
   DEFINER_FUNCTIONS,

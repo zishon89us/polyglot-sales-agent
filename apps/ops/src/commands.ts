@@ -8,7 +8,20 @@
 // A command is checked in full by `prepare` before a connection is made,
 // so one that is written wrongly is refused with nothing recorded or done.
 
-import type { Database } from "@polyglot-sales-agent/db";
+import { createHash } from "node:crypto";
+import {
+  contactLike,
+  PROFILE_BUDGET,
+  priceText,
+  profileSize,
+  readProfileFile,
+} from "@polyglot-sales-agent/core";
+import {
+  answering,
+  type Database,
+  loadBusinessProfile,
+  replaceProfile,
+} from "@polyglot-sales-agent/db";
 import {
   connectChannel,
   createTenant,
@@ -53,6 +66,8 @@ export const USAGE = `ops: the operator's commands. Each needs --as <your name>.
   ops jobs list-dead --as <name>
   ops jobs retry <job id> --as <name>
   ops log show [--limit <1 to ${LOG_LIMIT_MAX}>] --as <name>
+  ops profile load --tenant <tenant id> --file <path, or - for standard input> --as <name>
+  ops profile show --tenant <tenant id> --as <name>
 
 --as        your name: letters without accents, digits, spaces, dots, hyphens
             and underscores, at most 64. It is a claim, not proof.
@@ -63,6 +78,16 @@ channel connect
             reach that tenant. --number-id is
             the channel's identifier for the number, digits only, not the
             phone number itself.
+profile load
+            makes the tenant's services, policies and settings what the JSON
+            file says. The file is the whole profile: a service or a policy
+            it does not name is deleted, and both lists must be written. Nothing is changed if any part of it is refused. The
+            file is not recorded, only its SHA-256. It holds a business's
+            contact details: do not commit it.
+profile show
+            prints what the assistant is given about the business, and every
+            link, address and long number in it, which the assistant may send.
+            These two commands also need PSA_DB_APP_URL.
 jobs retry  queues the job again with its retries restored. A job that sends
             messages will not send those that have waited over 15 minutes:
             they are marked as expired.
@@ -155,8 +180,17 @@ function need(parsed: Parsed, name: string): string {
   return value.trim();
 }
 
+/**
+ * The application role's handle, for the commands that work inside one
+ * tenant's scope. Asked for only by those: the others never open it.
+ */
+export type AppHandle = () => Database;
+
+/** Reads a file named on the command line; `-` is standard input. Throws if it cannot. */
+export type FileReader = (path: string) => Uint8Array;
+
 /** A command that has been checked and is ready to run. */
-export type Prepared = (cross: Database, output: Output) => Promise<void>;
+export type Prepared = (cross: Database, output: Output, app: AppHandle) => Promise<void>;
 
 /**
  * Checks a command in full, without a database, and returns it ready to
@@ -166,7 +200,7 @@ export type Prepared = (cross: Database, output: Output) => Promise<void>;
  * is recorded; and `RecordIncomplete`, after printing the result, if the
  * action was done and its second row could not be written.
  */
-export function prepare(argv: readonly string[]): Prepared {
+export function prepare(argv: readonly string[], readFile: FileReader): Prepared {
   const parsed = parse(argv);
   const command = `${parsed.words[0] ?? ""} ${parsed.words[1] ?? ""}`.trim();
   const operatorName = need(parsed, "as");
@@ -180,15 +214,15 @@ export function prepare(argv: readonly string[]): Prepared {
   const ready =
     <T>(
       args: Readonly<Record<string, string>>,
-      action: (cross: Database) => Promise<{ value: T; subjectId?: string }>,
+      action: (cross: Database, app: AppHandle) => Promise<{ value: T; subjectId?: string }>,
       print: (value: T, output: Output) => void,
     ): Prepared =>
-    async (cross, output) => {
+    async (cross, output, app) => {
       let incomplete = false;
       const value = await recorded(
         cross,
         { command, operatorName, arguments: args },
-        () => action(cross),
+        () => action(cross, app),
         () => {
           incomplete = true;
         },
@@ -359,10 +393,132 @@ export function prepare(argv: readonly string[]): Prepared {
     );
   }
 
+  if (command === "profile load") {
+    only(parsed, ["as", "tenant", "file"], 2);
+    const tenantId = need(parsed, "tenant");
+    if (!UUID.test(tenantId)) {
+      throw new UsageError("--tenant is a tenant's identifier");
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = readFile(need(parsed, "file"));
+    } catch (error) {
+      if (error instanceof UsageError) {
+        throw error;
+      }
+      throw new UsageError("--file could not be read");
+    }
+    // Every rule of the file is checked here, before any connection is made.
+    const read = readProfileFile(bytes);
+    if (!read.ok) {
+      throw new UsageError(
+        `the profile file is refused, and nothing was changed:\n${read.problems.map((problem: string) => `  - ${problem}`).join("\n")}`,
+      );
+    }
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    // Never the file's name or anything in it: a path can hold a person's name.
+    return ready(
+      {
+        tenant: tenantId,
+        sha256,
+        services: String(read.profile.services.length),
+        policies: String(read.profile.policies.length),
+      },
+      async (_cross, app) => ({
+        value: await replaceProfile(app(), tenantId, read.profile, { sha256, operatorName }),
+        subjectId: tenantId,
+      }),
+      (change, output) => {
+        const counts = (kind: { added: number; changed: number; removed: number }) =>
+          `${kind.added} added, ${kind.changed} changed, ${kind.removed} removed`;
+        output.out(`profile loaded for ${tenantId}`);
+        output.out(`services: ${counts(change.services)}`);
+        output.out(`policies: ${counts(change.policies)}`);
+        output.out(`size: ${read.size} of ${PROFILE_BUDGET} characters`);
+      },
+    );
+  }
+
+  if (command === "profile show") {
+    only(parsed, ["as", "tenant"], 2);
+    const tenantId = need(parsed, "tenant");
+    if (!UUID.test(tenantId)) {
+      throw new UsageError("--tenant is a tenant's identifier");
+    }
+    return ready(
+      { tenant: tenantId },
+      async (_cross, app) => ({
+        value: {
+          profile: await loadBusinessProfile(app(), tenantId),
+          answering: await answering(app(), tenantId),
+        },
+        subjectId: tenantId,
+      }),
+      ({ profile, answering: state }, output) => {
+        // The business's own words go to the screen as every name does: in
+        // quotes, with any character that could move the cursor written as a code.
+        output.out(`business: ${shown(profile.name)}  ${profile.timeZone}`);
+        output.out(
+          `currency: ${profile.currency === null ? "not set" : `${profile.currency.code}, ${profile.currency.decimals} decimals`}`,
+        );
+        output.out(
+          `support contact: ${profile.supportContact === null ? "not set" : shown(profile.supportContact)}`,
+        );
+        output.out(
+          `${profile.services.length} active service${profile.services.length === 1 ? "" : "s"}`,
+        );
+        for (const service of profile.services) {
+          const price =
+            profile.currency === null
+              ? `${service.priceMinor} (no currency)`
+              : priceText(service.priceMinor, profile.currency);
+          output.out(
+            `  ${service.id}  ${price}  ${shown(service.name)}  ${shown(service.description)}`,
+          );
+        }
+        output.out(
+          `${profile.policies.length} polic${profile.policies.length === 1 ? "y" : "ies"}`,
+        );
+        for (const policy of profile.policies) {
+          output.out(`  ${policy.id}  ${shown(policy.title)}  ${shown(policy.body)}`);
+        }
+        if (profile.openingHours === null) {
+          output.out("opening hours: not set");
+        } else {
+          output.out("opening hours, weekday 1 is Monday:");
+          for (const day of profile.openingHours) {
+            const periods = day.periods.map((period) => `${period.opens}-${period.closes}`);
+            output.out(`  ${day.weekday}  ${periods.length === 0 ? "closed" : periods.join(", ")}`);
+          }
+        }
+        output.out(`size: ${profileSize(profile)} of ${PROFILE_BUDGET} characters`);
+        const found = contactLike(profile);
+        output.out(
+          `${found.length} link${found.length === 1 ? "" : "s"}, address${found.length === 1 ? "" : "es"} or long number${found.length === 1 ? "" : "s"} in the texts, which the assistant may send:`,
+        );
+        for (const item of found) {
+          output.out(`  ${shown(item)}`);
+        }
+        output.out(
+          state.settingsMissing.length === 0
+            ? "settings to answer: complete"
+            : `settings to answer: missing ${state.settingsMissing.join(", ")}`,
+        );
+        output.out(`channel: ${state.channelConnected ? "connected" : "not connected"}`);
+      },
+    );
+  }
+
   throw new UsageError("there is no such command");
 }
 
 /** Checks and runs one command. */
-export async function run(cross: Database, argv: readonly string[], output: Output): Promise<void> {
-  await prepare(argv)(cross, output);
+export async function run(
+  cross: Database,
+  argv: readonly string[],
+  output: Output,
+  app: AppHandle,
+  readFile: FileReader,
+): Promise<void> {
+  await prepare(argv, readFile)(cross, output, app);
 }

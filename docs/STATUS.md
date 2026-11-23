@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 done; U2 in review)
+## Current milestone: M3 AI core (U1 and U2 done; U3 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -470,10 +470,43 @@ M0 Inception met its exit criteria on 2026-11-16; see
   and all 45 were refused once it had passed. It now starts an hour from
   when the tests run. What the unit leaves is #321.
 
+- 2026-11-23 — #322 merged: U2 is done (#320, which it replaced, is
+  still open for the maintainer to close). **M3 U3** (#302) begun with
+  its design note (`design/notes/m3-u3-profile.md`): what a business
+  stores about itself, what of it the model is given and what is not,
+  whether a tenant is answering, and an operator's command to load a
+  profile from a file. A second agent reviewed the note: 32 findings,
+  four High and a Medium (the cross-tenant role would have gained the right to write
+  every tenant's prices; a rule on characters that refused correct Urdu,
+  Hindi and Bengali text; a support contact and a currency that
+  contradicted the glossary; a wrong statement about what `ops` records).
+  The note was rewritten (`reviews/2026-11-23-m3-u3-design-review.md`).
+  Rows 41 and 42 ask about the limits and about what of a business
+  reaches the model. Then the code: migration 0007 (`services`,
+  `policies`, six settings on a tenant), the rules a profile file must
+  keep, the one function that hands a profile to a turn, and the
+  operator's `profile load` and `profile show`, which work as the
+  tenant's own role so that the cross-tenant role gains nothing. Nothing
+  a customer sees has changed. A third agent reviewed the code
+  (`reviews/2026-11-23-gate4-u3-profile.md`): 15 findings, none High,
+  five Medium, and 14 of 51 mutants alive. The largest: the number of a
+  currency's decimals came from the runtime, which gives the Pakistani
+  rupee none, so a price would have been read a hundred times too large;
+  it is now a fixed list of 25 currencies (row 43). Also fixed: which two
+  names are the same no longer depends on the database's collation; a
+  database that is not UTF-8 is refused; the cross-tenant role can no
+  longer read a tenant's settings; a file that leaves out a list no
+  longer deletes it. A fourth agent checked the fixes
+  (`reviews/2026-11-23-gate4-u3-profile-verification.md`): eleven of
+  fifteen fixed outright, the rest in part as stated but one, and seven
+  smaller things, of which the last fixes (stored hours that make no
+  sense now stop a read; the glossary and the Makefile say what
+  changed) were checked by the author only. What is left is #324.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 40 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 42 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U2, U3, U4 and U5, with U0 still open for four
    answers. U3 builds on rows 34 and 36 as well, and U4 on row 37. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
@@ -529,7 +562,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 40 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 42 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 

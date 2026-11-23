@@ -895,6 +895,8 @@ describe("migration 0006 on a database that has conversations (design note, sect
     try {
       const all = loadMigrations(MIGRATIONS_DIRECTORY);
       const sessionsAt = all.findIndex((migration) => migration.name === "sessions");
+      // This test is about 0006: later migrations are taken down first and not brought back.
+      const upTo = all.slice(0, sessionsAt + 1);
       const migrator = await scratch.client(MIGRATE_ROLE);
       // Back to just before 0006, and whatever came after it.
       for (let step = all.length; step > sessionsAt; step -= 1) {
@@ -959,7 +961,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
       await inbound("edge", t(124), t(124), "e2");
       await inbound("edge", new Date(t(148).getTime() - 1), t(147), "e3");
 
-      expect(await migrateUp(migrator, all)).toContain("sessions");
+      expect(await migrateUp(migrator, upTo)).toContain("sessions");
 
       const hours = (column: string) =>
         `round(extract(epoch FROM ${column}) * 1000 - ${T0}) / ${HOUR}`;
@@ -1066,7 +1068,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
       ]);
 
       // The way back: the messages stay, what 0006 added goes.
-      expect(await migrateDown(migrator, all)).toBe("sessions");
+      expect(await migrateDown(migrator, upTo)).toBe("sessions");
       expect((await admin.query("SELECT count(*)::int AS n FROM messages")).rows).toEqual([
         { n: 10 },
       ]);
@@ -1080,7 +1082,7 @@ describe("migration 0006 on a database that has conversations (design note, sect
         ).rows,
       ).toEqual([{ n: 0 }]);
       // And up again gives the same sessions.
-      await migrateUp(migrator, all);
+      await migrateUp(migrator, upTo);
       expect((await admin.query("SELECT count(*)::int AS n FROM sessions")).rows).toEqual([
         { n: 5 },
       ]);

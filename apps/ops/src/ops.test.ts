@@ -1,6 +1,7 @@
 // The operator's commands against PostgreSQL (ADR 0011, "Confirmation").
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as dbMain from "@polyglot-sales-agent/db";
@@ -30,6 +31,8 @@ import {
 let database: TestDatabase;
 let crossPool: pg.Pool;
 let cross: Database;
+let appPool: pg.Pool;
+let app: Database;
 let administrator: pg.Client;
 let lines: string[];
 const output = { out: (line: string) => lines.push(line) };
@@ -40,11 +43,14 @@ beforeAll(async () => {
   database = await createTestDatabase({ migrate: true });
   crossPool = new pg.Pool({ connectionString: database.url(CROSS_ROLE), max: 4 });
   cross = adopt(CROSS_ROLE, crossPool);
+  appPool = new pg.Pool({ connectionString: database.url(APP_ROLE), max: 4 });
+  app = adopt(APP_ROLE, appPool);
   administrator = await database.administrator();
 }, 30_000);
 
 afterAll(async () => {
   await crossPool.end();
+  await appPool.end();
   await database.drop();
 });
 
@@ -76,7 +82,16 @@ async function added(): Promise<Row[]> {
   seen = all.rows.length;
   return fresh;
 }
-const ops = (...argv: string[]) => run(cross, argv, output);
+/** The files a test has put on the command line, by the name it gave them. */
+const files = new Map<string, Uint8Array>();
+const readFile = (path: string): Uint8Array => {
+  const found = files.get(path);
+  if (found === undefined) {
+    throw new Error("no such file");
+  }
+  return found;
+};
+const ops = (...argv: string[]) => run(cross, argv, output, () => app, readFile);
 const CREATE = [
   "tenant",
   "create",
@@ -707,9 +722,10 @@ describe("the program itself", () => {
   function program(
     argv: string[],
     env: Record<string, string>,
+    input?: Uint8Array,
   ): Promise<{ status: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
-      execFile(
+      const child = execFile(
         process.execPath,
         [main, ...argv],
         { env: { PATH: process.env["PATH"] ?? "", ...env } },
@@ -717,6 +733,7 @@ describe("the program itself", () => {
           resolve({ status: error === null ? 0 : Number(error.code ?? 1), stdout, stderr });
         },
       );
+      child.stdin?.end(input ?? "");
     });
   }
 
@@ -760,6 +777,70 @@ describe("the program itself", () => {
         "DROP TRIGGER refuse_finished ON operator_log; DROP FUNCTION refuse_finished()",
       );
     }
+  }, 30_000);
+
+  test("profile load reads a real file, and the tenant's role is needed for it: without that address the command fails and says which is missing", async () => {
+    const created = await program(
+      [
+        "tenant",
+        "create",
+        "--name",
+        "File Test",
+        "--pack",
+        "booking",
+        "--time-zone",
+        "UTC",
+        "--language",
+        "en",
+        "--as",
+        "Zeeshan",
+      ],
+      { PSA_DB_CROSS_URL: database.url(CROSS_ROLE) },
+    );
+    const tenantId = created.stdout.trim().replace("tenant created: ", "");
+    const fixture = fileURLToPath(
+      new URL("../../../packages/core/fixtures/profile.salon.ar.json", import.meta.url),
+    );
+    const argv = ["profile", "load", "--tenant", tenantId, "--file", fixture, "--as", "Zeeshan"];
+    const without = await program(argv, { PSA_DB_CROSS_URL: database.url(CROSS_ROLE) });
+    expect(without).toEqual({
+      status: 1,
+      stdout: "",
+      stderr: "ops: PSA_DB_APP_URL is not set, and this command needs it\n",
+    });
+    const loaded = await program(argv, {
+      PSA_DB_CROSS_URL: database.url(CROSS_ROLE),
+      PSA_DB_APP_URL: database.url(APP_ROLE),
+    });
+    expect(loaded.status).toBe(0);
+    expect(loaded.stdout).toContain("services: 12 added, 0 changed, 0 removed");
+    expect(loaded.stdout).toContain("size: 1271 of 40000 characters");
+    // From standard input, the same file again: nothing is changed.
+    const piped = await program(
+      ["profile", "load", "--tenant", tenantId, "--file", "-", "--as", "Zeeshan"],
+      { PSA_DB_CROSS_URL: database.url(CROSS_ROLE), PSA_DB_APP_URL: database.url(APP_ROLE) },
+      readFileSync(fixture),
+    );
+    expect(piped.status).toBe(0);
+    expect(piped.stdout).toContain("services: 0 added, 0 changed, 0 removed");
+    expect(piped.stdout).toContain("policies: 0 added, 0 changed, 0 removed");
+    // A file that is not there is refused as written wrongly, before any connection.
+    const missing = await program(
+      [
+        "profile",
+        "load",
+        "--tenant",
+        tenantId,
+        "--file",
+        "/nowhere/at/all.json",
+        "--as",
+        "Zeeshan",
+      ],
+      {},
+    );
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("ops: --file could not be read");
+    expect(missing.stderr).not.toContain("nowhere");
   }, 30_000);
 
   test("without its setting, or with the wrong role's, it does nothing and shows no address", async () => {
@@ -858,5 +939,263 @@ describe("nothing but ops can reach the operator's functions (ADR 0011, rule 2)"
     expect(FROM_OPS.test('import { run } from "../../ops/src/commands.ts";')).toBe(true);
     expect(FROM_OPS.test('import { run } from "@polyglot-sales-agent/ops";')).toBe(true);
     expect(Object.keys(opsCommands)).toContain("run");
+  });
+});
+
+describe("profile load and profile show (M3 unit U3; design note, section 5)", () => {
+  const PROFILE = {
+    settings: {
+      currency: "KWD",
+      support_contact: "+15550100",
+      notification_email: "owner@example.com",
+      business_hours: [{ weekday: 7, opens: "09:00", closes: "17:00" }],
+      opening_hours: [{ weekday: 7, opens: "10:00", closes: "24:00" }],
+    },
+    services: [{ name: "Consultation", description: "Private-Description", price_minor: 15000 }],
+    policies: [
+      { title: "Reaching us", body: "Write to desk@example.com or see https://example.com/pay" },
+    ],
+  };
+  const put = (name: string, value: unknown): void => {
+    files.set(
+      name,
+      new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value)),
+    );
+  };
+  let tenantId = "";
+
+  beforeEach(async () => {
+    await administrator.query(
+      "TRUNCATE services, policies, audit_log, channel_accounts, tenants CASCADE",
+    );
+    await ops(...CREATE, "--as", "Zeeshan");
+    tenantId = lines.at(-1)?.replace("tenant created: ", "") as string;
+    lines = [];
+    await added();
+  });
+
+  test("load: makes the profile what the file says, and records the tenant, the file's hash and its counts, never its name or anything in it", async () => {
+    put("/home/Private Person/profile.json", PROFILE);
+    await ops(
+      "profile",
+      "load",
+      "--tenant",
+      tenantId,
+      "--file",
+      "/home/Private Person/profile.json",
+      "--as",
+      "Zeeshan",
+    );
+    expect(lines).toEqual([
+      `profile loaded for ${tenantId}`,
+      "services: 1 added, 0 changed, 0 removed",
+      "policies: 1 added, 0 changed, 0 removed",
+      "size: 98 of 40000 characters",
+    ]);
+    const rows = await added();
+    expect(rows.map((row) => [row.phase, row.command, row.outcome, row.subject_id])).toEqual([
+      ["started", "profile load", null, null],
+      ["finished", "profile load", "ok", tenantId],
+    ]);
+    expect(rows[0]?.arguments).toEqual({
+      tenant: tenantId,
+      sha256: createHash("sha256")
+        .update(files.get("/home/Private Person/profile.json") as Uint8Array)
+        .digest("hex"),
+      services: "1",
+      policies: "1",
+    });
+    expect(JSON.stringify(rows)).not.toMatch(/Private|profile\.json|example\.com|15000/);
+    const stored = await administrator.query(
+      "SELECT name, price_minor FROM services WHERE tenant_id = $1",
+      [tenantId],
+    );
+    expect(stored.rows).toEqual([{ name: "Consultation", price_minor: "15000" }]);
+    // And the tenant's own audit log says an operator did it, and who they said they were.
+    const audit = await administrator.query("SELECT action, details FROM audit_log");
+    expect(audit.rows).toMatchObject([
+      {
+        action: "profile.loaded",
+        details: {
+          operatorName: "Zeeshan",
+          servicesAdded: 1,
+          sha256: createHash("sha256")
+            .update(files.get("/home/Private Person/profile.json") as Uint8Array)
+            .digest("hex"),
+        },
+      },
+    ]);
+  });
+
+  test("load: a file that breaks a rule is refused before anything is recorded or changed, with each problem's place and nothing that was typed", async () => {
+    put("bad.json", {
+      settings: { ...PROFILE.settings, currency: "private-currency" },
+      services: [{ name: "Private-Name", price_minor: "private-price" }],
+    });
+    const error = await ops(
+      "profile",
+      "load",
+      "--tenant",
+      tenantId,
+      "--file",
+      "bad.json",
+      "--as",
+      "Zeeshan",
+    ).catch((caught) => caught);
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toContain("nothing was changed");
+    expect(error.message).toContain("  - settings.currency:");
+    expect(error.message).toContain("  - services[0].price_minor:");
+    expect(error.message).not.toMatch(/[Pp]rivate/);
+    expect(await added()).toEqual([]);
+    expect((await administrator.query("SELECT 1 FROM services")).rows).toEqual([]);
+  });
+
+  test("load: a file that cannot be read, a tenant that is not an identifier and an option of another command are each refused before anything is done", async () => {
+    put("good.json", PROFILE);
+    for (const argv of [
+      ["profile", "load", "--tenant", tenantId, "--file", "nowhere.json", "--as", "Zeeshan"],
+      [
+        "profile",
+        "load",
+        "--tenant",
+        "Private Person",
+        "--file",
+        "nowhere.json",
+        "--as",
+        "Zeeshan",
+      ],
+      ["profile", "load", "--tenant", tenantId, "--as", "Zeeshan"],
+      [
+        "profile",
+        "load",
+        "--tenant",
+        tenantId,
+        "--file",
+        "x",
+        "--pack",
+        "booking",
+        "--as",
+        "Zeeshan",
+      ],
+      ["profile", "show", "--as", "Zeeshan"],
+      ["profile", "show", "--tenant", tenantId, "--file", "x", "--as", "Zeeshan"],
+      // A file that can be read, and a tenant that is no identifier.
+      ["profile", "load", "--tenant", "Private Person", "--file", "good.json", "--as", "Zeeshan"],
+      ["profile", "load", "--tenant", `${tenantId}0`, "--file", "good.json", "--as", "Zeeshan"],
+      ["profile", "show", "--tenant", "Private Person", "--as", "Zeeshan"],
+    ]) {
+      const error = await ops(...argv).catch((caught) => caught);
+      expect(error, argv.join(" ")).toBeInstanceOf(UsageError);
+      expect(String(error.message)).not.toContain("Private");
+    }
+    expect(await added()).toEqual([]);
+  });
+
+  test("load: a tenant that does not exist fails, is recorded as failed, and changes nothing", async () => {
+    put("p.json", PROFILE);
+    const error = await ops(
+      "profile",
+      "load",
+      "--tenant",
+      "00000000-0000-4000-8000-000000000000",
+      "--file",
+      "p.json",
+      "--as",
+      "Zeeshan",
+    ).catch((caught) => caught);
+    expect(error).toMatchObject({ code: "tenant-not-found" });
+    expect((await added()).map((row) => [row.phase, row.outcome])).toEqual([
+      ["started", null],
+      ["finished", "tenant-not-found"],
+    ]);
+    expect((await administrator.query("SELECT 1 FROM services")).rows).toEqual([]);
+  });
+
+  test("show: prints what the assistant is given, each price in its currency, the size, what could be sent on, and what is missing to answer; and is recorded", async () => {
+    put("p.json", PROFILE);
+    await ops("profile", "load", "--tenant", tenantId, "--file", "p.json", "--as", "Zeeshan");
+    lines = [];
+    await added();
+    await ops("profile", "show", "--tenant", tenantId, "--as", "Zeeshan");
+    const ids = await administrator.query<{ id: string }>(
+      "SELECT id FROM services UNION ALL SELECT id FROM policies",
+    );
+    expect(lines).toEqual([
+      'business: "Noor Dental"  Asia/Riyadh',
+      "currency: KWD, 3 decimals",
+      'support contact: "+15550100"',
+      "1 active service",
+      `  ${ids.rows[0]?.id}  15.000 KWD  "Consultation"  "Private-Description"`,
+      "1 policy",
+      `  ${ids.rows[1]?.id}  "Reaching us"  "Write to desk@example.com or see https://example.com/pay"`,
+      "opening hours, weekday 1 is Monday:",
+      "  1  closed",
+      "  2  closed",
+      "  3  closed",
+      "  4  closed",
+      "  5  closed",
+      "  6  closed",
+      "  7  10:00-24:00",
+      "size: 98 of 40000 characters",
+      "2 links, addresses or long numbers in the texts, which the assistant may send:",
+      '  "desk@example.com"',
+      '  "https://example.com/pay"',
+      "settings to answer: complete",
+      "channel: not connected",
+    ]);
+    const rows = await added();
+    expect(rows.map((row) => [row.phase, row.command, row.outcome, row.subject_id])).toEqual([
+      ["started", "profile show", null, null],
+      ["finished", "profile show", "ok", tenantId],
+    ]);
+    expect(rows[0]?.arguments).toEqual({ tenant: tenantId });
+  });
+
+  test("show: a tenant with nothing loaded, and text that could move the cursor is printed as a code", async () => {
+    await ops("profile", "show", "--tenant", tenantId, "--as", "Zeeshan");
+    expect(lines).toEqual([
+      'business: "Noor Dental"  Asia/Riyadh',
+      "currency: not set",
+      "support contact: not set",
+      "0 active services",
+      "0 policies",
+      "opening hours: not set",
+      "size: 0 of 40000 characters",
+      "0 links, addresses or long numbers in the texts, which the assistant may send:",
+      "settings to answer: missing currency, support_contact, notification_email, business_hours",
+      "channel: not connected",
+    ]);
+    // Not through the loader, which would refuse it: straight into the table.
+    await administrator.query(
+      `INSERT INTO policies (tenant_id, title, title_key, body)
+       VALUES ($1, 't' || chr(27) || '[2Jt', 't', 'a' || chr(27) || '[2Jb')`,
+      [tenantId],
+    );
+    await administrator.query(
+      `INSERT INTO services (tenant_id, name, name_key, description, price_minor)
+       VALUES ($1, 'n' || chr(27) || '[2Jn', 'n', 'd' || chr(27) || '[2Jd', 1)`,
+      [tenantId],
+    );
+    await administrator.query(
+      "UPDATE tenants SET currency = 'SAR', support_contact = 'c' || chr(27) || '[2Jc' WHERE id = $1",
+      [tenantId],
+    );
+    lines = [];
+    await ops("profile", "show", "--tenant", tenantId, "--as", "Zeeshan");
+    expect(lines.join("\n")).not.toContain(String.fromCharCode(27));
+    // Written out as the six characters of its code, not sent to the terminal.
+    for (const letter of ["a", "t", "n", "d", "c"]) {
+      expect(lines.join("\n")).toContain(
+        `${letter}${String.fromCharCode(92)}u001b[2J${letter === "a" ? "b" : letter}`,
+      );
+    }
+  });
+
+  test("the usage text names both commands and says what the file is", () => {
+    expect(USAGE).toContain("ops profile load --tenant");
+    expect(USAGE).toContain("ops profile show --tenant");
+    expect(USAGE).toContain("it does not name is deleted, and both lists must be written");
+    expect(USAGE).toContain("PSA_DB_APP_URL");
   });
 });

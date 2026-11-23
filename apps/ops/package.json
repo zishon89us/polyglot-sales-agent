@@ -5,6 +5,7 @@
   "description": "The operator's commands, run on the server (ADR 0011).",
   "type": "module",
   "dependencies": {
+    "@polyglot-sales-agent/core": "workspace:*",
     "@polyglot-sales-agent/db": "workspace:*"
   },
   "devDependencies": {

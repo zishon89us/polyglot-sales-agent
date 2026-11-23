@@ -83,12 +83,22 @@ async function admin(database?: string): Promise<pg.Client> {
   return client;
 }
 
-export async function createTestDatabase(options: { migrate: boolean }): Promise<TestDatabase> {
+export async function createTestDatabase(options: {
+  migrate: boolean;
+  /** Only to show that a database of another encoding is refused. */
+  latin1?: boolean;
+}): Promise<TestDatabase> {
   const name = `psa_test_${randomBytes(6).toString("hex")}`;
   const server = await admin();
   try {
     await ensureRoles(server, PASSWORDS);
-    await server.query(`CREATE DATABASE ${name}`);
+    // The encoding is said: lengths are counted in characters only in UTF-8
+    // (migration 0007 refuses another), and a server's default may differ.
+    await server.query(
+      options.latin1 === true
+        ? `CREATE DATABASE ${name} ENCODING 'LATIN1' LOCALE 'C' TEMPLATE template0`
+        : `CREATE DATABASE ${name} ENCODING 'UTF8' TEMPLATE template0`,
+    );
   } finally {
     await server.end();
   }
@@ -205,6 +215,15 @@ export async function seedTenant(
       `INSERT INTO audit_log (tenant_id, action, subject_type, subject_id)
        VALUES ($1, 'seeded', 'contact', $2)`,
       [tenantId, contactId],
+    );
+    await tx.query(
+      `INSERT INTO services (tenant_id, name, name_key, description, price_minor)
+       VALUES ($1, $2, lower($2), 'a description', 1500)`,
+      [tenantId, `Service ${label}`],
+    );
+    await tx.query(
+      "INSERT INTO policies (tenant_id, title, title_key, body) VALUES ($1, $2, lower($2), 'a body')",
+      [tenantId, `Policy ${label}`],
     );
     return { tenantId, channelAccountId, contactId, conversationId, sessionId, receivingNumberId };
   });

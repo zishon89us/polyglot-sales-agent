@@ -94,7 +94,7 @@ the allowed range.
 | Time zone | Required at setup | Any IANA time zone | US-B5, all metrics |
 | Default language | Required at setup | A supported language that is also an enabled template language | US-C5, US-C9, US-C12, fallback message |
 | Enabled template languages | Default language | Arabic, English, or both | US-C9, US-C16 |
-| Currency | Required at setup | Any ISO 4217 code | US-B1 |
+| Currency | Required at setup | Any ISO 4217 code. As built in M3, one of a list of 25 that the project keeps; whether that stands is decisions row 43 | US-B1 |
 | Support contact | Required at setup | A phone number or an email address | US-C6, US-C14 |
 | Notification email address | Required at setup | One email address | US-C14, US-C15 |
 | Business hours | Required at setup | Per weekday, zero or more periods | US-C6, US-C14 |

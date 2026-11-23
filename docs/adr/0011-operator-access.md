@@ -224,3 +224,24 @@ Each point is the agent's and awaits the maintainer.
 
 What is not built is listed in #293.
 
+## Amendment, 2026-11-23: the profile commands use the tenant's role too (M3 unit U3; decisions row 42)
+
+Proposed by the agent with the code.
+
+- **Commands built:** `profile load` and `profile show`. Both are
+  recorded like every command.
+- **Which database role.** The decision above has `ops` connect as the
+  cross-tenant role and no other. These two commands write and read one
+  tenant's services, policies and settings. Granting the cross-tenant
+  role that right would let a fault under it, in the API or the worker,
+  which hold the same credential, rewrite every tenant's prices. So `ops`
+  is also given the application role's address (`PSA_DB_APP_URL`), and
+  these commands do their work as that role inside the one tenant's
+  scope. The cross-tenant role has no privilege on `services` or
+  `policies` and can neither read nor change a tenant's settings (its
+  privilege on `tenants` is by column, and names none of them); it still
+  writes the operator's record.
+- **What is recorded:** the tenant, the SHA-256 of the file, and how many
+  services and policies it holds. Never the file's name or contents. A
+  load also writes one row to the tenant's own audit log, with the name
+  the operator gave and what was added, changed and removed.
