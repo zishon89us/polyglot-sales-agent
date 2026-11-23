@@ -91,11 +91,11 @@ result that is not retryable and cannot have arrived:
 | --- | --- | --- |
 | S1 | 1 to `max` buttons, each within the limits, titles all different, payloads all different | Sent; the channel's identifier |
 | S2 | No button, or more than `max` | `bad-buttons` |
-| S3 | A title that is empty, over `titleMax`, blank, with a space at either end, with a control character or a line break, or the same as another's once both are normalised (NFC), folded to lower case and trimmed | `bad-buttons` |
+| S3 | A title that is empty, over `titleMax`, blank (nothing left once space and characters that show nothing are removed), with a space at either end, with a control character, a line or paragraph separator, a character that shows nothing (a direction override, a zero-width space; the two joiners that some scripts need inside a word are allowed), or half of a surrogate pair; or the same as another's once both are brought to one compatibility form (NFKC) and one case, joiners are removed and every run of space is one space | `bad-buttons` |
 | S4 | A payload that is empty, over `payloadMax`, the same as another's, or not printable ASCII without spaces | `bad-buttons` |
-| S5 | A body that is empty or over `bodyMax` | `bad-body` |
+| S5 | A body that is empty, blank as S3 has it, holds U+0000, or is over `bodyMax` | `bad-body` |
 | S6 | A channel with no buttons | `no-buttons` |
-| S7 | `sendText` with an empty body or one over `textMax` | `bad-body`. New: M2 sent any body and let the channel refuse |
+| S7 | `sendText` with a body that is empty, blank, holds U+0000, or is over `textMax` | `bad-body`. New: M2 sent any body and let the channel refuse |
 | S8 | Every other failure of a send (no recipient, a bad sender, a refusal, a timeout) | The same result for both sends |
 
 Lengths are in UTF-16 units (section 1).
@@ -114,7 +114,9 @@ within every channel's limit; a model's reply carries none.
   the guardrail policy puts the person button on two texts and the
   opt-in button on one, and names no text with a stop button);
 - `coreButton(action)`, which builds `core.<action>` for one of the
-  three, and `readButtonPayload(text)`.
+  three, `readButtonPayload(text)`, and `coreButtonOf(text)`, which
+  gives the core's action only for exactly `core.<action>`: `core.stop.x`
+  is a payload with a rest, and is not the stop button.
 
 A payload is `<owner>.<action>` or `<owner>.<action>.<rest>`. Owner and
 action are 1 to 40 of the letters a to z, digits and hyphens, starting
@@ -169,7 +171,7 @@ Nothing in M3 needs its answer.
 | K2 | A message sent in another conversation of the same tenant | None |
 | K3 | A message of another tenant | None: the lookup runs in the tenant's scope and cannot see it |
 | K4 | An identifier nothing has | None |
-| K5 | Nothing; or something that is not an identifier (not 1 to 128 printable characters without spaces), which is stored as nothing | None |
+| K5 | Nothing; or something that is not an identifier (not 1 to 128 printable ASCII characters without spaces), which is stored as nothing | None |
 | K6 | A message **from** this customer, not to them | None: a button is on a message that was sent |
 | K7 | A message whose identifier was recorded after the tap was stored | That message, once it is recorded |
 | K8 | A message that was sent and never got an identifier (its send ended unknown) | None, for good. **None means "not matched", never "forged"** |
@@ -207,7 +209,7 @@ renames any row an earlier version stored as `button` with no payload
 | M1 | A text | As before |
 | M2 | A picture or a video with a caption | `kind` `text`, the caption as `body`, `caption_of`. The media is not fetched and nothing of it is kept (US-C12, 2 and 3) |
 | M3 | A picture or a video with no caption, with one that is not text, or with one that is empty once U+0000 is removed | `kind` `image` or `video`, no body: unread, as before |
-| M4 | A caption over the longest text the parser takes (65,536) | Unread, as M3 |
+| M4 | A caption over the longest text the parser takes (65,536) | Unread, as M3. A typed text over that length is still counted as malformed and left out, as M2 built it: the two differ, and making them one is in the follow-up issue |
 | M5 | A document, a sticker, a voice note, with or without a caption | Unread, as before |
 | M6 | A tap on a reply button | `kind` `button`, `button_payload`, `in_reply_to`, no body |
 | M7 | A tap on a template's quick-reply button | The same |

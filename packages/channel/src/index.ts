@@ -72,9 +72,34 @@ export interface ChannelLimits {
   } | null;
 }
 
-const CONTROL = /\p{Cc}/u;
+/** A control character or a line break of any kind. */
+const CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+/**
+ * A character that shows nothing and can reorder or hide what is beside it.
+ * The two joiners are left: some scripts need them inside a word.
+ */
+const HIDDEN = /(?![\u200c\u200d])\p{Cf}/u;
+/** Half of a pair with no other half: not text, and not every store or channel takes it. */
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+/** Whether a text shows nothing at all. */
+const blank = (text: string): boolean => text.replace(/[\p{Cf}\s]/gu, "") === "";
+/** Whether a body may be sent: something to read, and no U+0000. */
+const sendable = (body: unknown, max: number): body is string =>
+  typeof body === "string" && body.length <= max && !blank(body) && !body.includes("\u0000");
 /** A title as two are compared: the same letters in another case or form are the same title. */
-const titleKey = (title: string): string => title.normalize("NFC").toLowerCase().trim();
+/**
+ * What two titles are compared by: one compatibility form, one case (upper
+ * first, so that a letter with a longer upper-case form meets it), no
+ * joiners, and one space wherever there is space.
+ */
+const titleKey = (title: string): string =>
+  title
+    .normalize("NFKC")
+    .toUpperCase()
+    .toLowerCase()
+    .replace(/[\u200c\u200d]/g, "")
+    .replace(/\s+/gu, " ")
+    .trim();
 
 /**
  * Whether a text with buttons would be refused by a channel with these
@@ -102,7 +127,10 @@ export function checkButtonMessage(
       title.length < 1 ||
       title.length > allowed.titleMax ||
       title !== title.trim() ||
+      blank(title) ||
       CONTROL.test(title) ||
+      HIDDEN.test(title) ||
+      LONE_SURROGATE.test(title) ||
       titles.has(titleKey(title)) ||
       typeof payload !== "string" ||
       payload.length > allowed.payloadMax ||
@@ -114,7 +142,7 @@ export function checkButtonMessage(
     titles.add(titleKey(title));
     payloads.add(payload);
   }
-  if (typeof body !== "string" || body.length < 1 || body.length > allowed.bodyMax) {
+  if (!sendable(body, allowed.bodyMax)) {
     return "bad-body";
   }
   return undefined;
@@ -122,9 +150,7 @@ export function checkButtonMessage(
 
 /** Whether a text would be refused by a channel with these limits. */
 export function checkText(limits: ChannelLimits, body: string): "bad-body" | undefined {
-  return typeof body !== "string" || body.length < 1 || body.length > limits.textMax
-    ? "bad-body"
-    : undefined;
+  return sendable(body, limits.textMax) ? undefined : "bad-body";
 }
 
 /** The result of a message that was refused before any call was made. */

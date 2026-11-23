@@ -1,5 +1,9 @@
 -- A tap on a button and a caption, as they are stored (M3 unit U5; design
 -- note docs/design/notes/m3-u5-buttons-captions.md, section 4).
+--
+-- Stop the API and the workers before running this: it reads every row of
+-- `messages` while holding the table, to rename old rows and to check the
+-- new constraints. How long that takes on a large table is not measured.
 
 -- `button` is this system's own name for a tap that was read. Before this
 -- migration a channel's own type of that name (a template's quick reply)

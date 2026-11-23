@@ -299,6 +299,14 @@ describe("parseWebhook, on the fixtures of 2026-11-24: taps and captions", () =>
     expect(first(later("inbound-list-reply.json"))).toMatchObject({
       content: { type: "unsupported", channelType: "interactive" },
     });
+    const withText = first(
+      changed("inbound-list-reply.json", (m) => {
+        m["text"] = { body: "read me as text" };
+      }),
+    );
+    expect(withText).toMatchObject({
+      content: { type: "unsupported", channelType: "interactive" },
+    });
   });
 
   test("a typed text has no captionOf at all", () => {

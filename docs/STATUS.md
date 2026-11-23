@@ -562,6 +562,13 @@ M0 Inception met its exit criteria on 2026-11-16; see
   reply is still the echo. A document with a typed question stays
   unread. No eval score exists (rows 31 and 32). Row 46 asks whether
   start and opt-in are one button.
+  A third agent reviewed the code
+  (`reviews/2026-11-24-gate4-u5-buttons-captions.md`): 11 findings, none
+  High, one Medium, and 6 of 54 mutants alive (one equivalent). The
+  Medium one: a button's title could be blank to the eye, hold a line
+  break or a direction override, or differ from another only in form.
+  It is fixed, keeping the two joiners some scripts need inside a word;
+  so are the test gaps. What is left is #328.
 
 ## Next
 

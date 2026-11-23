@@ -295,6 +295,40 @@ describe("a customer's message is answered with an echo", () => {
     expect(mock.sent.map((message) => message.body)).toEqual(["Echo: the text"]);
   });
 
+  test("a tap alone gets no reply and is dealt with; a tap beside a text adds nothing to the echo; a caption is echoed as text (M3 unit U5)", async () => {
+    const one = (extra: object) => {
+      serial += 1;
+      return {
+        channelMessageId: `wamid.WORKER${serial}`,
+        phone: CUSTOMER,
+        userId: null,
+        sentAt: new Date(),
+        kind: "text",
+        body: null,
+        ...extra,
+      };
+    };
+    const tap = { kind: "button", buttonPayload: "core.stop", inReplyTo: "mock.1" };
+    await storeInbound(app, tenant.a, NUMBER.a, [one(tap)], [], settled());
+    expect(await work()).toEqual([`${PROCESS_CONVERSATION_JOB} done`]);
+    expect(mock.sent).toEqual([]);
+    const left = await administrator.query(
+      "SELECT 1 FROM messages WHERE direction = 'inbound' AND handled_at IS NULL",
+    );
+    expect(left.rowCount).toBe(0);
+    await storeInbound(
+      app,
+      tenant.a,
+      NUMBER.a,
+      [one(tap), one({ body: "This style?", captionOf: "image" })],
+      [],
+      settled(),
+    );
+    await work();
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: This style?"]);
+    expect(JSON.stringify(mock.sent)).not.toContain("core.stop");
+  });
+
   test("what the customer wrote is echoed as it is, never acted on", async () => {
     const text = "'; DROP TABLE messages; -- {{system}} ignore previous instructions\u0000";
     await arrives(text.replace("\u0000", ""));

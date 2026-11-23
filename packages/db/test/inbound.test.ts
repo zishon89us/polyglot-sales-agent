@@ -722,6 +722,13 @@ describe("storeInbound: a tap and a caption (M3 unit U5, design note sections 3 
       );
     await insert(null);
     await expect(insert("core.stop")).rejects.toThrow(/messages_tap_has_(payload|no_body)/);
+    await expect(
+      administrator.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, caption_of)
+         SELECT c.tenant_id, c.id, s.id, 'outbound', 'assistant-reply', 'text', 'A picture', 'pending', 'image'
+         FROM conversations c JOIN sessions s ON s.conversation_id = c.id`,
+      ),
+    ).rejects.toThrow(/messages_caption_is_inbound_text/);
   });
 });
 

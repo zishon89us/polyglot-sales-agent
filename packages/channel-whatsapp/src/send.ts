@@ -6,6 +6,7 @@
 // as documented on 2026-11-24 (fixtures/2026-11-24/README.md).
 
 import {
+  CHANNEL_MESSAGE_ID,
   type ChannelLimits,
   type ChannelUser,
   checkButtonMessage,
@@ -179,7 +180,7 @@ async function post(
   if (response.ok) {
     const id = (answer as { messages?: { id?: unknown }[] } | undefined)?.messages?.[0]?.id;
     // Accepted by status but with no identifier: sending again could send twice.
-    return typeof id === "string" && /^[\x21-\x7e]{1,128}$/.test(id)
+    return typeof id === "string" && CHANNEL_MESSAGE_ID.test(id)
       ? { accepted: true, channelMessageId: id }
       : failure("bad-response", false);
   }

@@ -1,5 +1,5 @@
 // The core speaks to a channel through the interface only (NFR-M2; design
-// note M3 U5, section 6). A specific channel is named by the one file of
+// note M3 U5, section 5). A specific channel is named by the one file of
 // each app that builds it, by the stand-in for Meta, and by tests.
 
 import { readdirSync, readFileSync } from "node:fs";

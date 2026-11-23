@@ -164,7 +164,13 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
     test("a text that is empty or longer than the channel carries is refused before any call", async () => {
       const { channel, from } = await subject();
       const to = { phone: "+15550142", userId: null };
-      for (const body of ["", "x".repeat(channel.limits.textMax + 1)]) {
+      for (const body of [
+        "",
+        "  \n",
+        "\u200b",
+        "a\u0000b",
+        "x".repeat(channel.limits.textMax + 1),
+      ]) {
         expect(await channel.sendText(from, to, body)).toEqual({
           accepted: false,
           retryable: false,
@@ -206,6 +212,14 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
         [...full, { payload: "core.more", title: "More" }],
         [{ payload: "core.stop", title: "t".repeat(allowed.titleMax + 1) }],
         [{ payload: "core.stop", title: "" }],
+        [{ payload: "core.stop", title: " Stop" }],
+        [{ payload: "core.stop", title: "a\nb" }],
+        [{ payload: "core.stop", title: "a\u2028b" }],
+        [{ payload: "core.stop", title: "a\u202eb" }],
+        [{ payload: "core.stop", title: "\u200b" }],
+        [{ payload: "core.stop", title: "\u200c" }],
+        [{ payload: "core.stop", title: "a\ud800" }],
+        [{ payload: "core.stop\n", title: "Stop" }],
         [{ payload: `core.${"x".repeat(allowed.payloadMax)}`, title: "Stop" }],
         [{ payload: "core stop", title: "Stop" }],
         [{ payload: "", title: "Stop" }],
@@ -219,6 +233,19 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
                 { payload: "core.stop", title: "Stop" },
                 { payload: "core.stop", title: "Start" },
               ],
+              ...(
+                [
+                  ["Stop", "stop"],
+                  ["\u00e9", "e\u0301"],
+                  ["Stop", "\uff33\uff54\uff4f\uff50"],
+                  ["STRASSE", "stra\u00dfe"],
+                  ["a b", "a  b"],
+                  ["ab", "a\u200db"],
+                ] as const
+              ).map(([first, second]) => [
+                { payload: "core.stop", title: first },
+                { payload: "core.start", title: second },
+              ]),
             ]
           : []),
       ];
@@ -228,9 +255,17 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
           JSON.stringify(buttons),
         ).toEqual(refused("bad-buttons"));
       }
-      for (const body of ["", "b".repeat(allowed.bodyMax + 1)]) {
-        expect(await channel.sendButtons(from, to, body, one)).toEqual(refused("bad-body"));
+      for (const body of ["", " \n\t", "\u200b", "a\u0000b", "b".repeat(allowed.bodyMax + 1)]) {
+        expect(await channel.sendButtons(from, to, body, one), JSON.stringify(body)).toEqual(
+          refused("bad-body"),
+        );
       }
+      // A joiner inside a word is kept: some scripts need it.
+      expect(
+        await channel.sendButtons(from, to, "hello", [
+          { payload: "core.stop", title: "\u0645\u06cc\u200c\u062e" },
+        ]),
+      ).toMatchObject({ accepted: true });
     });
 
     test("a send is answered with an identifier, or with a failure that says whether to retry", async () => {
