@@ -66,7 +66,7 @@ All of this is code. The model is not called until every step has passed.
 | --- | --- | --- | --- |
 | I1 | The order of checks, steps 1 to 14 | Signature, duplicate, tenant, the emergency phrase check (4a), opt-out and opt-in, Confirm button, follow-up reply, tenant answering, rate pause, handed over, person button, batching, no text, degraded mode. Defined in `docs/design/state-machines.md` section 1, which is the authority | State-machine tests |
 | I2 | Only text reaches the model | Voice notes, images and other unsupported types are never stored or sent; a caption is treated as text | US-C12 tests |
-| I3 | Input length | A batch longer than the limit is truncated by the rule set in #158 | Unit test, once #158 sets the number |
+| I3 | Input length | A batch's text beyond 8,000 code points is left out: the newest messages are kept whole, the older are not given, and the model is told how many (#158; glossary, "A batch's customer text"). The session's earlier messages and tool results are not bounded by this | Unit test of the rule (M3 unit U4); its use in the turn is U7's |
 | I4 | No identity in the prompt | No phone number, no profile name (G14) | Unit test |
 | I5 | Data is marked as data | Customer messages, business data and tool results are each wrapped in a delimiter that the wrapped text cannot close: the delimiter carries a random value made for that call, and any copy of it inside the text is removed | Unit test with text that contains the delimiter |
 | I6 | Only this tenant, only this session | The prompt holds the tenant's profile as identified items, a calendar (section 4), and this session's messages | Unit test on prompt assembly |
@@ -84,7 +84,7 @@ what the model is given and allowed to do, not on spotting bad input.
 | A3 | Tools for the `booking` pack: read services and policies; find free slots; create, move or cancel this contact's bookings | Code: no other tool exists | Tool inventory test |
 | A4 | A state-changing tool call is idempotent | Code: the partial unique index on active bookings, the conditional move and the idempotent cancel (`architecture.md`, "Processing one turn", step 4) | NFR-R3 test |
 | A5 | At most 3 future bookings per contact | Code | US-B2 test |
-| A6 | A bounded number of tool rounds and a bounded output length per reply | Code | Once #158 sets the numbers |
+| A6 | At most 4 rounds of tool calls in a reply, each of at most 4 calls; at most 4,096 output tokens on a call (#158; glossary) | Code | Unit tests of the limits on one answer and one call (U4); the rounds are counted in the turn (U7) |
 
 ## 4. After the model
 
@@ -100,12 +100,12 @@ decides the outcome.
 | O4 | No total. Covered by O3: a computed total is an amount with no passing claim. A total that happens to equal a stored price cannot be told apart and is not caught | Fallback |
 | O5 | Contact details and links, as defined below | Fallback |
 | O6 | The reply contains neither the deployment's canary string, which the prompt loader places in every prompt, nor 12 or more consecutive words of the instruction text | Fallback |
-| O7 | The reply is not empty and not longer than the limit set in #158 | Fallback |
+| O7 | The reply is not empty and not longer than 1,200 code points (#158; glossary) | Fallback |
 | O8 | Code adds the disclosure if this is the session's first outbound message, then applies the message-class checks and sends | As state machines §7 |
 
 Every check in this table is code, and each is tested by unit tests with a
-fake model that returns hostile output (ADR 0007). O7 has no number yet and
-is not testable until #158 sets one.
+fake model that returns hostile output (ADR 0007). O7's number is set (M3
+unit U4); the check itself is built with the others (U9).
 
 "Fallback" means the reply is not sent and the fallback message is sent in
 its place (US-C4 criterion 10). The one exception: if a state-changing tool
@@ -117,6 +117,31 @@ A failed check is not retried with the model. One retry might often
 succeed, but it doubles cost and delay on exactly the replies most likely to
 be attacks. Evals measure how often correct replies are blocked (E12); if
 that rate is too high, a single retry is the first thing to reconsider.
+
+### The names code uses
+
+The flags and the core's claim kinds, as code and the output structure
+spell them (`packages/core/src/names.ts`; `make check` compares the two).
+What each flag leads to is in section 6 and in the table above; a pack
+registers further claim kinds (ADR 0014), and the kinds for a time of an
+appointment and for a calendar date are the booking pack's (ADR 0012).
+
+| Flag | Set when the customer |
+| --- | --- |
+| `asks-for-person` | asks for a person, in free text |
+| `asks-to-stop` | asks to receive no more messages, in free text |
+| `sensitive-topic` | raises a topic on the list of section 6 |
+| `data-request` | asks to see or delete their personal data |
+| `emergency` | describes an emergency |
+| `asks-to-resume` | wishes to receive messages again, in free text |
+| `asks-if-person` | asks whether they are talking to a person |
+
+| Core claim kind | Row of the table in O3 |
+| --- | --- |
+| `price` | Price |
+| `opening-hours` | Opening hours |
+| `service-detail` | Service detail |
+| `policy` | Policy |
 
 ### O3: values and claims
 

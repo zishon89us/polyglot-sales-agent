@@ -1,5 +1,7 @@
 // The boundary test of ADR 0012, "Confirmation": the core names nothing of
-// the booking pack, and imports no pack.
+// the booking pack, and imports no pack. Since ADR 0014 the core side may
+// import the pack interface, and two files the registry; the rules are at
+// the end of this file.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -85,10 +87,12 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
     expect(CORE).toEqual([
       "apps/api",
       "apps/worker",
+      "packages/ai",
       "packages/channel",
       "packages/channel-whatsapp",
       "packages/core",
       "packages/db",
+      "packages/pack-interface",
     ]);
   });
 
@@ -160,48 +164,209 @@ describe("the core names nothing of the booking pack (ADR 0012)", () => {
   });
 });
 
-describe("the core imports no pack (ADR 0012)", () => {
-  const PACK =
-    /["'`]@polyglot-sales-agent\/pack-[^"'`]*["'`]|["'`][^"'`]*\/packs?(-[a-z-]+)?\/[^"'`]*["'`]/;
+// What ADR 0014 lets the core side import of the packs. A package's name
+// tells which of three things it is: `pack-interface`, `packs-registry`, or
+// a pack, `pack-<name>`. That is why `interface` and `registry` are not
+// names a pack may have.
+const quoted = (inside: string): RegExp => new RegExp(`["'\`]${inside}["'\`]`);
+/** A pack itself, by its package's name or by a path into its folder. */
+const A_PACK = new RegExp(
+  `${quoted("@polyglot-sales-agent/pack-(?!interface[\"'`/])[^\"'`]*").source}|${
+    quoted("[^\"'`]*/packs/(?!registry[\"'`/])[^\"'`]*").source
+  }`,
+);
+const THE_INTERFACE = new RegExp(
+  `${quoted("@polyglot-sales-agent/pack-interface(/[^\"'`]*)?").source}|${
+    quoted("[^\"'`]*/pack-interface(/[^\"'`]*)?").source
+  }`,
+);
+const THE_REGISTRY = new RegExp(
+  `${quoted("@polyglot-sales-agent/packs-registry(/[^\"'`]*)?").source}|${
+    quoted("[^\"'`]*/packs/registry(/[^\"'`]*)?").source
+  }`,
+);
 
-  test("no file of the core, tests included, imports one", () => {
-    const importers: string[] = [];
-    for (const directory of CORE) {
-      for (const name of readdirSync(`${root}${directory}`, {
-        recursive: true,
-        encoding: "utf8",
-      })) {
-        if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(name)) {
-          const path = `${directory}/${name}`;
-          if (PACK.test(readFileSync(`${root}${path}`, "utf8"))) {
-            importers.push(path);
-          }
-        }
+/**
+ * A way round: a string that begins as the interface or the registry and
+ * then goes up or into what is installed, and so can end anywhere. It is
+ * counted as an import of a pack.
+ */
+const A_WAY_ROUND = quoted(
+  "[^\"'`]*(?:pack-interface|packs-registry|packs/registry)/[^\"'`]*(?:\\.\\.|node_modules)[^\"'`]*",
+);
+const reachesAPack = (text: string): boolean => A_PACK.test(text) || A_WAY_ROUND.test(text);
+
+// What none of these rules can see: a name put together from parts
+// ("@polyglot-sales-agent/" + "pack-…"), a path written with backslashes,
+// and a folder's name in another case on a disk that ignores case.
+
+/** The folders that may not know a pack exists at all (ADR 0014, "Registration"). */
+const KNOWS_NO_PACK = [
+  "packages/core",
+  "packages/db",
+  "packages/channel",
+  "packages/channel-whatsapp",
+];
+/** The only files that may import the registry, to pass it to what they start. */
+const MAY_IMPORT_REGISTRY = ["apps/api/src/main.ts", "apps/worker/src/main.ts"];
+/** The only packages that may depend on it. */
+const MAY_DEPEND_ON_REGISTRY = ["apps/api", "apps/worker"];
+
+/** Every source file of the core side, tests included: a test may not import a pack either. */
+function sources(): { path: string; text: string }[] {
+  const found: { path: string; text: string }[] = [];
+  for (const directory of CORE) {
+    for (const name of readdirSync(`${root}${directory}`, { recursive: true, encoding: "utf8" })) {
+      const path = `${directory}/${name}`;
+      if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(name) && !/(^|\/)node_modules\//.test(path)) {
+        found.push({ path, text: readFileSync(`${root}${path}`, "utf8") });
       }
     }
-    // Until the registry of the pack interface exists (M3 to M5), nothing of the product imports a pack at all.
-    expect(importers).toEqual([]);
-    expect(PACK.test('import { BOOKING_WORDS } from "@polyglot-sales-agent/pack-booking";')).toBe(
-      true,
-    );
-    expect(PACK.test('import x from "../../packs/booking/src/names.ts";')).toBe(true);
-    expect(PACK.test('import { echoReply } from "@polyglot-sales-agent/core";')).toBe(false);
-  });
+  }
+  return found;
+}
 
-  test("no package of the core depends on one", () => {
+function dependencies(directory: string): string[] {
+  const manifest = JSON.parse(readFileSync(`${root}${directory}/package.json`, "utf8")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+  };
+  return [
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.devDependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+    ...Object.keys(manifest.peerDependencies ?? {}),
+  ];
+}
+
+describe("what the core side may import of the packs (ADR 0012, ADR 0014)", () => {
+  test("B3: no file of the core side, tests included, imports a pack, and no package depends on one", () => {
+    expect(
+      sources()
+        .filter((file) => reachesAPack(file.text))
+        .map((file) => file.path),
+    ).toEqual([]);
     for (const directory of CORE) {
-      const manifest = JSON.parse(readFileSync(`${root}${directory}/package.json`, "utf8")) as {
-        dependencies?: Record<string, string>;
-        devDependencies?: Record<string, string>;
-      };
-      const names = [
-        ...Object.keys(manifest.dependencies ?? {}),
-        ...Object.keys(manifest.devDependencies ?? {}),
-      ];
       expect(
-        names.filter((name) => name.includes("/pack-")),
+        dependencies(directory).filter(
+          (name) => /\/pack-/.test(name) && !name.endsWith("/pack-interface"),
+        ),
         directory,
       ).toEqual([]);
+    }
+  });
+
+  test("B2: the core, the database package and the channel packages import neither the interface nor the registry", () => {
+    // The list is this one: a folder taken out of it is seen here.
+    expect(KNOWS_NO_PACK).toEqual([
+      "packages/core",
+      "packages/db",
+      "packages/channel",
+      "packages/channel-whatsapp",
+    ]);
+    for (const folder of KNOWS_NO_PACK) {
+      expect(CORE, folder).toContain(folder);
+    }
+    expect(
+      sources()
+        .filter((file) => KNOWS_NO_PACK.some((folder) => file.path.startsWith(`${folder}/`)))
+        .filter((file) => THE_INTERFACE.test(file.text) || THE_REGISTRY.test(file.text))
+        .map((file) => file.path),
+    ).toEqual([]);
+    for (const directory of KNOWS_NO_PACK) {
+      expect(
+        dependencies(directory).filter((name) => /\/packs?-/.test(name)),
+        directory,
+      ).toEqual([]);
+    }
+  });
+
+  test("B4: only main.ts of the api and of the worker may import the registry, and only those two packages may depend on it", () => {
+    // The two lists are these: a third file or a third package is seen here.
+    expect(MAY_IMPORT_REGISTRY).toEqual(["apps/api/src/main.ts", "apps/worker/src/main.ts"]);
+    expect(MAY_DEPEND_ON_REGISTRY).toEqual(["apps/api", "apps/worker"]);
+    for (const file of MAY_IMPORT_REGISTRY) {
+      expect(
+        sources().map((source) => source.path),
+        file,
+      ).toContain(file);
+    }
+    expect(
+      sources()
+        .filter((file) => THE_REGISTRY.test(file.text))
+        .map((file) => file.path)
+        .filter((path) => !MAY_IMPORT_REGISTRY.includes(path)),
+    ).toEqual([]);
+    for (const directory of CORE) {
+      if (!MAY_DEPEND_ON_REGISTRY.includes(directory)) {
+        expect(
+          dependencies(directory).filter((name) => name.endsWith("/packs-registry")),
+          directory,
+        ).toEqual([]);
+      }
+    }
+  });
+
+  test("B5: each rule sees what it should, and tells the interface, the registry and a pack apart", () => {
+    const pack = [
+      'import { BOOKING_WORDS } from "@polyglot-sales-agent/pack-booking";',
+      'import pack from "@polyglot-sales-agent/pack-faq-only";',
+      "import pack from '@polyglot-sales-agent/pack-booking/names';",
+      'import x from "../../packs/booking/src/names.ts";',
+      'const pack = await import("../../../packs/faq-only/src/index.ts");',
+      "const pack = await import(`@polyglot-sales-agent/pack-booking`);",
+      // A pack whose name only begins like the interface's is a pack.
+      'import x from "@polyglot-sales-agent/pack-interfaces";',
+      'import x from "../packs/registry-two/src/index.ts";',
+    ];
+    const theInterface = [
+      'import type { Pack } from "@polyglot-sales-agent/pack-interface";',
+      'import { packNamed } from "../../pack-interface/src/index.ts";',
+    ];
+    const registry = [
+      'import { PACKS } from "@polyglot-sales-agent/packs-registry";',
+      'import { PACKS } from "../../packages/packs/registry/src/index.ts";',
+      "const { PACKS } = await import('@polyglot-sales-agent/packs-registry');",
+    ];
+    const neither = [
+      'import { echoReply } from "@polyglot-sales-agent/core";',
+      'import { bounded } from "@polyglot-sales-agent/ai";',
+      'const text = "a pack of cards";',
+      'import x from "./packs.ts";',
+    ];
+    for (const line of pack) {
+      expect(A_PACK.test(line), line).toBe(true);
+      expect(THE_INTERFACE.test(line), line).toBe(false);
+      expect(THE_REGISTRY.test(line), line).toBe(false);
+    }
+    for (const line of theInterface) {
+      expect(THE_INTERFACE.test(line), line).toBe(true);
+      expect(A_PACK.test(line), line).toBe(false);
+      expect(THE_REGISTRY.test(line), line).toBe(false);
+    }
+    for (const line of registry) {
+      expect(THE_REGISTRY.test(line), line).toBe(true);
+      expect(A_PACK.test(line), line).toBe(false);
+      expect(THE_INTERFACE.test(line), line).toBe(false);
+    }
+    // A string that begins as the interface or the registry and then leaves it reaches a pack.
+    for (const line of [
+      'import x from "../packs/registry/../booking/src/index.ts";',
+      'import x from "@polyglot-sales-agent/packs-registry/node_modules/@polyglot-sales-agent/pack-booking";',
+      'import x from "@polyglot-sales-agent/pack-interface/../pack-booking";',
+      'import x from "../../pack-interface/../packs/booking/src/index.ts";',
+    ]) {
+      expect(reachesAPack(line), line).toBe(true);
+    }
+    for (const line of [...theInterface, ...registry, ...neither]) {
+      expect(A_WAY_ROUND.test(line), line).toBe(false);
+    }
+    for (const line of neither) {
+      expect(A_PACK.test(line) || THE_INTERFACE.test(line) || THE_REGISTRY.test(line), line).toBe(
+        false,
+      );
     }
   });
 });

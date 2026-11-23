@@ -1,0 +1,11 @@
+{
+  "name": "@polyglot-sales-agent/pack-interface",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The type of a pack and of its parts (ADR 0014). No pack's name.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

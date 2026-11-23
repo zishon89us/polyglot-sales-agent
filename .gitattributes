@@ -1,0 +1,3 @@
+# A prompt is read byte for byte: a carriage return in one is refused by the
+# loader, so a checkout that would add them must not (M3 unit U4).
+prompts/** text eol=lf

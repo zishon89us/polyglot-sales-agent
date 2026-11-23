@@ -2,7 +2,8 @@
 // all use (M2 unit U3). `tools/names-check.ts` fails `make check` if one of
 // the places it reads disagrees with this file: the glossary, the data model,
 // the state machines, the OpenAPI file and the script that generates it, the
-// handover model and the guardrail policy. To add or rename a value, change
+// handover model and the guardrail policy (the handover reasons, the model's
+// flags and the core's claim kinds). To add or rename a value, change
 // it here and then in each place the check names.
 //
 // Only names that belong to the core are here, with one known exception,
@@ -65,3 +66,28 @@ export type MessageClass = keyof typeof MESSAGE_CLASSES;
 
 export const MESSAGE_DIRECTIONS = ["inbound", "outbound"] as const;
 export type MessageDirection = (typeof MESSAGE_DIRECTIONS)[number];
+
+/**
+ * What the model may flag about a customer's message (guardrail policy,
+ * sections 4, 6 and 11). Code acts on each; the model only sets it. Three
+ * are spelt as the handover reason they lead to (`sensitive-topic`,
+ * `data-request`, `emergency`); `asks-for-person` leads to `requested`. A
+ * search for one finds the other: they are two lists.
+ */
+export const MODEL_FLAGS = [
+  "asks-for-person",
+  "asks-to-stop",
+  "sensitive-topic",
+  "data-request",
+  "emergency",
+  "asks-to-resume",
+  "asks-if-person",
+] as const;
+export type ModelFlag = (typeof MODEL_FLAGS)[number];
+
+/**
+ * The kinds of claim the core checks (guardrail policy, section 4; ADR
+ * 0012). A pack registers its own beside these.
+ */
+export const CORE_CLAIM_KINDS = ["price", "opening-hours", "service-detail", "policy"] as const;
+export type CoreClaimKind = (typeof CORE_CLAIM_KINDS)[number];

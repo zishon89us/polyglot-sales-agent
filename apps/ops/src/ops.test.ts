@@ -14,6 +14,7 @@ import {
   sqlState,
   type TestDatabase,
 } from "@polyglot-sales-agent/db/testing";
+import { PACKS as REGISTRY } from "@polyglot-sales-agent/packs-registry";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import * as opsCommands from "./commands.ts";
@@ -570,6 +571,26 @@ describe("a command that fails, or is written wrongly", () => {
     expect(USAGE).toContain("letters without accents");
     expect(USAGE).toContain("waited over 15 minutes");
     expect(parse(["a", "--b", "c", "d"])).toEqual({ words: ["a", "d"], options: { b: "c" } });
+  });
+
+  test("the packs a tenant can be created on are the registry's, and the program itself does not import it (ADR 0014)", () => {
+    expect([...PACKS].sort()).toEqual(Object.keys(REGISTRY).sort());
+    // `ops` keeps its own list: only this test knows the registry.
+    for (const file of readdirSync(new URL(".", import.meta.url), {
+      encoding: "utf8",
+      recursive: true,
+    })) {
+      if (file.endsWith(".ts") && !file.endsWith(".test.ts")) {
+        const source = readFileSync(new URL(file, import.meta.url), "utf8");
+        expect(source, file).not.toMatch(/packs-registry|packs\/registry|pack-(booking|faq-only)/);
+      }
+    }
+    const manifest = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      dependencies: Record<string, string>;
+    };
+    expect(Object.keys(manifest.dependencies).filter((name) => name.includes("pack"))).toEqual([]);
   });
 });
 

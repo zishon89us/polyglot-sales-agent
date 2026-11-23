@@ -1,0 +1,15 @@
+{
+  "name": "@polyglot-sales-agent/ai",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The model client of ADR 0005: its types, the check of what a model answers, the time bound, a scripted adapter for tests, and the prompt loader. No provider yet.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyglot-sales-agent/core": "workspace:*",
+    "yaml": "2.9.1"
+  }
+}

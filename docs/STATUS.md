@@ -503,10 +503,47 @@ M0 Inception met its exit criteria on 2026-11-16; see
   sense now stop a read; the glossary and the Makefile say what
   changed) were checked by the author only. What is left is #324.
 
+- 2026-11-23 — #323 merged: U3 is done. **M3 U4** (#303, pull request
+  #325) begun with its design note (`design/notes/m3-u4-llm-client.md`):
+  the model client, its scripted stand-in, the structure a model answers
+  in, the limits on one call (#158), the prompt loader and the pack
+  packages of ADR 0014. A second agent reviewed the note
+  (`reviews/2026-11-23-m3-u4-design-review.md`): 18 findings, five High
+  (an output limit that could not hold a full reply in the scripts the
+  product is for; a claim kind the core may not name; the test client's
+  loud failure swallowed by the wrapper around it; a way back for a
+  prompt that went round the eval gate; an input bound with unfair
+  edges). The note was rewritten, and **has not been reviewed again**.
+  Rows 44 and 45 ask about the limits and about one folder per prompt
+  version. Then the code: `packages/pack-interface`,
+  `packages/packs/registry`, `faq-only` and `booking` as packs with a
+  name, `packages/ai`, and the boundary test's three import rules. No
+  provider, no prompt and nothing a customer sees: the reply is still
+  the echo. No eval score exists (rows 31 and 32). A third agent
+  reviewed the code (`reviews/2026-11-23-gate4-u4-llm-client.md`): 18
+  findings, none High, three Medium, and 24 of 130 mutants alive (the
+  review counts five of them equivalent and marks four). The Medium ones: nothing tied the limits to the
+  documents that state them; a client could be made without the
+  function that bounds and checks it; the provider test did not read
+  the whole repository. All three are fixed, with most of the Low ones.
+  The first check of the fixes by another agent was stopped before it
+  reported.
+- 2026-11-24 — The check was run again
+  (`reviews/2026-11-23-gate4-u4-llm-client-verification.md`): 12 of the
+  18 answers held as stated, four in part, one with a wrong sentence;
+  nothing broken; no High finding, one Medium: a client's call could
+  still be replaced in place by an assignment. A client is now frozen
+  and its calls read-only. Also fixed: the glossary check matched digits
+  inside other numbers; the scan's new exemptions let numbers shaped
+  like a phone's through; a request's tools were read again after the
+  answer. **These last fixes are checked by the author only.** CI had
+  failed on the pull request's title, which was longer than 72
+  characters; it is shortened. What the unit leaves is #326.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 42 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 45 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U2, U3, U4 and U5, with U0 still open for four
    answers. U3 builds on rows 34 and 36 as well, and U4 on row 37. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
@@ -562,7 +599,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 42 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 45 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 

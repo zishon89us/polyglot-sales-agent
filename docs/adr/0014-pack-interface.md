@@ -308,3 +308,20 @@ packs written outside this repository.
 - The threat model's entries on what pack code can reach (T39, T48) are
   not changed, because M3 gives pack code nothing to reach. M5 revisits
   them with the database question.
+
+## Amendment, 2026-11-23 (M3 unit U4)
+
+Proposed by the agent with the code.
+
+- **A prompt fragment is a prompt's name and its version,** where the
+  table above has "the name of a prompt". The pack's object names both,
+  so that a trace says exactly which text ran and a fragment goes back
+  to an earlier version by a pull request, like the core's prompt
+  (decisions row 45).
+- **Built in U4:** `packages/pack-interface` (the type, the lookup by
+  name, the check of a name), `packages/packs/registry`, and `booking`
+  and `faq-only` as packs with a name. `tools` and `claimKinds` are not
+  in the type yet. Nothing imports the registry but tests: the two
+  `main.ts` files will when the turn exists (U7).
+- **`apps/ops` depends on the registry for its test only.** The program
+  does not import it, and a test reads its sources to show that.

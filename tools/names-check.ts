@@ -5,11 +5,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 import {
+  CORE_CLAIM_KINDS,
   HANDOVER_REASONS,
   HANDOVER_STATES,
   MESSAGE_CLASSES,
   MESSAGE_DIRECTIONS,
   MESSAGE_STATUSES,
+  MODEL_FLAGS,
 } from "../packages/core/src/names.ts";
 
 function read(root: string, path: string): string {
@@ -147,6 +149,7 @@ export function checkSharedNames(root: string): string[] {
     read(root, "docs/ai/guardrail-policy.md"),
     "## 6. When a conversation goes to a person",
   );
+  const policyNames = section(read(root, "docs/ai/guardrail-policy.md"), "### The names code uses");
   const modelOpen = pythonStrings(model, "\nOPEN = ");
   const modelTerminal = pythonStrings(model, "\nTERMINAL = ");
   const policyReasons = firstColumn(policy ?? "", "Reason")?.flatMap(backticked);
@@ -225,6 +228,16 @@ export function checkSharedNames(root: string): string[] {
       "guardrail policy, section 6 reasons",
       policyReasons === undefined ? undefined : [...new Set(policyReasons)],
       HANDOVER_REASONS,
+    ),
+    ...compare(
+      "guardrail policy, the flags' names",
+      firstColumn(policyNames ?? "", "Flag")?.flatMap(backticked),
+      MODEL_FLAGS,
+    ),
+    ...compare(
+      "guardrail policy, the core's claim kinds",
+      firstColumn(policyNames ?? "", "Core claim kind")?.flatMap(backticked),
+      CORE_CLAIM_KINDS,
     ),
   ];
 }

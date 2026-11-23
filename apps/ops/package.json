@@ -9,6 +9,7 @@
     "@polyglot-sales-agent/db": "workspace:*"
   },
   "devDependencies": {
+    "@polyglot-sales-agent/packs-registry": "workspace:*",
     "@types/pg": "8.23.1",
     "pg": "8.23.1"
   }
