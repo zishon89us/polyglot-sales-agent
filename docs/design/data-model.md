@@ -302,8 +302,9 @@ data side.
 ### `services` — tenant-owned
 
 `name`, `description`, `price_minor`, `active`, `updated_at` are the core's
-(built in M3 unit U3; a name is unique within a tenant whatever its case;
-lengths are the API design's).
+(built in M3 unit U3; lengths are the API design's). `name_key` is the name
+as two are compared, made by the loader's one function and unique within a
+tenant, so that the database's collation decides nothing.
 `duration_minutes` and `capacity` belong to the booking pack and are held in
 its own table, `booking_service_settings`, keyed by service (ADR 0012). A
 service with bookings is deactivated, not deleted. Until a pack has rows
@@ -320,8 +321,8 @@ row when the owner adds a service.
 ### `policies` — tenant-owned
 
 `title`, `body`, `updated_at`. Owner-entered text; delimited as data when
-given to the model. Built in M3 unit U3; a title is unique within a tenant
-whatever its case.
+given to the model. Built in M3 unit U3; `title_key` is unique within a
+tenant, as `name_key` is for a service.
 
 ### `blocked_periods` — tenant-owned
 
@@ -422,8 +423,8 @@ readiness probe. In the request path, as built in M2: recording an event
 for a number no tenant has (`unroutable_events`), recording a body that
 could not be read (`unparsed_events`) with its `operator-alert` job, and
 the API's readiness check. Nothing else may use the cross-tenant role. It
-has no privilege on `services` or `policies` and cannot change a tenant's
-settings: the operator's `profile` commands work as the application role
+has no privilege on `services` or `policies`, and of `tenants` it reads
+and inserts only the columns that are not settings: the operator's `profile` commands work as the application role
 inside one tenant's scope (ADR 0011, amendment of 2026-11-23).
 
 What enforces it today is narrower than "which modules": a test fails if

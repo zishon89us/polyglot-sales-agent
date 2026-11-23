@@ -16,11 +16,16 @@ import {
   CROSS_ROLE,
   type Database,
   loadBusinessProfile,
+  loadMigrations,
+  MIGRATE_ROLE,
+  migrateDown,
+  migrateUp,
+  migrationStatus,
   replaceProfile,
   storeInbound,
   withTenant,
 } from "../src/index.ts";
-import { adopt, createTestDatabase, type TestDatabase } from "./harness.ts";
+import { adopt, createTestDatabase, MIGRATIONS_DIRECTORY, type TestDatabase } from "./harness.ts";
 
 let database: TestDatabase;
 let pool: pg.Pool;
@@ -87,6 +92,8 @@ const BASE = {
     { title: "Lateness", body: "We wait 15 minutes." },
   ],
 };
+/** A file's two lists, when a test has none to give: both are required. */
+const NONE = { services: [], policies: [] };
 const load = (value: Record<string, unknown>, to = tenant) =>
   replaceProfile(app, to, file(value), { sha256: "test" });
 async function rows<Row extends pg.QueryResultRow>(
@@ -175,7 +182,7 @@ describe("loading a profile (section 5)", () => {
       { title: "Payment" },
     ]);
     // A file with none clears them all.
-    expect(await load({ settings: SETTINGS })).toMatchObject({
+    expect(await load({ ...NONE, settings: SETTINGS })).toMatchObject({
       services: { removed: 1 },
       policies: { removed: 1 },
     });
@@ -241,7 +248,7 @@ describe("loading a profile (section 5)", () => {
     let running: Promise<unknown>;
     try {
       await administrator.query("SELECT 1 FROM tenants WHERE id = $1 FOR NO KEY UPDATE", [tenant]);
-      running = load({ settings: SETTINGS });
+      running = load({ ...NONE, settings: SETTINGS });
       for (let tries = 0; ; tries += 1) {
         const waiting = await pool.query<{ n: number }>(
           `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
@@ -304,22 +311,171 @@ describe("loading a profile (section 5)", () => {
     ]);
   });
 
-  test("the database itself refuses a name twice in one tenant, whatever the case, and allows it in another", async () => {
+  test("the database itself refuses one name's key twice in one tenant, and allows it in another", async () => {
     await load(BASE);
     await expect(
       administrator.query(
-        "INSERT INTO services (tenant_id, name, price_minor) VALUES ($1, 'haircut', 1)",
+        "INSERT INTO services (tenant_id, name, name_key, price_minor) VALUES ($1, 'HAIRCUT', 'haircut', 1)",
         [tenant],
       ),
     ).rejects.toMatchObject({ code: "23505" });
     await expect(
       administrator.query(
-        "INSERT INTO policies (tenant_id, title, body) VALUES ($1, 'PAYMENT', 'x')",
+        "INSERT INTO policies (tenant_id, title, title_key, body) VALUES ($1, 'PAYMENT', 'payment', 'x')",
         [tenant],
       ),
     ).rejects.toMatchObject({ code: "23505" });
     await load(BASE, other);
     expect(await rows("SELECT count(*)::int AS n FROM services")).toEqual([{ n: 6 }]);
+  });
+
+  test("a later load with other values changes each of them, moves the time of change of what changed and of nothing else", async () => {
+    await load(BASE);
+    const before = await stored();
+    const policiesBefore = await rows<{ title: string; updated_at: Date }>(
+      "SELECT title, updated_at FROM policies WHERE tenant_id = $1 ORDER BY title",
+      [tenant],
+    );
+    const change = await load({
+      settings: {
+        currency: "KWD",
+        support_contact: "help@example.com",
+        notification_email: "second@example.com",
+        business_hours: [{ weekday: 1, opens: "08:00", closes: "12:00" }],
+      },
+      services: [
+        // The description alone.
+        { name: "Haircut", description: "Wash, cut and dry.", price_minor: 12000 },
+        // The price alone.
+        { name: "Blow-dry", price_minor: 8500 },
+        { name: "Old service", price_minor: 100, active: false },
+      ],
+      policies: [
+        // The body alone.
+        { title: "Payment", body: "Cards only." },
+        { title: "Lateness", body: "We wait 15 minutes." },
+      ],
+    });
+    expect(change).toEqual({
+      services: { added: 0, changed: 2, removed: 0 },
+      policies: { added: 0, changed: 1, removed: 0 },
+    });
+    expect(
+      await rows(
+        "SELECT currency, support_contact, notification_email, business_hours, opening_hours FROM tenants WHERE id = $1",
+        [tenant],
+      ),
+    ).toEqual([
+      {
+        currency: "KWD",
+        support_contact: "help@example.com",
+        notification_email: "second@example.com",
+        business_hours: [{ weekday: 1, opens: "08:00", closes: "12:00" }],
+        opening_hours: null,
+      },
+    ]);
+    expect(
+      await rows(
+        "SELECT name, description, price_minor FROM services WHERE tenant_id = $1 ORDER BY name",
+        [tenant],
+      ),
+    ).toEqual([
+      { name: "Blow-dry", description: "", price_minor: "8500" },
+      { name: "Haircut", description: "Wash, cut and dry.", price_minor: "12000" },
+      { name: "Old service", description: "", price_minor: "100" },
+    ]);
+    const after = await stored();
+    const moved = (name: string): boolean => {
+      const was = before.find((row) => row.name === name) as { updated_at: Date; id: string };
+      const is = after.find((row) => row.name === name) as { updated_at: Date; id: string };
+      expect(is.id, name).toBe(was.id);
+      return is.updated_at.getTime() > was.updated_at.getTime();
+    };
+    expect([moved("Haircut"), moved("Blow-dry"), moved("Old service")]).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    const policiesAfter = await rows<{ title: string; body: string; updated_at: Date }>(
+      "SELECT title, body, updated_at FROM policies WHERE tenant_id = $1 ORDER BY title",
+      [tenant],
+    );
+    expect(policiesAfter.map((row) => [row.title, row.body])).toEqual([
+      ["Lateness", "We wait 15 minutes."],
+      ["Payment", "Cards only."],
+    ]);
+    expect(
+      policiesAfter.map(
+        (row, index) =>
+          row.updated_at.getTime() > (policiesBefore[index]?.updated_at.getTime() ?? 0),
+      ),
+    ).toEqual([false, true]);
+  });
+
+  test("names outside ASCII: the longest is stored, and one that differs only in case is the same item", async () => {
+    expect(await rows("SHOW server_encoding")).toEqual([{ server_encoding: "UTF8" }]);
+    // 200 Arabic letters, and a body of 4,000: characters, not bytes.
+    const long = "\u0633".repeat(200);
+    await load({
+      settings: SETTINGS,
+      services: [
+        { name: long, price_minor: 1 },
+        { name: "\u00C9lan Spa", price_minor: 2 },
+      ],
+      policies: [{ title: "\u00C9lan", body: "\u0633".repeat(4000) }],
+    });
+    const first = await rows<{ id: string; name: string }>(
+      "SELECT id, name FROM services WHERE name LIKE '%Spa'",
+    );
+    expect(await rows("SELECT char_length(name) AS n FROM services ORDER BY 1")).toEqual([
+      { n: 8 },
+      { n: 200 },
+    ]);
+    const change = await load({
+      settings: SETTINGS,
+      services: [
+        { name: long, price_minor: 1 },
+        { name: "\u00E9LAN spa", price_minor: 2 },
+      ],
+      policies: [{ title: "\u00E9lan", body: "\u0633".repeat(4000) }],
+    });
+    expect(change).toEqual({
+      services: { added: 0, changed: 1, removed: 0 },
+      policies: { added: 0, changed: 1, removed: 0 },
+    });
+    expect(await rows("SELECT id, name FROM services WHERE name LIKE '%spa'")).toEqual([
+      { id: first[0]?.id, name: "\u00E9LAN spa" },
+    ]);
+  });
+
+  test("the database's own checks: a length, a price below nothing, a currency's form, hours that are no list", async () => {
+    await load(BASE);
+    for (const statement of [
+      `UPDATE services SET description = repeat('x', 2001)`,
+      `UPDATE services SET name = repeat('x', 201)`,
+      `UPDATE services SET name = ''`,
+      `UPDATE services SET name_key = ''`,
+      `UPDATE services SET price_minor = -1`,
+      `UPDATE policies SET body = repeat('x', 4001)`,
+      `UPDATE policies SET body = ''`,
+      `UPDATE policies SET title = repeat('x', 201)`,
+      `UPDATE tenants SET currency = 'sar'`,
+      `UPDATE tenants SET support_contact = ''`,
+      `UPDATE tenants SET notification_email = repeat('x', 255)`,
+      `UPDATE tenants SET business_hours = '{}'`,
+      `UPDATE tenants SET opening_hours = '1'`,
+    ]) {
+      await expect(administrator.query(statement), statement).rejects.toMatchObject({
+        code: "23514",
+      });
+    }
+    // At each limit, it is taken.
+    await administrator.query(
+      "UPDATE services SET description = repeat('x', 2000), price_minor = 0 WHERE name = 'Haircut'",
+    );
+    await administrator.query(
+      "UPDATE policies SET body = repeat('x', 4000) WHERE title = 'Payment'",
+    );
   });
 });
 
@@ -416,6 +572,7 @@ describe("what the model is given (section 2)", () => {
   test("M10: what the owner typed is given as typed, a number and a link included", async () => {
     await load({
       settings: SETTINGS,
+      services: [],
       policies: [
         {
           title: "Reaching us",
@@ -446,6 +603,7 @@ describe("what the model is given (section 2)", () => {
       {
         settings: { ...SETTINGS, currency: "KWD" },
         services: [{ name: "Other's", price_minor: 5 }],
+        policies: [],
       },
       other,
     );
@@ -458,9 +616,32 @@ describe("what the model is given (section 2)", () => {
     ]);
   });
 
-  test("a price wider than JSON carries is refused by the loader long before it could be misread here", async () => {
-    await load({ settings: SETTINGS, services: [{ name: "Costly", price_minor: 2 ** 53 - 1 }] });
+  test("the widest price the loader takes is given exactly; a wider one, or hours of another shape, stored by other means stops the read", async () => {
+    await load({
+      settings: SETTINGS,
+      services: [{ name: "Costly", price_minor: 2 ** 53 - 1 }],
+      policies: [],
+    });
     expect((await profile()).services[0]?.priceMinor).toBe(9007199254740991);
+    await administrator.query("UPDATE services SET price_minor = 9007199254740993");
+    await expect(profile()).rejects.toMatchObject({ code: "profile-unreadable" });
+    await administrator.query("UPDATE services SET price_minor = 1");
+    expect((await profile()).services[0]?.priceMinor).toBe(1);
+    for (const hours of [
+      "[null]",
+      "[5]",
+      '[{"weekday": 1, "opens": "9", "closes": "17:00"}]',
+      '[{"weekday": 1.5, "opens": "09:00", "closes": "17:00"}]',
+      '[{"weekday": 1, "opens": "09:00"}]',
+    ]) {
+      await administrator.query("UPDATE tenants SET opening_hours = $2::jsonb WHERE id = $1", [
+        tenant,
+        hours,
+      ]);
+      await expect(profile(), hours).rejects.toMatchObject({ code: "profile-unreadable" });
+    }
+    await administrator.query("UPDATE tenants SET opening_hours = NULL, currency = 'XXQ'");
+    await expect(profile()).rejects.toMatchObject({ code: "profile-unreadable" });
   });
 });
 
@@ -490,7 +671,7 @@ describe("whether a tenant is answering (section 4)", () => {
     }
   });
 
-  test("A3: no channel account; another tenant's channel does not count", async () => {
+  test("A3: no channel account; another tenant's channel is not in reach, so it does not count", async () => {
     await load(BASE);
     await administrator.query(
       "INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id) VALUES ($1, 'mock', $2)",
@@ -500,7 +681,7 @@ describe("whether a tenant is answering (section 4)", () => {
   });
 
   test("A4, A5: business hours with no period at all are set; opening hours, services and policies are not needed", async () => {
-    await load({ settings: { ...SETTINGS, business_hours: [] } });
+    await load({ ...NONE, settings: { ...SETTINGS, business_hours: [] } });
     await connect();
     expect(await answering(app, tenant)).toEqual({ settingsMissing: [], channelConnected: true });
   });
@@ -527,8 +708,74 @@ describe("the size of a profile (section 3)", () => {
   });
 });
 
+describe("the database's encoding", () => {
+  test("a database that is not UTF-8 is refused by the migration: its lengths would be counted in bytes", async () => {
+    const latin = await createTestDatabase({ migrate: false, latin1: true });
+    try {
+      const client = await latin.client(MIGRATE_ROLE);
+      const all = loadMigrations(MIGRATIONS_DIRECTORY);
+      const at = all.findIndex((migration) => migration.name === "profile");
+      expect(at).toBe(6);
+      await migrateUp(client, all.slice(0, at));
+      await expect(migrateUp(client, all.slice(0, at + 1))).rejects.toThrow(
+        "this database is encoded as LATIN1, and must be UTF8",
+      );
+      expect((await migrationStatus(client, all)).applied).toHaveLength(at);
+    } finally {
+      await latin.drop();
+    }
+  }, 30_000);
+});
+
+describe("migration 0007, with rows", () => {
+  test("the way back loses every tenant's services, policies and settings, keeps the audit rows of their loads, and the way forward starts empty", async () => {
+    const scratch = await createTestDatabase({ migrate: true });
+    try {
+      const owner = await scratch.administrator();
+      const made = await owner.query<{ id: string }>(
+        `INSERT INTO tenants (name, pack, time_zone, default_language, currency)
+         VALUES ('Salon Noor', 'faq-only', 'UTC', 'en', 'SAR') RETURNING id`,
+      );
+      const id = made.rows[0]?.id as string;
+      await owner.query(
+        "INSERT INTO services (tenant_id, name, name_key, price_minor) VALUES ($1, 'Cut', 'cut', 1)",
+        [id],
+      );
+      await owner.query(
+        "INSERT INTO policies (tenant_id, title, title_key, body) VALUES ($1, 'Pay', 'pay', 'Cash.')",
+        [id],
+      );
+      await owner.query(
+        "INSERT INTO audit_log (tenant_id, action, subject_type, subject_id) VALUES ($1, 'profile.loaded', 'tenant', $1)",
+        [id],
+      );
+      const client = await scratch.client(MIGRATE_ROLE);
+      const all = loadMigrations(MIGRATIONS_DIRECTORY);
+      expect(all.at(-1)?.name).toBe("profile");
+      expect(await migrateDown(client, all)).toBe("profile");
+      expect(
+        (await owner.query("SELECT to_regclass('services') AS s, to_regclass('policies') AS p"))
+          .rows,
+      ).toEqual([{ s: null, p: null }]);
+      expect((await owner.query("SELECT action FROM audit_log")).rows).toEqual([
+        { action: "profile.loaded" },
+      ]);
+      await migrateUp(client, all);
+      expect(
+        (
+          await owner.query(
+            "SELECT currency, (SELECT count(*)::int FROM services) AS services, (SELECT count(*)::int FROM policies) AS policies FROM tenants",
+          )
+        ).rows,
+      ).toEqual([{ currency: null, services: 0, policies: 0 }]);
+    } finally {
+      await scratch.drop();
+    }
+  }, 30_000);
+});
+
 describe('who may do what (section 5, "Which role writes")', () => {
-  test("the cross-tenant role can neither read nor write a tenant's services, policies or settings", async () => {
+  test("the cross-tenant role can neither read nor write a tenant's services, policies or settings; of a tenant it reads and makes what it did before", async () => {
     await load(BASE);
     const cross = new pg.Client({ connectionString: database.url(CROSS_ROLE) });
     await cross.connect();
@@ -538,12 +785,30 @@ describe('who may do what (section 5, "Which role writes")', () => {
         "SELECT 1 FROM policies",
         "UPDATE services SET price_minor = 0",
         "DELETE FROM policies",
-        "INSERT INTO policies (tenant_id, title, body) SELECT id, 't', 'b' FROM tenants",
+        "INSERT INTO policies (tenant_id, title, title_key, body) SELECT id, 't', 't', 'b' FROM tenants",
         "UPDATE tenants SET currency = 'KWD'",
         "UPDATE tenants SET support_contact = '+15550199'",
+        "SELECT * FROM tenants",
+        "SELECT currency FROM tenants",
+        "SELECT support_contact FROM tenants",
+        "SELECT notification_email FROM tenants",
+        "SELECT business_hours FROM tenants",
+        "SELECT opening_hours FROM tenants",
+        "SELECT opening_hours_updated_at FROM tenants",
+        "SELECT 1 FROM tenants WHERE currency = 'SAR'",
+        "INSERT INTO tenants (name, pack, time_zone, default_language, currency) VALUES ('x', 'faq-only', 'UTC', 'en', 'SAR')",
+        "INSERT INTO tenants (name, pack, time_zone, default_language, notification_email) VALUES ('x', 'faq-only', 'UTC', 'en', 'x@example.com')",
       ]) {
         await expect(cross.query(statement), statement).rejects.toMatchObject({ code: "42501" });
       }
+      const seen = await cross.query(
+        "SELECT id, created_at, name, pack, time_zone, default_language FROM tenants ORDER BY name",
+      );
+      expect(seen.rows.map((row) => row.name)).toEqual(["Another", "Salon Noor"]);
+      const made = await cross.query(
+        "INSERT INTO tenants (name, pack, time_zone, default_language) VALUES ('Third', 'faq-only', 'UTC', 'en') RETURNING id",
+      );
+      expect(made.rowCount).toBe(1);
     } finally {
       await cross.end();
     }

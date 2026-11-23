@@ -97,20 +97,58 @@ export function nameKey(text: string): string {
 }
 
 // Control characters, the characters that override the direction of text,
-// and the line and paragraph separators. The joiners (U+200C, U+200D) and
+// the line and paragraph separators, the byte-order mark and half of a
+// surrogate pair. The joiners (U+200C, U+200D) and
 // the direction marks (U+200E, U+200F, U+061C) are not here: correct Urdu,
 // Persian, Hindi, Bengali and mixed Arabic and Latin text need them.
-const REFUSED = /[\p{Cc}\u202A-\u202E\u2066-\u2069\u2028\u2029]/u;
+const REFUSED = /[\p{Cc}\p{Cs}\u202A-\u202E\u2066-\u2069\u2028\u2029\uFEFF]/u;
+// A name or a title has something to read in it.
+const READABLE = /[\p{L}\p{N}]/u;
 
 const length = (text: string): number => [...text].length;
 
-/** How many decimals a currency's amounts have, or undefined for a code the platform's list does not hold. */
+/**
+ * The currencies a profile may be in, each with how many of an amount's
+ * digits are after the point. A fixed list, not the runtime's: the
+ * runtime's figures are for display, differ from the standard's for
+ * several currencies (it gives the Pakistani rupee none), and can change
+ * with an upgrade, which would move every stored price by a factor of a
+ * hundred. The figures are ISO 4217's minor units as payment providers'
+ * published tables give them (read 2026-11-23; the standard itself was not
+ * read). A currency is added here, with its figure checked, when a
+ * business needs it.
+ */
+export const CURRENCIES: Readonly<Record<string, number>> = {
+  AED: 2,
+  BDT: 2,
+  BHD: 3,
+  EGP: 2,
+  EUR: 2,
+  GBP: 2,
+  IDR: 2,
+  INR: 2,
+  IQD: 3,
+  JOD: 3,
+  JPY: 0,
+  KRW: 0,
+  KWD: 3,
+  LBP: 2,
+  LKR: 2,
+  LYD: 3,
+  MAD: 2,
+  MYR: 2,
+  OMR: 3,
+  PKR: 2,
+  QAR: 2,
+  SAR: 2,
+  TND: 3,
+  TRY: 2,
+  USD: 2,
+};
+
+/** How many decimals a currency's amounts have, or undefined for a code that is not in the list. */
 export function currencyDecimals(code: string): number | undefined {
-  if (!/^[A-Z]{3}$/.test(code) || !Intl.supportedValuesOf("currency").includes(code)) {
-    return undefined;
-  }
-  return new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions()
-    .maximumFractionDigits;
+  return Object.hasOwn(CURRENCIES, code) ? CURRENCIES[code] : undefined;
 }
 
 /** A price written out, such as `150.00 SAR`, from its smallest unit. Digits are exact: no floating point. */
@@ -125,11 +163,16 @@ export function priceText(
 }
 
 const PHONE = /^\+[0-9]{8,15}$/;
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+// Letters of the Latin alphabet, digits and the usual signs only: an address
+// in another script is refused (design note, "As built").
+const EMAIL = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const isEmail = (text: string): boolean => EMAIL.test(text) && length(text) <= EMAIL_MAX;
 const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 
-function minutes(clock: string, closing: boolean): number | undefined {
+function minutes(clock: unknown, closing: boolean): number | undefined {
+  if (typeof clock !== "string") {
+    return undefined;
+  }
   if (closing && clock === "24:00") {
     return 24 * 60;
   }
@@ -195,9 +238,14 @@ export function readProfileFile(bytes: Uint8Array): ProfileRead {
     return { ok: false, problems: ["the file is not JSON"] };
   }
   const problems: string[] = [];
-  if (keysWritten(text) !== keysIn(parsed)) {
-    // JSON keeps the last of two and says nothing.
-    problems.push("a key is given twice in one object");
+  try {
+    if (keysWritten(text) !== keysIn(parsed)) {
+      // JSON keeps the last of two and says nothing. Which key is not known:
+      // only that the file writes more keys than it holds.
+      problems.push("a key is given twice in one object");
+    }
+  } catch {
+    return { ok: false, problems: ["the file is nested too deeply"] };
   }
   if (!isObject(parsed)) {
     return { ok: false, problems: ["the file is not a JSON object"] };
@@ -213,13 +261,19 @@ export function readProfileFile(bytes: Uint8Array): ProfileRead {
       problems.push(`${where}: is not text`);
       return "";
     }
-    const text = normaliseName(value);
-    if (REFUSED.test(text)) {
+    // Before the spaces are made one: a tab, a line break or a separator in
+    // a name is refused, not quietly made a space.
+    if (REFUSED.test(value)) {
       problems.push(
-        `${where}: has a control character or a character that overrides the direction of text`,
+        `${where}: has a control character, a line break or a character that overrides the direction of text`,
       );
-    } else if (length(text) < 1 || length(text) > max) {
+      return "";
+    }
+    const text = normaliseName(value);
+    if (length(text) < 1 || length(text) > max) {
       problems.push(`${where}: is 1 to ${max} characters`);
+    } else if (!READABLE.test(text)) {
+      problems.push(`${where}: has no letter and no digit`);
     }
     return text;
   };
@@ -320,7 +374,7 @@ export function readProfileFile(bytes: Uint8Array): ProfileRead {
       "currency" in given &&
       (typeof currency !== "string" || currencyDecimals(currency) === undefined)
     ) {
-      problems.push("settings.currency: is not a currency code this platform knows, such as SAR");
+      problems.push(`settings.currency: is not one of ${Object.keys(CURRENCIES).join(", ")}`);
     }
     const contact = given["support_contact"];
     if (
@@ -347,9 +401,11 @@ export function readProfileFile(bytes: Uint8Array): ProfileRead {
   }
 
   const services: ServiceEntry[] = [];
-  const serviceList = parsed["services"] ?? [];
+  // A list is written even when it is empty: a file cut short does not
+  // delete a business's services by leaving them out.
+  const serviceList = parsed["services"];
   if (!Array.isArray(serviceList)) {
-    problems.push("services: is not a list");
+    problems.push("services: is required, and is a list; write [] for none");
   } else {
     if (serviceList.length > PROFILE_MAX_SERVICES) {
       problems.push(`services: more than ${PROFILE_MAX_SERVICES}`);
@@ -364,16 +420,21 @@ export function readProfileFile(bytes: Uint8Array): ProfileRead {
       const price = item["price_minor"];
       if (typeof price !== "number" || !Number.isSafeInteger(price) || price < 0) {
         problems.push(
-          `${at}.price_minor: is a whole number of the currency's smallest unit, 0 or more, written without a point or an exponent`,
+          `${at}.price_minor: is a whole number of the currency's smallest unit, 0 or more`,
         );
       }
-      const active = item["active"] ?? true;
+      const active = "active" in item ? item["active"] : true;
       if (typeof active !== "boolean") {
         problems.push(`${at}.active: is true or false`);
       }
       services.push({
         name: line(item["name"], `${at}.name`, NAME_MAX),
-        description: lines(item["description"] ?? "", `${at}.description`, 0, DESCRIPTION_MAX),
+        description: lines(
+          "description" in item ? item["description"] : "",
+          `${at}.description`,
+          0,
+          DESCRIPTION_MAX,
+        ),
         priceMinor: typeof price === "number" ? price : 0,
         active: active === true,
       });
@@ -381,9 +442,9 @@ export function readProfileFile(bytes: Uint8Array): ProfileRead {
   }
 
   const policies: PolicyEntry[] = [];
-  const policyList = parsed["policies"] ?? [];
+  const policyList = parsed["policies"];
   if (!Array.isArray(policyList)) {
-    problems.push("policies: is not a list");
+    problems.push("policies: is required, and is a list; write [] for none");
   } else {
     if (policyList.length > PROFILE_MAX_POLICIES) {
       problems.push(`policies: more than ${PROFILE_MAX_POLICIES}`);
@@ -452,10 +513,19 @@ export function profileSize(profile: {
   );
 }
 
+// An address with a scheme, an email address, or a name with a dot and a
+// known-looking ending, with or without a path. Digits are any script's.
+const LINK =
+  /[a-z][a-z0-9+.-]*:\/\/[^\s]+|[^\s@]+@[^\s@]+\.[^\s@]+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?/giu;
+const TRAILING = /[.,;:!?)\]}\u060C\u061B\u061F\u06D4\u0964]+$/u;
+const NUMBER = /\+?\p{Nd}[\p{Nd} ().-]{5,}\p{Nd}/gu;
+const NOT_DIGIT = /\P{Nd}/gu;
+
 /**
  * Every link, email address and run of seven or more digits in a profile's
  * texts: what the assistant will be allowed to send, since it is the
- * business's own (design note, M10). For an operator to read, not a check.
+ * business's own (design note, M10). For an operator to read, not a check:
+ * it finds the usual forms, in any script's digits, and can miss others.
  */
 export function contactLike(profile: {
   readonly services: readonly { readonly name: string; readonly description: string }[];
@@ -467,11 +537,11 @@ export function contactLike(profile: {
   ];
   const found = new Set<string>();
   for (const text of texts) {
-    for (const match of text.matchAll(/(?:https?:\/\/|www\.)[^\s]+|[^\s@]+@[^\s@]+\.[^\s@]+/giu)) {
-      found.add(match[0]);
+    for (const match of text.matchAll(LINK)) {
+      found.add(match[0].replace(TRAILING, ""));
     }
-    for (const match of text.matchAll(/\+?[0-9][0-9 ().-]{5,}[0-9]/gu)) {
-      if (match[0].replace(/[^0-9]/gu, "").length >= 7) {
+    for (const match of text.matchAll(NUMBER)) {
+      if (match[0].replace(NOT_DIGIT, "").length >= 7) {
         found.add(match[0]);
       }
     }
@@ -521,19 +591,50 @@ export interface ProfileRow {
 
 /** Makes the profile the model is given from the stored rows (design note, M1 to M13). */
 export function assembleBusinessProfile(row: ProfileRow): BusinessProfile {
+  // What is stored is checked again, and a turn fails rather than tell a
+  // customer a price or an hour that was misread.
+  const stored = (what: string): Error =>
+    Object.assign(new Error(`assembleBusinessProfile: the stored ${what} cannot be read`), {
+      code: "profile-unreadable",
+    });
   const decimals = row.currency === null ? undefined : currencyDecimals(row.currency);
+  if (row.currency !== null && decimals === undefined) {
+    throw stored("currency");
+  }
+  const periods: unknown = row.opening_hours;
+  if (periods !== null) {
+    const fine =
+      Array.isArray(periods) &&
+      periods.every(
+        (period: unknown) =>
+          typeof period === "object" &&
+          period !== null &&
+          Number.isInteger((period as HoursPeriod).weekday) &&
+          minutes((period as HoursPeriod).opens, false) !== undefined &&
+          minutes((period as HoursPeriod).closes, true) !== undefined,
+      );
+    if (!fine) {
+      throw stored("opening hours");
+    }
+  }
   return {
     name: row.name,
     timeZone: row.time_zone,
     currency:
       row.currency === null || decimals === undefined ? null : { code: row.currency, decimals },
     supportContact: row.support_contact,
-    services: row.services.map((service) => ({
-      id: service.id,
-      name: service.name,
-      description: service.description,
-      priceMinor: Number(service.price_minor),
-    })),
+    services: row.services.map((service) => {
+      const priceMinor = Number(service.price_minor);
+      if (!Number.isSafeInteger(priceMinor) || String(priceMinor) !== service.price_minor) {
+        throw stored("price");
+      }
+      return {
+        id: service.id,
+        name: service.name,
+        description: service.description,
+        priceMinor,
+      };
+    }),
     policies: row.policies.map((policy) => ({
       id: policy.id,
       title: policy.title,

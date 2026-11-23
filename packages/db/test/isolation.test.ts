@@ -46,7 +46,7 @@ const PRIVILEGES = {
     jobs: "DELETE,INSERT,SELECT,UPDATE",
     // To read; what it may insert is by column, below.
     operator_log: "SELECT",
-    tenants: "INSERT,SELECT",
+    // `tenants` is not here: this role's privileges on it are by column, below.
     unparsed_events: "INSERT,SELECT",
     unroutable_events: "INSERT,SELECT",
     worker_heartbeats: "DELETE,INSERT,SELECT,UPDATE",
@@ -462,7 +462,8 @@ describe("privileges", () => {
     // The three tables with privileges by column: `jobs` (ADR 0004, amendment);
     // `operator_log`, where the cross-tenant role may not choose a row's identifier or time;
     // and `tenants`, of which the application role may change its own row's settings and
-    // nothing else: not its name, its pack, its time zone or its language.
+    // nothing else (not its name, its pack, its time zone or its language), and of which
+    // the cross-tenant role may read and insert every column but those settings.
     const of = (table: string) =>
       columns.rows
         .filter((row) => row.table === table)
@@ -473,16 +474,31 @@ describe("privileges", () => {
       "operator_log",
       "tenants",
     ]);
-    expect(of("tenants")).toEqual(
-      [
-        "business_hours",
-        "currency",
-        "notification_email",
-        "opening_hours",
-        "opening_hours_updated_at",
-        "support_contact",
-      ].sort(),
+    const SETTINGS = [
+      "business_hours",
+      "currency",
+      "notification_email",
+      "opening_hours",
+      "opening_hours_updated_at",
+      "support_contact",
+    ];
+    const FIRST = ["created_at", "default_language", "id", "name", "pack", "time_zone"];
+    expect(of("tenants")).toEqual([...SETTINGS, ...FIRST].sort());
+    const onTenants = await migrate.query<{ grantee: string; held: string; columns: string }>(
+      `SELECT grantee, privilege_type AS held, string_agg(column_name, ',' ORDER BY column_name) AS columns
+       FROM information_schema.column_privileges
+       WHERE table_schema = 'public' AND table_name = 'tenants' AND grantee IN ($1, $2)
+       GROUP BY 1, 2 ORDER BY 1, 2`,
+      [APP_ROLE, CROSS_ROLE],
     );
+    // The application role's SELECT is the whole table's, so it shows on every column.
+    const every = [...SETTINGS, ...FIRST].sort().join(",");
+    expect(onTenants.rows).toEqual([
+      { grantee: APP_ROLE, held: "SELECT", columns: every },
+      { grantee: APP_ROLE, held: "UPDATE", columns: SETTINGS.join(",") },
+      { grantee: CROSS_ROLE, held: "INSERT", columns: FIRST.join(",") },
+      { grantee: CROSS_ROLE, held: "SELECT", columns: FIRST.join(",") },
+    ]);
     expect(of("jobs")).toEqual(
       ["id", "payload", "run_at", "state", "subject_id", "tenant_id", "type"].sort(),
     );

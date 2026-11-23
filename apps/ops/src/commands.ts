@@ -80,8 +80,8 @@ channel connect
             phone number itself.
 profile load
             makes the tenant's services, policies and settings what the JSON
-            file says. The file is the whole profile: what it does not name
-            is deleted. Nothing is changed if any part of it is refused. The
+            file says. The file is the whole profile: a service or a policy
+            it does not name is deleted, and both lists must be written. Nothing is changed if any part of it is refused. The
             file is not recorded, only its SHA-256. It holds a business's
             contact details: do not commit it.
 profile show

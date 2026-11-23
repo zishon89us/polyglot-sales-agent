@@ -6,6 +6,7 @@
 import { describe, expect, test } from "vitest";
 import {
   BODY_MAX,
+  CURRENCIES,
   contactLike,
   currencyDecimals,
   DESCRIPTION_MAX,
@@ -97,12 +98,37 @@ describe("a profile file that keeps every rule", () => {
   });
 
   test("may have no services, no policies and no opening hours, which are then cleared", () => {
-    const result = read({ settings: SETTINGS });
+    const result = read({ settings: SETTINGS, services: [], policies: [] });
     expect(result).toMatchObject({
       ok: true,
       size: 0,
       profile: { services: [], policies: [], settings: { openingHours: null } },
     });
+  });
+
+  test("both lists are written, even when empty: a file cut short deletes nothing by leaving one out", () => {
+    expect(read({ settings: SETTINGS })).toEqual({
+      ok: false,
+      problems: [
+        "services: is required, and is a list; write [] for none",
+        "policies: is required, and is a list; write [] for none",
+      ],
+    });
+    for (const absent of [null, {}, "none"]) {
+      expect(
+        problems((file) => {
+          file["services"] = absent;
+        }),
+      ).toEqual(["services: is required, and is a list; write [] for none"]);
+      expect(
+        problems((file) => {
+          file["policies"] = absent;
+        }),
+      ).toEqual(["policies: is required, and is a list; write [] for none"]);
+    }
+    // A key that is written says something: null is not "the usual".
+    expect(service({ active: null })).toEqual(["services[0].active: is true or false"]);
+    expect(service({ description: null })).toEqual(["services[0].description: is not text"]);
   });
 
   test("an email address is a support contact too", () => {
@@ -135,6 +161,17 @@ describe("what the file itself must be (L6)", () => {
       ok: false,
       problems: [`the file is larger than ${PROFILE_FILE_MAX_BYTES} bytes`],
     });
+    // At exactly the limit it is read: spaces after a file's last brace are JSON.
+    const good = JSON.stringify({ settings: SETTINGS, services: [], policies: [] });
+    const padded = new TextEncoder().encode(good.padEnd(PROFILE_FILE_MAX_BYTES, " "));
+    expect(padded.length).toBe(PROFILE_FILE_MAX_BYTES);
+    expect(readProfileFile(padded).ok).toBe(true);
+    expect(
+      readProfileFile(new TextEncoder().encode(`${good.padEnd(PROFILE_FILE_MAX_BYTES, " ")} `)),
+    ).toEqual({
+      ok: false,
+      problems: [`the file is larger than ${PROFILE_FILE_MAX_BYTES} bytes`],
+    });
   });
 
   test("UTF-8, with no byte-order mark", () => {
@@ -161,13 +198,19 @@ describe("what the file itself must be (L6)", () => {
     const twice =
       '{"settings":' +
       JSON.stringify(SETTINGS) +
-      ',"services":[{"name":"A","price_minor":1,"price_minor":2}]}';
+      ',"services":[{"name":"A","price_minor":1,"price_minor":2}],"policies":[]}';
     expect(readProfileFile(new TextEncoder().encode(twice))).toEqual({
       ok: false,
       problems: ["a key is given twice in one object"],
     });
     // The same words inside a text are not a key.
     expect(policy({ body: 'say "price_minor": twice, "price_minor": again' })).toEqual([]);
+  });
+
+  test("a file nested too deeply to count is refused, and said so", () => {
+    const deep = `${"[".repeat(200_000)}${"]".repeat(200_000)}`;
+    const result = readProfileFile(new TextEncoder().encode(deep));
+    expect(result).toEqual({ ok: false, problems: ["the file is nested too deeply"] });
   });
 
   test("an unknown key is refused wherever it is, and is not repeated", () => {
@@ -211,20 +254,43 @@ describe("settings", () => {
     ).toEqual(["settings: is not an object"]);
   });
 
-  test("a currency is one the platform's list holds", () => {
-    for (const currency of ["sar", "SARX", "XXQ", 1, ""]) {
-      expect(settings({ currency })).toEqual([
-        "settings.currency: is not a currency code this platform knows, such as SAR",
-      ]);
+  test("a currency is one of the list this project keeps", () => {
+    const told = `settings.currency: is not one of ${Object.keys(CURRENCIES).join(", ")}`;
+    // The last is a real currency that is not in the list yet.
+    for (const currency of ["sar", "SARX", "XXQ", 1, "", "toString", "CHF"]) {
+      expect(settings({ currency })).toEqual([told]);
     }
-    expect(settings({ currency: "KWD" })).toEqual([]);
+    for (const currency of Object.keys(CURRENCIES)) {
+      expect(settings({ currency }), currency).toEqual([]);
+    }
   });
 
-  test("a currency's decimals come from the same list: three for one, none for another", () => {
+  test("a currency's decimals are the list's own, not the runtime's: two for the rupee, three for a dinar, none for the yen", () => {
     expect(currencyDecimals("SAR")).toBe(2);
     expect(currencyDecimals("KWD")).toBe(3);
     expect(currencyDecimals("JPY")).toBe(0);
+    // The runtime's figure for each of these four is another (0, on the Node this was written on).
+    expect(currencyDecimals("PKR")).toBe(2);
+    expect(currencyDecimals("IDR")).toBe(2);
+    expect(currencyDecimals("LBP")).toBe(2);
+    expect(currencyDecimals("IQD")).toBe(3);
     expect(currencyDecimals("XXQ")).toBeUndefined();
+    expect(currencyDecimals("constructor")).toBeUndefined();
+    // The whole list, so that a figure is not changed without this line being read.
+    expect(CURRENCIES).toEqual({
+      ...Object.fromEntries(
+        "AED BDT EGP EUR GBP IDR INR LBP LKR MAD MYR PKR QAR SAR TRY USD"
+          .split(" ")
+          .map((code) => [code, 2]),
+      ),
+      ...Object.fromEntries("BHD IQD JOD KWD LYD OMR TND".split(" ").map((code) => [code, 3])),
+      JPY: 0,
+      KRW: 0,
+    });
+    // Every code is one the runtime knows as a currency at all.
+    for (const code of Object.keys(CURRENCIES)) {
+      expect(Intl.supportedValuesOf("currency"), code).toContain(code);
+    }
     expect(priceText(15000, { code: "SAR", decimals: 2 })).toBe("150.00 SAR");
     expect(priceText(15000, { code: "KWD", decimals: 3 })).toBe("15.000 KWD");
     expect(priceText(15000, { code: "JPY", decimals: 0 })).toBe("15000 JPY");
@@ -240,21 +306,49 @@ describe("settings", () => {
       "5550100",
       "+1555",
       "+1 555 0100",
-      "+15550100123456789",
+      // Seven digits, and sixteen.
+      "+1555010",
+      "+1555010012345678",
       "a@b",
       7,
+      // An escape, a right-to-left override, a null, and what is not an address's sign.
+      "a\u001B[2J@example.com",
+      "a\u202Egro@example.com",
+      "a\u0000@example.com",
+      "<script>@example.com",
+      "a b@example.com",
+      // An address in another script is refused too.
+      "\u0645@example.com",
+      // Longer than an address may be.
+      `${"a".repeat(243)}@example.com`,
     ]) {
-      expect(settings({ support_contact: contact })).toHaveLength(1);
+      expect(settings({ support_contact: contact })).toEqual([
+        "settings.support_contact: is a phone number in international form, a plus and 8 to 15 digits, or an email address",
+      ]);
     }
+    // Eight digits, and fifteen.
     expect(settings({ support_contact: "+15550100" })).toEqual([]);
+    expect(settings({ support_contact: "+155501001234567" })).toEqual([]);
+    expect(settings({ support_contact: `${"a".repeat(242)}@example.com` })).toEqual([]);
   });
 
-  test("a notification email is an email address of at most 254 characters", () => {
-    expect(settings({ notification_email: "owner" })).toEqual([
-      "settings.notification_email: is not an email address",
-    ]);
-    expect(settings({ notification_email: `${"a".repeat(244)}@example.com` })).toHaveLength(1);
+  test("a notification email is an email address of at most 254 characters, in the Latin alphabet, with no character to hide", () => {
+    for (const email of [
+      "owner",
+      "owner@example",
+      "a\u001B[2J@example.com",
+      "a\u202Egro@example.com",
+      "a\u0000@example.com",
+      "<script>@example.com",
+      "\u0645@example.com",
+      `${"a".repeat(243)}@example.com`,
+    ]) {
+      expect(settings({ notification_email: email })).toEqual([
+        "settings.notification_email: is not an email address",
+      ]);
+    }
     expect(settings({ notification_email: `${"a".repeat(242)}@example.com` })).toEqual([]);
+    expect(settings({ notification_email: "first.last+tag@mail.example.com" })).toEqual([]);
   });
 });
 
@@ -315,8 +409,8 @@ describe("hours", () => {
 
 describe("services and policies", () => {
   test("lengths are counted in code points, at each edge", () => {
-    // An astral character is one code point and two UTF-16 units.
-    const one = "😀";
+    // An astral letter is one code point and two UTF-16 units.
+    const one = "\u{10400}";
     expect(service({ name: one.repeat(NAME_MAX) })).toEqual([]);
     expect(service({ name: one.repeat(NAME_MAX + 1) })).toEqual([
       `services[0].name: is 1 to ${NAME_MAX} characters`,
@@ -350,18 +444,42 @@ describe("services and policies", () => {
   });
 
   test("a control character or one that overrides the direction of text is refused; a line break only in a long text", () => {
-    const refused = "has a control character or a character that overrides the direction of text";
-    // A right-to-left override, an isolate, an escape, a null.
-    for (const bad of ["a\u202Eb", "a\u2066b", "a\u001Bb", "a\u0000b"]) {
-      expect(service({ name: bad })).toEqual([`services[0].name: ${refused}`]);
-      expect(policy({ body: bad })).toEqual([`policies[0].body: ${refused}`]);
+    const inText = "has a control character or a character that overrides the direction of text";
+    const inName =
+      "has a control character, a line break or a character that overrides the direction of text";
+    // A right-to-left override, an isolate, an escape, a null, a line
+    // separator, a byte-order mark, and half of a surrogate pair.
+    for (const bad of [
+      "a\u202Eb",
+      "a\u2066b",
+      "a\u001Bb",
+      "a\u0000b",
+      "a\u2028b",
+      "a\u2029b",
+      "a\uFEFFb",
+      "a\uD800b",
+      "a\uDC00",
+    ]) {
+      expect(service({ name: bad })).toEqual([`services[0].name: ${inName}`]);
+      expect(policy({ title: bad })).toEqual([`policies[0].title: ${inName}`]);
+      expect(service({ description: bad })).toEqual([`services[0].description: ${inText}`]);
+      expect(policy({ body: bad })).toEqual([`policies[0].body: ${inText}`]);
     }
-    // A line separator is refused in a body. In a name it is white space, and becomes a space.
-    expect(policy({ body: "a\u2028b" })).toEqual([`policies[0].body: ${refused}`]);
-    expect(service({ name: "a\u2028b" })).toEqual([]);
-    // In a name a line break is a space; in a body it stays.
-    expect(service({ name: "two\nwords" })).toEqual([]);
-    expect(policy({ body: "a\tb" })).toEqual([`policies[0].body: ${refused}`]);
+    // A line break and a tab: refused in a name, not made a space. In a body a line break stays.
+    expect(service({ name: "two\nwords" })).toEqual([`services[0].name: ${inName}`]);
+    expect(service({ name: "two\twords" })).toEqual([`services[0].name: ${inName}`]);
+    expect(policy({ body: "two\nlines" })).toEqual([]);
+    expect(policy({ body: "a\tb" })).toEqual([`policies[0].body: ${inText}`]);
+  });
+
+  test("a name has a letter or a digit in it: one of marks that do not show is refused", () => {
+    // A zero-width space, a joiner, a soft hyphen, signs only.
+    for (const empty of ["\u200B", "\u200D\u200D", "\u00AD", "---"]) {
+      expect(service({ name: empty })).toEqual(["services[0].name: has no letter and no digit"]);
+      expect(policy({ title: empty })).toEqual(["policies[0].title: has no letter and no digit"]);
+    }
+    expect(service({ name: "24/7" })).toEqual([]);
+    expect(service({ name: "\u0662\u0664" })).toEqual([]);
   });
 
   test("two names that differ only in case, in composed form or in spaces are the same name", () => {
@@ -444,11 +562,12 @@ describe("services and policies", () => {
 
 describe("the size budget (section 3)", () => {
   const sized = (characters: number) => {
-    // 30 policies with bodies that add up to exactly `characters`, titles included.
+    // Ten policies with bodies that add up to exactly `characters`, titles included.
     const titles = Array.from({ length: 10 }, (_, index) => `p${index}`);
     const each = Math.floor(characters / 10);
     return {
       settings: SETTINGS,
+      services: [],
       policies: titles.map((title, index) => ({
         title,
         body: "b".repeat(each - title.length + (index === 0 ? characters - each * 10 : 0)),
@@ -502,8 +621,25 @@ describe("what in a profile's texts looks like a way to reach someone (M10)", ()
       "+1 (555) 0100",
       "https://example.com/pay?x=1",
       "desk@example.com",
-      "www.example.org,",
+      "www.example.org",
       "555-0100",
     ]);
+  });
+
+  test("digits of another script, a link with no scheme and one of another scheme are listed; six digits are not", () => {
+    const found = (text: string) =>
+      contactLike({ services: [], policies: [{ title: "t", body: text }] });
+    // Arabic-Indic and Persian digits.
+    expect(found("\u0660\u0665\u0665\u0665\u0660\u0661\u0660\u0660")).toHaveLength(1);
+    expect(found("\u06F0\u06F5\u06F5\u06F5\u06F0\u06F1\u06F0\u06F0")).toHaveLength(1);
+    expect(found("pay at example.com/pay.")).toEqual(["example.com/pay"]);
+    expect(found("chat on wa.me/15550100")).toEqual(["wa.me/15550100", "15550100"]);
+    expect(found("files at ftp://example.com/list")).toEqual(["ftp://example.com/list"]);
+    // Seven digits are listed and six are not.
+    expect(found("ring 5550100")).toEqual(["5550100"]);
+    expect(found("ring 555010")).toEqual([]);
+    expect(found("ring 555-0100")).toEqual(["555-0100"]);
+    expect(found("ring 555-010")).toEqual([]);
+    expect(found("open 9.30 to 17.00, every day.")).toEqual([]);
   });
 });

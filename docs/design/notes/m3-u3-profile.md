@@ -48,7 +48,7 @@ API design's:
 | Service description | 0 to 2,000 | Database and loader |
 | Policy body | 1 to 4,000 | Database and loader |
 | Price | A whole number of the currency's smallest unit, 0 or more, and one JSON carries exactly | Database (0 or more) and loader |
-| Currency | A code the platform's own list of currencies holds (`Intl`); the number of decimals comes from the same list, so that 15000 is 150.00 in one currency and 15.000 in another | Loader; the database checks three capital letters |
+| Currency | **As built, a fixed list of 25 kept in the code (row 43; "As built" below).** As first designed: a code the platform's own list of currencies holds (`Intl`); the number of decimals comes from the same list, so that 15000 is 150.00 in one currency and 15.000 in another | Loader; the database checks three capital letters |
 | Support contact | A phone number in international form, `+` and 8 to 15 digits, or an email address | Loader; the database checks length |
 | Notification email | An email address, at most 254; nothing is sent to it in M3 and it is not verified | Loader |
 | Services in a profile | 100 | Loader **(row 41)** |
@@ -300,9 +300,51 @@ open:
   was changed. The counts of added, changed and removed are in the
   tenant's audit log, with the name the operator gave and the same hash,
   and are printed.
-- **A name with a line break or a tab in it** is not refused: white space
-  in a name or a title is made one space. Only a description and a body
-  keep a line break.
+- **Currency (section 1; decisions row 43).** Not the runtime's list: a
+  fixed table of 25 currencies in `packages/core`, each with its
+  decimals. The code review found that the runtime's decimals are for
+  display and differ from the standard's (none for the Pakistani rupee),
+  and can change with an upgrade.
+- **Which two names are the same** is decided by one function, the
+  loader's `nameKey`, and stored beside the name (`name_key`,
+  `title_key`). The database's own folding of case follows its collation
+  and is not used. Letters that fold differently in different languages
+  (the Turkish dotted capital I, the Greek final sigma) are folded as
+  JavaScript folds them with no language given.
+- **The database must be UTF-8.** Migration 0007 refuses another
+  encoding, where a length would be counted in bytes.
+- **A name with a line break, a tab, a line separator or a byte-order
+  mark in it is refused,** not made a space. A name must hold a letter or
+  a digit. Half of a surrogate pair is refused everywhere.
+- **An email address is in the Latin alphabet's letters, digits and the
+  usual signs only.** An address in another script is refused. The
+  support contact and the notification email can therefore hold no
+  character the rule on characters refuses.
+- **Both lists are required.** A file with no `services` or no `policies`
+  key is refused; none is written `[]`. `null` is refused wherever it is
+  written.
+- **A number's written form is not checked:** `1e3` and `1000.0` are the
+  whole number 1000 and are taken.
+- **A profile's size counts active services only** (section 3 said its
+  texts): a service that is not active is not given to the model. A file
+  can hold 100 inactive services at full length and pass.
+- **The problem "a key is given twice" names no place.** It is known only
+  that the file writes more keys than it holds. A file nested too deeply
+  to count is refused in those words.
+- **The cross-tenant role cannot read a tenant's settings.** Its
+  privilege on `tenants` was the whole table's; it is now on the six
+  columns the table had before.
+- **What is stored is checked again when a profile is read.** A price
+  wider than a whole number carries exactly, hours of another shape or a
+  currency outside the list stops the read with an error: a turn fails
+  rather than tell a customer a price that was misread.
+- **The list of what looks like a contact** (M10) finds addresses with a
+  scheme, email addresses, names with a dot and an ending (`wa.me/…`),
+  and runs of seven or more digits in any script's digits. It can miss
+  other forms and can list a word after a full stop with no space. It is
+  for an operator to read, not a check.
+- **L11:** the two records are joined by the file's hash only. The audit
+  row has no identifier of the operator's record.
 - **`profile show` prints each text in quotes,** as `ops` prints every
   name: a line break shows as its code, and so do the joiners and
   direction marks that the loader allows. Text in Urdu or Hindi is
@@ -311,11 +353,13 @@ open:
   changed all three tables and not committed. That the read is one
   statement is by reading the code; no test would fail if it became two.
 - **L9** is tested by a load made to wait on the tenant's row, not by two
-  loads at once.
+  loads at once. The load's first statement updates that row; there is no
+  separate lock.
 - **`ops` depends on `packages/core`** as well as on the database package:
   the file's rules are the core's.
 - **Not written:** a test that the application role needs no table but
   the three to read a profile (M9 is shown by the query's text and by
   searching the profile for a seeded contact's number, identifier and
   words); a test of exit code 3 for the two new commands, which share the
-  path every command takes.
+  path every command takes; the migration on a UTF-8 database whose
+  locale is not `C` beyond what CI runs.

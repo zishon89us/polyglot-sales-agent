@@ -238,8 +238,9 @@ Proposed by the agent with the code.
   is also given the application role's address (`PSA_DB_APP_URL`), and
   these commands do their work as that role inside the one tenant's
   scope. The cross-tenant role has no privilege on `services` or
-  `policies` and cannot change a tenant's settings; it still writes the
-  operator's record.
+  `policies` and can neither read nor change a tenant's settings (its
+  privilege on `tenants` is by column, and names none of them); it still
+  writes the operator's record.
 - **What is recorded:** the tenant, the SHA-256 of the file, and how many
   services and policies it holds. Never the file's name or contents. A
   load also writes one row to the tenant's own audit log, with the name

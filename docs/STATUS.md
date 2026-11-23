@@ -476,7 +476,7 @@ M0 Inception met its exit criteria on 2026-11-16; see
   stores about itself, what of it the model is given and what is not,
   whether a tenant is answering, and an operator's command to load a
   profile from a file. A second agent reviewed the note: 32 findings,
-  five High (the cross-tenant role would have gained the right to write
+  four High and a Medium (the cross-tenant role would have gained the right to write
   every tenant's prices; a rule on characters that refused correct Urdu,
   Hindi and Bengali text; a support contact and a currency that
   contradicted the glossary; a wrong statement about what `ops` records).
@@ -487,7 +487,16 @@ M0 Inception met its exit criteria on 2026-11-16; see
   keep, the one function that hands a profile to a turn, and the
   operator's `profile load` and `profile show`, which work as the
   tenant's own role so that the cross-tenant role gains nothing. Nothing
-  a customer sees has changed.
+  a customer sees has changed. A third agent reviewed the code
+  (`reviews/2026-11-23-gate4-u3-profile.md`): 15 findings, none High,
+  five Medium, and 14 of 51 mutants alive. The largest: the number of a
+  currency's decimals came from the runtime, which gives the Pakistani
+  rupee none, so a price would have been read a hundred times too large;
+  it is now a fixed list of 25 currencies (row 43). Also fixed: which two
+  names are the same no longer depends on the database's collation; a
+  database that is not UTF-8 is refused; the cross-tenant role can no
+  longer read a tenant's settings; a file that leaves out a list no
+  longer deletes it.
 
 ## Next
 
