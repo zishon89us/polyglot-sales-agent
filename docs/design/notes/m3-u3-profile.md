@@ -343,6 +343,17 @@ open:
   and runs of seven or more digits in any script's digits. It can miss
   other forms and can list a word after a full stop with no space. It is
   for an operator to read, not a check.
+- **Nothing in the database ties a key to its name.** The loader is the
+  only writer and always makes the key with `nameKey`. A later writer
+  (M5's screen) must do the same; and since `nameKey` uses the runtime's
+  Unicode tables, an upgrade that changes how a letter is folded would
+  make the next load see a stored item as removed and added.
+- **A currency can be added to the list and not taken out** without a
+  migration of the tenants that hold it: a tenant with a stored currency
+  outside the list is told by `answering` that nothing is missing, while
+  every read of its profile fails.
+- **A phone number is in the digits 0 to 9.** One typed in another
+  script's digits is refused, and the problem says which digits.
 - **L11:** the two records are joined by the file's hash only. The audit
   row has no identifier of the operator's record.
 - **`profile show` prints each text in quotes,** as `ops` prints every

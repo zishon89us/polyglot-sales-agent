@@ -382,7 +382,7 @@ export function readProfileFile(bytes: Uint8Array): ProfileRead {
       (typeof contact !== "string" || !(PHONE.test(contact) || isEmail(contact)))
     ) {
       problems.push(
-        "settings.support_contact: is a phone number in international form, a plus and 8 to 15 digits, or an email address",
+        "settings.support_contact: is a phone number in international form, a plus and 8 to 15 of the digits 0 to 9, or an email address",
       );
     }
     const email = given["notification_email"];
@@ -609,9 +609,9 @@ export function assembleBusinessProfile(row: ProfileRow): BusinessProfile {
         (period: unknown) =>
           typeof period === "object" &&
           period !== null &&
-          Number.isInteger((period as HoursPeriod).weekday) &&
-          minutes((period as HoursPeriod).opens, false) !== undefined &&
-          minutes((period as HoursPeriod).closes, true) !== undefined,
+          [1, 2, 3, 4, 5, 6, 7].includes((period as HoursPeriod).weekday) &&
+          (minutes((period as HoursPeriod).opens, false) ?? Number.POSITIVE_INFINITY) <
+            (minutes((period as HoursPeriod).closes, true) ?? Number.NEGATIVE_INFINITY),
       );
     if (!fine) {
       throw stored("opening hours");

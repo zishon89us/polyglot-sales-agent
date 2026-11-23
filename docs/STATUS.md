@@ -496,7 +496,12 @@ M0 Inception met its exit criteria on 2026-11-16; see
   names are the same no longer depends on the database's collation; a
   database that is not UTF-8 is refused; the cross-tenant role can no
   longer read a tenant's settings; a file that leaves out a list no
-  longer deletes it.
+  longer deletes it. A fourth agent checked the fixes
+  (`reviews/2026-11-23-gate4-u3-profile-verification.md`): eleven of
+  fifteen fixed outright, the rest in part as stated but one, and seven
+  smaller things, of which the last fixes (stored hours that make no
+  sense now stop a read; the glossary and the Makefile say what
+  changed) were checked by the author only. What is left is #324.
 
 ## Next
 

@@ -528,6 +528,22 @@ describe("what the model is given (section 2)", () => {
     expect(text).not.toMatch(/updated|20[0-9][0-9]-/);
   });
 
+  test("policies and services are given in the order of their names, whatever order they were stored in", async () => {
+    const titles = ["m", "c", "x", "a", "t", "e", "z", "b"];
+    await load({
+      settings: SETTINGS,
+      services: titles.map((name) => ({ name: `S ${name}`, price_minor: 1 })),
+      policies: titles.map((title) => ({ title: `P ${title}`, body: "b" })),
+    });
+    // Rewritten, so that the newest versions of the rows are not in the order of insertion.
+    await administrator.query("UPDATE policies SET body = 'c' WHERE title IN ('P a', 'P m')");
+    await administrator.query("UPDATE services SET price_minor = 2 WHERE name IN ('S a', 'S m')");
+    const given = await profile();
+    const sorted = [...titles].sort();
+    expect(given.policies.map((policy) => policy.title)).toEqual(sorted.map((t) => `P ${t}`));
+    expect(given.services.map((service) => service.name)).toEqual(sorted.map((t) => `S ${t}`));
+  });
+
   test("M9: nothing from a contact's record or a conversation is in it, whatever the tenant has stored", async () => {
     await load(BASE);
     const before = await profile();
@@ -633,6 +649,11 @@ describe("what the model is given (section 2)", () => {
       '[{"weekday": 1, "opens": "9", "closes": "17:00"}]',
       '[{"weekday": 1.5, "opens": "09:00", "closes": "17:00"}]',
       '[{"weekday": 1, "opens": "09:00"}]',
+      '[{"weekday": 99, "opens": "09:00", "closes": "17:00"}]',
+      '[{"weekday": 0, "opens": "09:00", "closes": "17:00"}]',
+      '[{"weekday": 1, "opens": "09:00", "closes": "08:00"}]',
+      '[{"weekday": 1, "opens": "09:00", "closes": "09:00"}]',
+      '[{"weekday": 1, "opens": "24:00", "closes": "24:00"}]',
     ]) {
       await administrator.query("UPDATE tenants SET opening_hours = $2::jsonb WHERE id = $1", [
         tenant,

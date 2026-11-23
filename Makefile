@@ -23,7 +23,11 @@ identity:
 # The tests need a PostgreSQL 16 server. `db-up` starts one in Docker;
 # any server works if PSA_TEST_ADMIN_URL in `.env` points at it. `db-setup`
 # prepares the development database: the three roles, the migrations, then
-# the isolation check. It reads `.env` (copy `.env.example`).
+# the isolation check. It reads `.env` (copy `.env.example`). The database
+# itself must exist and be UTF-8: the migrations refuse another encoding.
+# On a server whose default is another, make it with
+#   CREATE DATABASE psa ENCODING 'UTF8' TEMPLATE template0;
+# and remake a database that was made otherwise.
 db-up:
 	docker compose up --detach --wait db
 

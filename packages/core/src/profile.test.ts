@@ -317,13 +317,15 @@ describe("settings", () => {
       "a\u0000@example.com",
       "<script>@example.com",
       "a b@example.com",
+      // Digits of another script: the message says which digits.
+      "+\u0669\u0666\u0666\u0665\u0665\u0665\u0660\u0661\u0660",
       // An address in another script is refused too.
       "\u0645@example.com",
       // Longer than an address may be.
       `${"a".repeat(243)}@example.com`,
     ]) {
       expect(settings({ support_contact: contact })).toEqual([
-        "settings.support_contact: is a phone number in international form, a plus and 8 to 15 digits, or an email address",
+        "settings.support_contact: is a phone number in international form, a plus and 8 to 15 of the digits 0 to 9, or an email address",
       ]);
     }
     // Eight digits, and fifteen.
