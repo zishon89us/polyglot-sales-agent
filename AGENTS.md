@@ -217,9 +217,10 @@ a lifecycle phase.
 │   ├── dashboard/            # owner web app
 │   └── mock-whatsapp/        # local Cloud API imitation
 ├── packages/
-│   ├── core/  ai/  channel-whatsapp/  integrations/  db/
-│   └── packs/booking/  packs/faq-only/
-├── prompts/                  # versioned prompt files, one folder per prompt
+│   ├── core/  ai/  channel/  channel-whatsapp/  channel-mock/  db/
+│   ├── pack-interface/      # the type of a pack (ADR 0014)
+│   └── packs/booking/  packs/faq-only/  packs/registry/
+├── prompts/                  # versioned prompt files, one folder per prompt and per version
 ├── evals/                    # datasets, graders, runner, baseline results
 ├── infra/                    # infrastructure-as-code
 ├── docs/

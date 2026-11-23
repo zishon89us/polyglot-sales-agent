@@ -1,0 +1,161 @@
+// The model client in this project's own types (ADR 0005; design note
+// docs/design/notes/m3-u4-llm-client.md, sections 2 and 3). No provider's
+// type appears here or anywhere outside an adapter.
+
+import type { ModelFlag } from "@polyglot-sales-agent/core";
+
+/** A prompt a request's system text was assembled from. Written to the trace. */
+export interface PromptIdentity {
+  readonly name: string;
+  readonly version: number;
+}
+
+/**
+ * One message of a request. `data` is what code gives the model: the
+ * business's profile, a note of what was left out. Everything but
+ * `assistant` is information for the model, never instruction.
+ */
+export type LlmMessage =
+  | { readonly role: "data"; readonly text: string }
+  | { readonly role: "customer"; readonly text: string }
+  | { readonly role: "assistant"; readonly text: string }
+  | { readonly role: "tool-result"; readonly toolCallId: string; readonly text: string };
+
+/** A tool as the model is told of it. Its arguments are checked where it is run. */
+export interface ToolOffer {
+  readonly name: string;
+  readonly description: string;
+  /** A JSON Schema for the arguments, passed to the provider as it is. */
+  readonly argumentsSchema: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * One call. Nothing here is named for a contact: no phone number and no
+ * person's name has a field (NFR-V7).
+ */
+export interface LlmRequest {
+  readonly system: string;
+  readonly prompts: readonly PromptIdentity[];
+  readonly messages: readonly LlmMessage[];
+  readonly tools: readonly ToolOffer[];
+  /** The claim kinds this tenant's answers may use: the core's and its pack's. */
+  readonly claimKinds: readonly string[];
+  /** Required: a call with no bound on its output is not made. */
+  readonly maxOutputTokens: number;
+  /** Required: a call with no bound on its wait is not made. */
+  readonly timeoutMs: number;
+}
+
+export interface Claim {
+  readonly kind: string;
+  /** What the claim is about: an item the model was given. */
+  readonly item: string;
+  /** The value as the reply states it. */
+  readonly value: string;
+}
+
+/** Plain data: what JSON can carry. */
+export type Plain =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly Plain[]
+  | { readonly [key: string]: Plain };
+
+export interface ToolCall {
+  /** Pairs a result with its call inside one reply's loop. Used for nothing else. */
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: { readonly [key: string]: Plain };
+}
+
+/** What a model answers, checked. An answer asks for tools or it replies, not both. */
+export interface LlmOutput {
+  readonly reply: string;
+  readonly claims: readonly Claim[];
+  readonly flags: readonly ModelFlag[];
+  readonly toolCalls: readonly ToolCall[];
+}
+
+export interface TokenUse {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+/** Why an answer was not accepted. Never the answer's text. */
+export const INVALID_OUTPUT_CODES = ["shape", "flag", "claim", "tool-call", "truncated"] as const;
+export type InvalidOutputCode = (typeof INVALID_OUTPUT_CODES)[number];
+
+/** How a provider failed. Never the provider's message. Which are tried again is the caller's rule. */
+export const PROVIDER_ERROR_CODES = [
+  "unavailable",
+  "rate-limited",
+  "refused",
+  "bad-request",
+  "not-authorised",
+  "other",
+] as const;
+export type ProviderErrorCode = (typeof PROVIDER_ERROR_CODES)[number];
+
+/**
+ * The result of one call. Only `timeout` and `provider-error` are the
+ * provider's failing (state machines, section 8); `invalid-output` is a
+ * failed output check (guardrail policy, O1).
+ */
+export type LlmResult =
+  | {
+      readonly kind: "ok";
+      readonly output: LlmOutput;
+      readonly usage: TokenUse;
+      readonly model: string;
+    }
+  | {
+      readonly kind: "invalid-output";
+      readonly code: InvalidOutputCode;
+      readonly usage: TokenUse;
+      readonly model: string;
+    }
+  | { readonly kind: "timeout" }
+  | { readonly kind: "provider-error"; readonly code: ProviderErrorCode };
+
+export type ProviderFailure = "timeout" | "provider-error";
+export type Health =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly failure: ProviderFailure };
+
+/** What an adapter returns: what its provider said, unchecked, or how the provider failed. */
+export type AdapterAnswer =
+  | {
+      readonly kind: "answer";
+      /** As the provider gave it, parsed and not checked. */
+      readonly value: unknown;
+      /** The provider stopped because the output limit was reached. */
+      readonly truncated: boolean;
+      readonly usage: TokenUse;
+      readonly model: string;
+    }
+  | { readonly kind: "provider-error"; readonly code: ProviderErrorCode };
+
+/**
+ * What a provider's adapter implements. One attempt, no retry. It turns
+ * its provider's errors into `provider-error`; anything it throws is a
+ * fault in this repository's code and is thrown on to the caller.
+ */
+export interface LlmAdapter {
+  generate(request: LlmRequest, signal: AbortSignal): Promise<AdapterAnswer>;
+  health(signal: AbortSignal): Promise<Health>;
+}
+
+declare const checked: unique symbol;
+
+/**
+ * What the rest of the code calls. Made only by `bounded`: an adapter is
+ * not one, so the time bound and the check of the answer cannot be left
+ * out.
+ */
+export interface LlmClient {
+  readonly [checked]: true;
+  generate(request: LlmRequest): Promise<LlmResult>;
+  health(): Promise<Health>;
+}

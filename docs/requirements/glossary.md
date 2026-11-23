@@ -124,6 +124,14 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Slots offered at once | 5 | US-B2 |
 | Per-contact rate limit | 20 inbound messages in 5 minutes, then a 15-minute pause | US-C17, NFR-S7 |
 | Model call timeout and attempts | 20 seconds, 3 attempts, waits of 1 and 4 seconds | US-C15, NFR-R4 |
+| Output of one model call | At most 4,096 tokens. Assumes a code point costs at most three tokens, which is not measured; provisional (decisions row 44) | #158 |
+| Reply length | At most 1,200 code points | #158; guardrail policy O7 |
+| Tool calls in one reply | At most 4 rounds, each of at most 4 calls, whose arguments are at most 2,000 code points as JSON and 5 levels deep | #158 |
+| Claims in one answer | At most 30, each item and value at most 100 code points | #158 |
+| A batch's customer text | At most 8,000 code points given to one call; the newest messages kept whole. Provisional until the channel's limit on a message is read (M3 unit U5) | #158; guardrail policy I3 |
+| Prompt file | At most 20,000 code points | #158 |
+| Provider health check | 5 seconds | ADR 0005 |
+| Ceilings on any model call | 60 seconds; 8,192 output tokens | #158 |
 | Awaiting-retry attempts | Every 60 seconds and on the customer's next message, until the message is 15 minutes old; at most one provider-failure fallback per session per 15 minutes | US-C15 |
 | Age limit of a tool result used to state a slot or booking time | 10 minutes | US-C4 |
 | Reminder floor | Scheduled no later than 60 minutes before the appointment; accepted by the channel no later than 55 minutes before | US-B3 |

@@ -195,7 +195,8 @@ flowchart TB
 | `channel-whatsapp` | The WhatsApp implementation. All knowledge of Meta's payloads lives here. In development and CI it talks over HTTP to the `mock-whatsapp` app, so the same code runs as in a deployment, against another address |
 | `channel-mock` | A second implementation that lives in memory, with a format of its own. It imitates nothing; it is what a test uses when the test is not about WhatsApp, and it is the second implementation that shows the interface fits more than one channel (NFR-M2) |
 | `ai` | `LlmClient` and its adapters; loading versioned prompts; building the business profile; validating structured output; checking claims; writing traces. |
-| `pack` | The interface a pack implements (below). |
+| `pack-interface` | The type of a pack and of its parts, the lookup of a pack by name and the check of a pack's name (ADR 0014). Built in M3 unit U4 with the name and the prompt fragment; tools and claim kinds are added by the units that first use them. |
+| `packs/registry` | The packs a deployment runs, by name, and nothing else. Imported only by `main.ts` of the api and of the worker (ADR 0014); nothing imports it yet. |
 | `packs/booking` | Everything about appointments: the booking and reminder state machines, the reminder timing rule, slots and capacity, its tables and migrations, its tools, templates, buttons, timers, API routes, settings and metrics (ADR 0012). As built in M2 it holds only the list of its names, which a test keeps out of the core; the pack itself is M5's |
 | `packs/faq-only` | The trial pack: a prompt fragment and evals. It uses the core business profile and adds no code. |
 | `integrations` | Reserved for v1.1. Empty in v1.0. |

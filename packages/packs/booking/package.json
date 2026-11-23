@@ -2,9 +2,14 @@
   "name": "@polyglot-sales-agent/pack-booking",
   "version": "0.0.0",
   "private": true,
-  "description": "The booking pack (ADR 0012). So far only the names the core must not use; the pack itself is M5's.",
+  "description": "The booking pack (ADR 0012, ADR 0014). So far a name, and the names the core must not use; the pack itself is M5's.",
   "type": "module",
   "exports": {
-    ".": "./src/names.ts"
+    ".": "./src/index.ts",
+    "./names": "./src/names.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@polyglot-sales-agent/pack-interface": "workspace:*"
   }
 }

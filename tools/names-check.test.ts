@@ -53,6 +53,29 @@ describe("checkSharedNames", () => {
     ]);
   });
 
+  test("a flag renamed, dropped or added in the guardrail policy only", () => {
+    change("docs/ai/guardrail-policy.md", "| `asks-to-resume` |", "| `asks-to-restart` |");
+    expect(checkSharedNames(root)).toEqual([
+      'guardrail policy, the flags\' names: "asks-to-resume" is missing',
+      'guardrail policy, the flags\' names: "asks-to-restart" is not in packages/core/src/names.ts',
+    ]);
+  });
+
+  test("a core claim kind added in the guardrail policy only, and the table gone", () => {
+    change(
+      "docs/ai/guardrail-policy.md",
+      "| `policy` | Policy |",
+      "| `policy` | Policy |\n| `calendar-date` | Calendar date |",
+    );
+    expect(checkSharedNames(root)).toEqual([
+      'guardrail policy, the core\'s claim kinds: "calendar-date" is not in packages/core/src/names.ts',
+    ]);
+    change("docs/ai/guardrail-policy.md", "| Core claim kind |", "| Kind |");
+    expect(checkSharedNames(root)).toEqual([
+      "guardrail policy, the core's claim kinds: the list was not found where the check expects it",
+    ]);
+  });
+
   test("a message class renamed in the glossary only", () => {
     change("docs/requirements/glossary.md", "| Service notice |", "| Service note |");
     expect(checkSharedNames(root)).toEqual([

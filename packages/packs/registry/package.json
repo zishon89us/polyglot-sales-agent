@@ -1,0 +1,16 @@
+{
+  "name": "@polyglot-sales-agent/packs-registry",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The packs a deployment runs, by name, and nothing else (ADR 0014). Imported only by main.ts of the api and of the worker.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyglot-sales-agent/pack-booking": "workspace:*",
+    "@polyglot-sales-agent/pack-faq-only": "workspace:*",
+    "@polyglot-sales-agent/pack-interface": "workspace:*"
+  }
+}

@@ -126,3 +126,32 @@ added by code holds the contact's number or name (NFR-V7).
 - Not settled here: the model call that labels a session as an inquiry when
   it ends (US-C19), its failure behaviour and its cost. Tracked as a
   `review-finding` issue from S19.
+
+## Amendment, 2026-11-23 (M3 unit U4; design note `docs/design/notes/m3-u4-llm-client.md`)
+
+Proposed by the agent with the code.
+
+- **An adapter and a client are two types.** A provider's adapter returns
+  what the provider said, unchecked, or a typed failure. One function,
+  `bounded`, makes a client of an adapter: it keeps the time and checks
+  the answer against the structure. The rest of the code takes a client,
+  so the bound and the check cannot be left out. "A wrapper around every
+  adapter writes the trace" still holds; it goes outside this one.
+- **The request carries the assembled text,** with the names and versions
+  of the prompts it was made from, not "a prompt name and version": the
+  adapter does not read files.
+- **What an adapter throws is thrown on.** Only a typed `timeout` or
+  `provider-error` counts as the provider's failing. An exception is a
+  fault in this repository's code and fails the job; it is not retried
+  as a provider failure and not counted towards degraded mode.
+- **An answer cut at the output limit** is `invalid-output` with the code
+  `truncated`, whatever the cut text looks like.
+- **Failures carry a code from a fixed list** and never the model's text
+  or the provider's message.
+- **The structure has four parts:** reply, claims, flags, tool calls. An
+  answer asks for tools or replies, not both. The seven flags and the
+  core's four claim kinds are named in `packages/core/src/names.ts`.
+- **Confirmation, as built in U4:** the import-boundary test is a list of
+  known providers' packages; a library it does not know, or a plain HTTP
+  call, passes. Each typed failure is driven through the scripted
+  adapter. The trace and prompt-assembly tests are U6's and U7's.

@@ -270,7 +270,7 @@ Where text that reaches the model comes from, and who controls it:
 | T51 | **Planted content.** A manipulated reply carries a link, a phone number or payment details, sent from the business's own number | A link, email address, phone number or account number in a reply must equal a value in the tenant's own data; checked by code after the model | Guardrail policy section 4, check O5; US-C4 criterion 15 | Detection is by pattern and can miss an unusual form; measured by the planted-content eval cases |
 | T52 | **Advice the assistant must not give**, or offensive output in the business's name | Refusal rules in the prompt; the model's sensitive-topic flag triggers handover; refusal eval cases per language | US-C8 criterion 5, R-A4, guardrail policy #44 | Rests on the model's judgement; measured, not enforced (ADR 0007) |
 | T53 | **One customer's data shown to another.** A customer asks who else is booked, or for another customer's details | Tools return slots and this contact's own bookings, never who holds a slot; the prompt holds only this session | US-C2, NFR-A1, ADR 0007 layer 2 | None known |
-| T54 | **Unbounded use.** A customer makes each reply expensive: very long input, a loop of tool calls, very long output | Turn cap, per-contact limit, timeout and batching exist; limits per call do not | NFR-C2, NFR-S7, **#158**, **#157** | Open until #158; the daily token budget waits on OQ-7 |
+| T54 | **Unbounded use.** A customer makes each reply expensive: very long input, a loop of tool calls, very long output | Turn cap, per-contact limit, timeout and batching exist; limits per call do not | NFR-C2, NFR-S7, **#158**, **#157** | **Partly closed** (M3 unit U4): output, tool calls and the batch's text are bounded on each call. Still open: the session's earlier messages and tool results given to a call (U7), the session's and the tenant's budgets (U12, #157; OQ-7) |
 | T55 | **Model output used unsafely downstream.** Reply text is treated as markup, a query, a link to fetch or a command | Output is schema-validated and used only as message text and typed tool arguments; it is rendered as characters in the dashboard; nothing executes it | ADR 0007 layers 2 to 4, **#155** | None known once #155 is built |
 | T56 | **The model or provider changes** and behaviour shifts silently | Model version pinned in configuration; a full eval run on any change; the provider sits behind an interface | R-A5, ADR 0005 | A provider can change a pinned model without notice |
 | T57 | **Conversations are used to train or evaluate.** Real messages enter prompts, eval sets or a provider's training | Eval data is written, never harvested; a pattern scan in CI; provider terms | NFR-V6, NFR-V5, ADR 0010 (proposed) | Depends on A5 |
@@ -307,7 +307,7 @@ document it belongs to is written.
 | Text is rendered as characters; browser security headers | #155; a new NFR |
 | Sign-in: new identifier at sign-in, sessions ended on password change, links from a configured address, equal timing, per-source limits, audit entries | #156; an amendment to ADR 0008 |
 | Tenant-level ceiling and alert | #157; a new step in the order of checks |
-| Limits per model call | #158; new fixed values |
+| Limits per model call | #158; fixed values in the glossary since M3 unit U4 |
 | Links, phone numbers and payment details in replies | #159; guardrail policy |
 | Keyed hash for suppressed numbers | #160; data model |
 | Operator access and its audit trail | #161; architecture or an ADR |
@@ -338,7 +338,7 @@ finding A31 showed the earlier list was too short):
 | Entries | State |
 | --- | --- |
 | T4, T29 | Mitigation named; its limits are not set (#154, #164) |
-| T6, T54 | Not designed; M3 (#157, #158) |
+| T6, T54 | T54's limits per call are built (#158, M3 unit U4); the rest is M3's (#157) |
 | Recycled number (T8) | Not mitigated; accepted for v1.0 (#166) |
 | Provider retention (T16) | Open until the provider is chosen (ADR 0010) |
 | Stored script (T25) | Mitigation named; open until built (#155) |

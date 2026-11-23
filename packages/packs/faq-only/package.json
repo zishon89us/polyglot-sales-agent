@@ -1,0 +1,14 @@
+{
+  "name": "@polyglot-sales-agent/pack-faq-only",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The trial pack (NFR-M1). In M3 a name and nothing else; its prompt and evals are added at the end of M5 (ADR 0014; decisions row 37).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyglot-sales-agent/pack-interface": "workspace:*"
+  }
+}
