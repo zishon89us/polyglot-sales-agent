@@ -5,7 +5,7 @@ stop, or a thing only the maintainer can do. Answer with the row's number
 and "yes", "no", or a few words; a "no" tells the agent what to change.
 "If no" says what a no would cost, as far as the agent can tell.
 
-Last brought up to date: 2026-11-23, with the M3 plan (rows 29 to 35) and its first units (rows 36 to 40;
+Last brought up to date: 2026-11-23, with the M3 plan (rows 29 to 35) and its first units (rows 36 to 41;
 a row keeps its number for good, so new rows take the next numbers
 wherever they sit on the page). At the end of M2 a second agent
 checked the first version against the repository and found it left out a
@@ -44,6 +44,7 @@ an earlier draft.
 | 38 | **After two replies in a row have been dropped because the customer wrote again, the third is sent anyway** (`design/notes/m3-u2-sessions.md`, D6). Without a bound, a customer who writes every few seconds is never answered. A yes changes US-C11, 2, which today reads as "always dropped" | **Built as proposed, in #322:** two. The customer then waits at most one batching window and three turns: about 10 seconds with the echo, about 25 with a model that answers in 5, about 205 at the worst a turn may take. The forced reply does not cover the newest message, so a second follows, and from M5 the channel may charge for each | Say another number, a limit in seconds, or that a reply is always dropped for a newer message; the number is one constant, the other two are a change to the turn |
 | 39 | Withdrawn on 2026-11-23, before any answer. It proposed ending a session when a contact known only by a number first got the channel's identifier. WhatsApp sends the identifier with every message, so the case arises only on a channel that sends none, and row 1 decides that | — | — |
 | 40 | **A customer's message that nobody answered within 24 hours is not answered by the assistant** (the same note, W2 and S3): it is marked dealt with, and the worker reports it when a turn meets it (not when it is closed with its session as the next message is stored). It takes a worker stopped for a day, a dead job an operator retries late, or a message the channel delivers more than a day after it says it was sent. The channel would refuse a free-form reply by then | **Built as proposed, in #322.** In M3 nobody else sees the message; from M4 staff do | Say what should happen: a template (M5), or a handover (if row 29 is a yes) |
+| 41 | **A business's profile may be at most 40,000 characters,** provisionally, with at most 100 services and 30 policies (`design/notes/m3-u3-profile.md`, sections 1 and 3). The whole profile goes to the model on every reply, so its size is paid for each time | Proposed, not built. No model is chosen, so nothing was measured: the unit that measures the models (U17) sets the number that stays, in tokens | Say other limits; they are constants |
 
 ## Made in M2; a yes closes them
 

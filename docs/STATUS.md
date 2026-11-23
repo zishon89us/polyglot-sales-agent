@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 done; U2 in review)
+## Current milestone: M3 AI core (U1 and U2 done; U3 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -470,10 +470,17 @@ M0 Inception met its exit criteria on 2026-11-16; see
   and all 45 were refused once it had passed. It now starts an hour from
   when the tests run. What the unit leaves is #321.
 
+- 2026-11-23 — #322 merged: U2 is done (#320, which it replaced, is
+  still open for the maintainer to close). **M3 U3** (#302) begun with
+  its design note (`design/notes/m3-u3-profile.md`): what a business
+  stores about itself, what of it the model is given and what is not,
+  whether a tenant is answering, and an operator's command to load a
+  profile from a file. Row 41 asks about the size limits. No code yet.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 40 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 41 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U2, U3, U4 and U5, with U0 still open for four
    answers. U3 builds on rows 34 and 36 as well, and U4 on row 37. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
@@ -529,7 +536,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 40 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 41 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 
