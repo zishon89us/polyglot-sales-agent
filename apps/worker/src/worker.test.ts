@@ -384,7 +384,8 @@ describe("several messages in a row get one answer (US-C11; design note, section
     }
     throw new Error("the queue did not empty");
   }
-  const base = Date.UTC(2026, 10, 23, 12, 0, 0);
+  // An hour from now, not a fixed date: a job due more than a minute ago is refused (migration 0002).
+  const base = Math.ceil(Date.now() / 1_000) * 1_000 + 60 * 60_000;
   const t = (ms: number): Date => new Date(base + ms);
 
   test("a burst is answered together, in order, and not before the window closes (NFR-P5)", async () => {

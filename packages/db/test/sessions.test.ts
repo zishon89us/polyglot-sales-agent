@@ -35,7 +35,10 @@ let app: Database;
 let administrator: pg.Client;
 let tenant = "";
 const NUMBER = "100000000000006";
-const T0 = Date.UTC(2026, 10, 23, 9, 0, 0);
+// An hour from now, to the second. Not a fixed date: the tenant's role may
+// not queue a job due more than a minute ago (migration 0002), so a test
+// that stored a message "at" a date now past would be refused.
+const T0 = Math.ceil(Date.now() / 1_000) * 1_000 + 60 * 60_000;
 const HOUR = 60 * 60_000;
 const at = (ms: number): Date => new Date(T0 + ms);
 
