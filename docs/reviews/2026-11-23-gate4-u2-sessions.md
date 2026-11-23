@@ -5,8 +5,13 @@ window, the batching window, overtaken replies), unedited, and before it
 what the author did. The reviewer ran the tests and 43 mutants against a
 database. It reviewed commit `d605d48`. That commit's header is three
 characters too long for the commit-message check, which neither the
-author nor the reviewer ran on it before it was pushed; see the pull
-request for what was done about it.
+author nor the reviewer ran on it before it was pushed. With the
+maintainer's choice the unit's commits were replayed on a fresh branch
+(pull request #322 in place of #320) with that one header shortened and
+the same tree. The hashes in this folder's three reports on U2 are the
+old branch's: `07983fd` is now `d782147`, `d5d11df` is `7e1c278`,
+`f3eea05` is `d1b3b32`, `d605d48` is `9f3d874`, `8c86843` is `97d9c0b`
+and `af658a7` is `ea17e50`.
 
 ## Author's response
 
