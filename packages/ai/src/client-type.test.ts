@@ -35,8 +35,51 @@ describe("a client is made by bounded and by nothing else", () => {
     const made = new LlmClient(adapter, { set: () => 0, clear: () => {} });
     expect(made).toBeDefined();
 
-    // At run time a copy of a client is an empty object: it has neither method.
-    expect(Object.keys({ ...client })).toEqual([]);
+    // Nor is an object with every public member of one: the private part is what makes a client.
+    const members: Pick<LlmClient, keyof LlmClient> = client;
+    // @ts-expect-error
+    turn(members);
+  });
+
+  test("a client's calls cannot be replaced in place: not by the compiler, and not at run time", () => {
+    const generate = async (_request: LlmRequest): Promise<LlmResult> => ({ kind: "timeout" });
+    const before = client.generate;
+
+    expect(() => {
+      // @ts-expect-error The call is read-only.
+      client.generate = generate;
+    }).toThrow(TypeError);
+    expect(() => {
+      // @ts-expect-error So is the other.
+      client.health = async () => ({ ok: true });
+    }).toThrow(TypeError);
+    // What the compiler lets through is refused when it runs: a client is frozen.
+    expect(() => Object.assign(client, { generate })).toThrow(TypeError);
+    expect(() => Object.defineProperty(client, "generate", { value: generate })).toThrow(TypeError);
+    expect(Object.isFrozen(client)).toBe(true);
+    expect(client.generate).toBe(before);
+
+    // The class's own prototype is frozen too, and holds neither call.
+    expect(Object.isFrozen(LlmClient.prototype)).toBe(true);
+    expect(() => Object.assign(LlmClient.prototype, { generate })).toThrow(TypeError);
+    expect(bounded(adapter).generate).not.toBe(generate);
+  });
+
+  test("a call taken off its client still works, and still refuses by a rejection", async () => {
+    const detached = bounded(
+      new FakeLlmAdapter([{ kind: "provider-error", code: "unavailable" }]),
+    ).generate;
+    const request: LlmRequest = {
+      system: "",
+      prompts: [],
+      messages: [],
+      tools: [],
+      claimKinds: [],
+      maxOutputTokens: 1,
+      timeoutMs: 1_000,
+    };
+    expect(await detached(request)).toEqual({ kind: "provider-error", code: "unavailable" });
+    await expect(detached({ ...request, timeoutMs: 0 })).rejects.toBeInstanceOf(RangeError);
   });
 
   test("a request without a bound is refused by the compiler", () => {

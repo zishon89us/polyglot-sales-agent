@@ -385,7 +385,7 @@ describe("loading a prompt by name and version", () => {
     expect(refused(new Uint8Array([0x41, 0xff, 0x42]))).toBe(
       "prompts/reply/1/prompt.md: is not UTF-8",
     );
-    expect(refused(`﻿${TEXT}`)).toContain("byte-order mark");
+    expect(refused(`\uFEFF${TEXT}`)).toContain("byte-order mark");
     expect(refused("x".repeat(PROMPT_FILE_MAX + 1))).toContain(
       `is longer than ${PROMPT_FILE_MAX} characters`,
     );
@@ -545,6 +545,31 @@ describe("the scan of prompts/ for a contact's details (NFR-V6)", () => {
       "account 12.34.56.78",
       "call 555\t0100",
       "version 1.2.3.4.5.6.7",
+    ]) {
+      expect(contactDetailsIn(text), text).toHaveLength(1);
+    }
+  });
+
+  test("a part of a number that looks like a time, an amount or a count excuses nothing", () => {
+    // Still taken for an amount, because it is written like one: "5550.100".
+    expect(contactDetailsIn("5550.100")).toEqual([]);
+    for (const text of [
+      "555.0100",
+      "0300 123.45 67",
+      "0300 123.456 7",
+      "0171 234.567",
+      "06 1234.567",
+      "555-01.00",
+      "01 23 45 67.89",
+      "300.12 345.67",
+      "1,234,567,890",
+      "1234567.89",
+      "+92 300,123,456",
+      "770,090,012,3",
+      "12:34 56:78",
+      "07:70 09:00 12:34",
+      "12:34:56:78",
+      "\u0660\u0663\u0660\u0660 \u0661\u0662\u0663.\u0664\u0665 \u0666\u0667",
     ]) {
       expect(contactDetailsIn(text), text).toHaveLength(1);
     }

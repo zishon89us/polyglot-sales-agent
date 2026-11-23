@@ -220,14 +220,15 @@ describe("a call that does not answer in time", () => {
         const { client, timers, adapter } = scripted([{ kind: "hang", then, value: GOOD }]);
         const pending = client.generate(REQUEST);
         await settled();
-        expect(adapter.endedLate).toBe(0);
+        expect(adapter.endedLate).toEqual([]);
         timers.pass(MODEL_CALL_TIMEOUT_MS);
         // A good answer that comes late is still a timeout.
         expect(await pending, then).toEqual({ kind: "timeout" });
         await settled();
         await new Promise((resolve) => setImmediate(resolve));
         // The adapter did end, after the client had given up on it.
-        expect(adapter.endedLate, then).toBe(1);
+        // In the way the step said: a late answer and a late rejection are told apart.
+        expect(adapter.endedLate, then).toEqual([then]);
       }
     } finally {
       process.off("unhandledRejection", note);
@@ -442,6 +443,77 @@ describe("a fault that is not the provider's", () => {
     expect(timers.waiting()).toBe(0);
   });
 
+  test("what a request offers is read when the call is made: a caller that changes its request while the call waits changes nothing of the check", async () => {
+    const timers = new HandTimers();
+    let answer: (value: AdapterAnswer) => void = () => {};
+    const adapter: LlmAdapter = {
+      generate: () =>
+        new Promise<AdapterAnswer>((resolve) => {
+          answer = resolve;
+        }),
+      health: async () => ({ ok: true }),
+    };
+    const tools = [...REQUEST.tools];
+    const claimKinds = [...REQUEST.claimKinds];
+    const request = { ...REQUEST, tools, claimKinds };
+    const pending = bounded(adapter, timers).generate(request);
+    await settled();
+    // While the call waits, the caller empties both lists and drops one.
+    tools.length = 0;
+    claimKinds.length = 0;
+    (request as { tools: unknown }).tools = undefined;
+    answer({
+      kind: "answer",
+      value: {
+        reply: "",
+        claims: [],
+        flags: [],
+        toolCalls: [{ id: "1", name: "find", arguments: {} }],
+      },
+      truncated: false,
+      usage: { inputTokens: 1, outputTokens: 1 },
+      model: "m",
+    });
+    expect((await pending).kind).toBe("ok");
+
+    // The same for the claim kinds, with an answer that makes a claim.
+    const kinds = ["price"];
+    const second = bounded(adapter, timers).generate({ ...REQUEST, claimKinds: kinds });
+    await settled();
+    kinds.length = 0;
+    answer({
+      kind: "answer",
+      value: {
+        reply: "It is 150.00.",
+        claims: [{ kind: "price", item: "s1", value: "150.00" }],
+        flags: [],
+        toolCalls: [],
+      },
+      truncated: false,
+      usage: { inputTokens: 1, outputTokens: 1 },
+      model: "m",
+    });
+    expect((await second).kind).toBe("ok");
+  });
+
+  test("the scripted adapter says so when a request is not plain data and cannot be kept", async () => {
+    const { client, adapter } = scripted([{ kind: "answer", value: GOOD }]);
+    const odd = {
+      ...REQUEST,
+      tools: [{ name: "find", description: "", argumentsSchema: { check: () => true } }],
+    };
+    await expect(client.generate(odd)).rejects.toThrow("is not plain data");
+    expect(adapter.calls).toEqual([]);
+  });
+
+  test("a late answer carries the value its step gave", async () => {
+    const adapter = new FakeLlmAdapter([{ kind: "hang", value: GOOD }]);
+    const controller = new AbortController();
+    const pending = adapter.generate(REQUEST, controller.signal);
+    controller.abort();
+    expect(await pending).toMatchObject({ kind: "answer", value: GOOD, truncated: false });
+  });
+
   test("C6: each ceiling itself is allowed", async () => {
     const { client } = scripted([
       { kind: "answer", value: GOOD },
@@ -472,6 +544,7 @@ describe("health", () => {
     expect(await client.health()).toEqual({ ok: false, failure: "provider-error" });
     expect(await client.health()).toEqual({ ok: false, failure: "timeout" });
     expect(adapter.healthRemaining()).toBe(0);
+    adapter.assertDone();
     expect(await client.health()).toEqual({ ok: true });
     expect(adapter.healthCalls).toBe(4);
   });
@@ -490,6 +563,12 @@ describe("health", () => {
     await settled();
     expect(result).toEqual({ ok: false, failure: "timeout" });
     expect(MODEL_HEALTH_TIMEOUT_MS).toBe(5_000);
+  });
+
+  test("a scripted health that no call took is not done", async () => {
+    const { adapter } = scripted([], [{ kind: "failed", failure: "timeout" }]);
+    expect(adapter.healthRemaining()).toBe(1);
+    expect(() => adapter.assertDone()).toThrow("1 health steps");
   });
 
   test("C8: a throw is thrown on", async () => {

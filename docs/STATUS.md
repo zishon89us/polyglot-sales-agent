@@ -521,14 +521,24 @@ M0 Inception met its exit criteria on 2026-11-16; see
   provider, no prompt and nothing a customer sees: the reply is still
   the echo. No eval score exists (rows 31 and 32). A third agent
   reviewed the code (`reviews/2026-11-23-gate4-u4-llm-client.md`): 18
-  findings, none High, three Medium, and 24 of 130 mutants alive, five
-  of them equivalent. The Medium ones: nothing tied the limits to the
+  findings, none High, three Medium, and 24 of 130 mutants alive (the
+  review counts five of them equivalent and marks four). The Medium ones: nothing tied the limits to the
   documents that state them; a client could be made without the
   function that bounds and checks it; the provider test did not read
   the whole repository. All three are fixed, with most of the Low ones.
-  **The fixes are checked by the author only:** the second agent's
-  check was stopped before it reported and is still to be run. #325
-  stays a draft until then. What the unit leaves is #326.
+  The first check of the fixes by another agent was stopped before it
+  reported.
+- 2026-11-24 — The check was run again
+  (`reviews/2026-11-23-gate4-u4-llm-client-verification.md`): 12 of the
+  18 answers held as stated, four in part, one with a wrong sentence;
+  nothing broken; no High finding, one Medium: a client's call could
+  still be replaced in place by an assignment. A client is now frozen
+  and its calls read-only. Also fixed: the glossary check matched digits
+  inside other numbers; the scan's new exemptions let numbers shaped
+  like a phone's through; a request's tools were read again after the
+  answer. **These last fixes are checked by the author only.** CI had
+  failed on the pull request's title, which was longer than 72
+  characters; it is shortened. What the unit leaves is #326.
 
 ## Next
 

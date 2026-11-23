@@ -326,6 +326,19 @@ export function assemblePrompt(
   };
 }
 
+const CLOCK = "\\p{Nd}{1,2}:\\p{Nd}{2}";
+const AMOUNT = "\\p{Nd}{1,6}\\.\\p{Nd}{2,3}";
+/**
+ * A whole run of digits that is not a contact's detail: a clock time or a
+ * span of two ("09:00-17:00"), an amount or a list of amounts ("150.00,
+ * 200.00"), or a number with its thousands marked, of at most three
+ * groups ("1,200,000").
+ */
+const ORDINARY = new RegExp(
+  `^(?:${CLOCK}(?:[-\u2013\u2014]${CLOCK})?|${AMOUNT}(?:, ${AMOUNT})*|\\p{Nd}{1,3}(?:,\\p{Nd}{3}){1,2})$`,
+  "u",
+);
+
 /**
  * What in a file under `prompts/` looks like a contact's detail: an email
  * address, or seven or more digits of any script when the spaces and
@@ -336,18 +349,21 @@ export function assemblePrompt(
  */
 export function contactDetailsIn(source: string): string[] {
   const found: string[] = [];
-  const dated = source
-    .replaceAll(/(?<![\p{Nd}-])\p{Nd}{4}-\p{Nd}{2}-\p{Nd}{2}(?![\p{Nd}-])/gu, " ")
-    // A clock time, an amount with two or three decimals, and a number with
-    // its thousands marked: what a prompt's examples are made of.
-    .replaceAll(/(?<![\p{Nd}:])\p{Nd}{1,2}:\p{Nd}{2}(?![\p{Nd}:])/gu, " ")
-    .replaceAll(/(?<![\p{Nd}.,])\p{Nd}{1,3}(?:,\p{Nd}{3})+(?![\p{Nd},])/gu, " ")
-    .replaceAll(/(?<![\p{Nd}.,])\p{Nd}{1,6}\.\p{Nd}{2,3}(?![\p{Nd}.])/gu, " ");
+  // A date is taken out first: it sits beside other numbers ("## 1 (2026-11-23)").
+  const dated = source.replaceAll(
+    /(?<![\p{Nd}-])\p{Nd}{4}-\p{Nd}{2}-\p{Nd}{2}(?![\p{Nd}-])/gu,
+    " ",
+  );
   for (const match of dated.matchAll(/[^\s@]+@[^\s@]+\.[^\s@]+/gu)) {
     found.push(match[0]);
   }
   for (const match of dated.matchAll(/\p{Nd}(?:[\p{P}\p{Zs}\t]*\p{Nd}){6,}/gu)) {
-    found.push(match[0]);
+    // A run of digits is left alone only if the whole of it is one of the
+    // things a prompt's examples are made of. A part of it that looks like
+    // one excuses nothing: "0300 123.45 67" is not an amount.
+    if (!ORDINARY.test(match[0])) {
+      found.push(match[0]);
+    }
   }
   return found;
 }

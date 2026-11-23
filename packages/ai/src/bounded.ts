@@ -69,7 +69,10 @@ function usageOf(answer: { usage: TokenUse; model: string }): TokenUse {
   return { inputTokens: answer.usage.inputTokens, outputTokens: answer.usage.outputTokens };
 }
 
-function resultOf(answer: AdapterAnswer, request: LlmRequest): LlmResult {
+function resultOf(
+  answer: AdapterAnswer,
+  offered: { readonly claimKinds: readonly string[]; readonly tools: readonly string[] },
+): LlmResult {
   if (typeof answer !== "object" || answer === null) {
     throw new AdapterFault("returned nothing");
   }
@@ -87,10 +90,7 @@ function resultOf(answer: AdapterAnswer, request: LlmRequest): LlmResult {
   if (answer.truncated !== false) {
     return { kind: "invalid-output", code: "truncated", usage, model: answer.model };
   }
-  const read = readOutput(answer.value, {
-    claimKinds: request.claimKinds,
-    tools: request.tools.map((tool) => tool.name),
-  });
+  const read = readOutput(answer.value, offered);
   return read.ok
     ? { kind: "ok", output: read.output, usage, model: answer.model }
     : { kind: "invalid-output", code: read.code, usage, model: answer.model };
@@ -196,61 +196,76 @@ function within<Answer, Result>(
 }
 
 /**
- * What the rest of the code calls a model through. It is a class with a
- * private part so that nothing else can be one: not an adapter, not an
- * object written by hand, and not a copy of a client with a method
- * replaced (a copy by `{...client}` has none of its methods). Only
- * `bounded` makes one. Whatever is added around a call later, the trace
- * of M3 unit U6 for one, is added in this file.
+ * What the rest of the code calls a model through. Nothing else can be
+ * one, and one cannot be changed:
+ *
+ * - it is a class with a private part, so an adapter, an object written by
+ *   hand and a copy of a client with a method replaced are not clients;
+ * - its two calls are its own, read-only, and it is frozen, as is the
+ *   class's prototype, so neither call can be replaced in place.
+ *
+ * Only `bounded` makes one. Whatever is added around a call later, the
+ * trace of M3 unit U6 for one, is added in this file.
  */
 export class LlmClient {
   readonly #adapter: LlmAdapter;
   readonly #timers: Timers;
 
+  /** One attempt, bounded in time, its answer checked against the structure. */
+  readonly generate: (request: LlmRequest) => Promise<LlmResult>;
+  /** Whether the provider can be reached. Bounded like a call. */
+  readonly health: () => Promise<Health>;
+
   private constructor(adapter: LlmAdapter, timers: Timers) {
     this.#adapter = adapter;
     this.#timers = timers;
+    this.generate = (request) => {
+      let fault: Error | undefined;
+      let timeoutMs = 0;
+      let offered: { claimKinds: string[]; tools: string[] } = { claimKinds: [], tools: [] };
+      try {
+        fault = requestFault(request);
+        if (fault === undefined) {
+          // Read here and not again: what was checked is what is used, and
+          // what the caller does to its request while the call waits changes
+          // nothing of how the answer is checked.
+          timeoutMs = request.timeoutMs;
+          offered = {
+            claimKinds: [...request.claimKinds],
+            tools: request.tools.map((tool) => tool.name),
+          };
+        }
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      if (fault !== undefined || !whole(timeoutMs, MODEL_CALL_TIMEOUT_CEILING_MS)) {
+        return Promise.reject(fault ?? new RangeError("timeoutMs changed while it was read"));
+      }
+      return within<AdapterAnswer, LlmResult>(
+        this.#timers,
+        timeoutMs,
+        (signal) => this.#adapter.generate(request, signal),
+        (answer) => resultOf(answer, offered),
+        { kind: "timeout" },
+      );
+    };
+    this.health = () =>
+      within<Health, Health>(
+        this.#timers,
+        MODEL_HEALTH_TIMEOUT_MS,
+        (signal) => this.#adapter.health(signal),
+        healthOf,
+        { ok: false, failure: "timeout" },
+      );
+    Object.freeze(this);
   }
 
   /** @internal Use `bounded`. */
   static around(adapter: LlmAdapter, timers: Timers): LlmClient {
     return new LlmClient(adapter, timers);
   }
-
-  /** One attempt, bounded in time, its answer checked against the structure. */
-  generate(request: LlmRequest): Promise<LlmResult> {
-    let fault: Error | undefined;
-    let timeoutMs = 0;
-    try {
-      fault = requestFault(request);
-      // Read once: what was checked is what is used.
-      timeoutMs = fault === undefined ? request.timeoutMs : 0;
-    } catch (error) {
-      return Promise.reject(error);
-    }
-    if (fault !== undefined || !whole(timeoutMs, MODEL_CALL_TIMEOUT_CEILING_MS)) {
-      return Promise.reject(fault ?? new RangeError("timeoutMs changed while it was read"));
-    }
-    return within<AdapterAnswer, LlmResult>(
-      this.#timers,
-      timeoutMs,
-      (signal) => this.#adapter.generate(request, signal),
-      (answer) => resultOf(answer, request),
-      { kind: "timeout" },
-    );
-  }
-
-  /** Whether the provider can be reached. Bounded like a call. */
-  health(): Promise<Health> {
-    return within<Health, Health>(
-      this.#timers,
-      MODEL_HEALTH_TIMEOUT_MS,
-      (signal) => this.#adapter.health(signal),
-      healthOf,
-      { ok: false, failure: "timeout" },
-    );
-  }
 }
+Object.freeze(LlmClient.prototype);
 
 /**
  * Makes a client of an adapter. Every call is bounded in time, and every

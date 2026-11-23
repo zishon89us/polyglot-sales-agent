@@ -281,7 +281,7 @@ Three mutants (M79, M80, M90) did not apply because my search pattern was wrong;
 - **P12 wording:** with files that end in a newline (every file a formatter touches), the result has two empty lines between core and fragment, not "an empty line". It is deterministic.
 
 ### G13. Low. An invisible character in the source, and no line-ending rule for `prompts/`
-- **Byte-order mark literal:** `packages/ai/src/prompts.ts:57` is `text.startsWith("<U+FEFF>")` with a raw byte-order mark inside the string literal (bytes `EF BB BF`). An editor or tool that strips it turns the test into `startsWith("")`, which refuses every prompt. Write `"﻿"`.
+- **Byte-order mark literal:** `packages/ai/src/prompts.ts:57` is `text.startsWith("<U+FEFF>")` with a raw byte-order mark inside the string literal (bytes `EF BB BF`). An editor or tool that strips it turns the test into `startsWith("")`, which refuses every prompt. Write `"\uFEFF"`.
 - **Line endings:** the repository has no `.gitattributes`. `prompt.md` with CRLF is refused ("a tab and a carriage return are two"), so a Windows checkout with `core.autocrlf` loads no prompt. `meta.yaml` and `CHANGELOG.md` with CRLF load. Add `prompts/** text eol=lf` with the first prompt (U7).
 
 ### G14. Low. Documents that disagree with themselves or the code
@@ -378,17 +378,19 @@ Three mutants (M79, M80, M90) did not apply because my search pattern was wrong;
 
 ## Author's response
 
-Everything below is in the same pull request (#325). **The fixes have
-been checked by the author only.** A check by another agent was started
-and stopped before it reported; it is still to be run, and the pull
-request stays a draft until it has been.
+Everything below is in the same pull request (#325). The fixes were
+checked by another agent on 2026-11-24, after a first check was stopped
+before it reported: `2026-11-23-gate4-u4-llm-client-verification.md`.
+It found four of these answers true only in part; what it found is
+answered there.
 The mutants the review found alive were run again by the author after the
 fixes; the result is beside each.
 
 One change to the report as saved: in G13 the reviewer wrote the
 byte-order mark itself between the quotation marks of the suggested fix.
 It is written here as its escape, so that this file holds no invisible
-character.
+character. (As first saved, the file did hold one, at that place; the
+check of the fixes found it, and it is now the escape.)
 
 | Finding | Answer |
 | --- | --- |

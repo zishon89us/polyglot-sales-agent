@@ -58,8 +58,8 @@ export class FakeLlmAdapter implements LlmAdapter {
   healthCalls = 0;
   /** How many calls the script had no step for. */
   overran = 0;
-  /** How many calls that were made to hang have since ended, by a late answer or a late rejection. */
-  endedLate = 0;
+  /** How each call that was made to hang has since ended, after it was told to stop. */
+  readonly endedLate: ("answer" | "reject")[] = [];
   readonly #script: FakeStep[];
   readonly #health: FakeHealthStep[];
 
@@ -93,7 +93,16 @@ export class FakeLlmAdapter implements LlmAdapter {
 
   async generate(request: LlmRequest, signal: AbortSignal): Promise<AdapterAnswer> {
     // A copy: what the caller does to its request afterwards is not what was asked.
-    this.calls.push(structuredClone(request));
+    let asked: LlmRequest;
+    try {
+      // A copy of plain data: it has no class, and it cannot hold a function.
+      asked = structuredClone(request);
+    } catch {
+      throw new Error(
+        "the scripted model was given a request that is not plain data and cannot be kept",
+      );
+    }
+    this.calls.push(asked);
     const step = this.#script.shift();
     if (step === undefined) {
       this.overran += 1;
@@ -120,7 +129,7 @@ export class FakeLlmAdapter implements LlmAdapter {
         return { kind: "provider-error", code: step.code };
       case "hang":
         await stopped(signal);
-        this.endedLate += 1;
+        this.endedLate.push(step.then === "reject" ? "reject" : "answer");
         if (step.then === "reject") {
           throw new Error("the scripted model was stopped");
         }

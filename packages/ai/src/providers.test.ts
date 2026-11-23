@@ -69,8 +69,8 @@ const ADAPTERS = "packages/ai/src/adapters/";
 /** The one package that may depend on one. */
 const MAY_DEPEND = "packages/ai";
 
-/** Folders that hold none of this repository's code: what is installed, and the history. */
-const NOT_OURS = ["node_modules", ".git"];
+/** Folders that hold none of this repository's code: what is installed, the history, and what a build or a run leaves. */
+const NOT_OURS = ["node_modules", ".git", "dist", "build", "coverage"];
 
 /** Every file of the repository, from its root down, as a path from the root. */
 function everyFile(): string[] {

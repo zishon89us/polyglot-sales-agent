@@ -49,10 +49,19 @@ describe("the limits on one call to the model", () => {
       expect(lines, name).toHaveLength(1);
       return (lines[0] as string).split("|")[2] as string;
     };
+    // The row's numbers, each whole ("4,096" is one number, not a 4 and a
+    // 96), must be exactly these, in any order: a number changed, added or
+    // dropped in the glossary is seen.
     const says = (name: string, ...values: number[]): void => {
-      for (const value of values) {
-        expect(row(name), `${name}: ${value}`).toContain(value.toLocaleString("en-US"));
-      }
+      // What a row says in brackets is where it points, not a value.
+      const cell = row(name).replaceAll(/\([^)]*\)/g, " ");
+      const stated = (cell.match(/\d[\d,]*/g) ?? []).map((text) =>
+        Number(text.replaceAll(",", "")),
+      );
+      expect(
+        stated.sort((a, b) => a - b),
+        name,
+      ).toEqual([...values].sort((a, b) => a - b));
     };
     says(
       "Model call timeout and attempts",

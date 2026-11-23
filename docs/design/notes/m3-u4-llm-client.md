@@ -480,13 +480,21 @@ open. Most of it answers the code review
 - **A client is a class, not an interface** (section 2). `LlmClient` has
   a private part, so that nothing else can be one: not an adapter, not an
   object written by hand, and not a copy of a client with a method
-  replaced. `bounded` is still the only way to make one. Whatever is put
+  replaced. Its two calls are read-only and it is frozen, with the
+  class's prototype, so a call cannot be replaced in place either: the
+  compiler refuses an assignment, and what the compiler lets through
+  (`Object.assign`) throws when it runs. `bounded` is still the only way
+  to make one. Not closed: a cast, and `Object.create` on the prototype,
+  which the compiler types as anything. Whatever is put
   around a call later, U6's trace for one, is therefore added inside
   `packages/ai/src/bounded.ts`, not built by its caller. A file of
   compile-time checks holds each of these.
 - **A request is checked before the call too:** its system text, prompts,
   messages, tools by name and claim kinds must be there, or the call is
-  refused with a `TypeError` before the adapter is asked (and paid).
+  refused with a `TypeError` before the adapter is asked (and paid). Its
+  bound, its tools' names and its claim kinds are read then and not
+  again, so a caller that changes its request while the call waits
+  changes nothing of how the answer is checked.
 - **What an adapter returns is checked:** token counts, a model's name of
   one line and at most 200 code points, a failure's code from the list,
   a health that is ok or one of the two failures. Anything else is an
@@ -503,9 +511,9 @@ open. Most of it answers the code review
   customer that answer. U17 counts how often.
 - **The limits of one answer cannot all be met at once** (section 4). The
   worked example speaks of a reply and its claims. Four tool calls with
-  arguments at their limit are 8,000 code points, far more than the
-  output limit holds at any price per code point: such an answer is
-  `truncated`.
+  arguments at their limit are 8,000 code points, which at the price
+  this note assumes is 24,000 tokens against a limit of 4,096: such an
+  answer is `truncated`.
 - **A tool call's identifier is at most 100 code points** (section 3); it
   is in the glossary's row and was missing from section 4's table.
 - **The channel's limit** (T3): the repository's own stand-in for the
@@ -518,9 +526,12 @@ open. Most of it answers the code review
 - **`assemblePrompt` keeps the loader's rules itself,** so a prompt that
   did not come from `loadPrompt` is checked all the same, and refuses a
   canary that the prompt's own text already holds.
-- **The scan of `prompts/`** also leaves alone a clock time, an amount
-  with two or three decimals and a number with its thousands marked,
-  which a prompt's examples are made of. It reads a file that is a link.
+- **The scan of `prompts/`** also leaves alone a run of digits that is,
+  as a whole, a clock time or a span of two, an amount with two or three
+  decimals or a list of such, or a number of at most three groups with
+  its thousands marked. A part of a run that looks like one excuses
+  nothing. A number written exactly like an amount (`5550.100`) is
+  taken for one. It reads a file that is a link.
 - **The provider test walks the repository from its root,** so a folder
   added later is read without being named. It still knows only its list
   of names.
