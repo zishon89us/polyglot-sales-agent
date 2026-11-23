@@ -62,9 +62,9 @@ function storeResult(token: string, body: string): Promise<"stored" | "discarded
       return "discarded";
     }
     await tx.query(
-      `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, body, status)
-       VALUES ($1, $2, 'outbound', 'assistant-reply', 'text', $3, 'pending')`,
-      [a.tenantId, a.conversationId, body],
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status)
+       VALUES ($1, $2, $4, 'outbound', 'assistant-reply', 'text', $3, 'pending')`,
+      [a.tenantId, a.conversationId, body, a.sessionId],
     );
     return "stored";
   });
@@ -208,13 +208,15 @@ describe("storing a result", () => {
       taking = take(after(LEASE_MS)).then((result) => {
         taken = result;
       });
-      // A webhook storing a new message for the same conversation goes straight through.
+      // A bare insert of a row for the same conversation goes straight through: the
+      // foreign key's lock does not conflict with this one. `storeInbound` no longer
+      // does: it takes the conversation's lock on purpose (sessions.test.ts).
       const started = Date.now();
       await withTenant(app, a.tenantId, (tx) =>
         tx.query(
-          `INSERT INTO messages (tenant_id, conversation_id, direction, kind)
-           VALUES ($1, $2, 'inbound', 'text')`,
-          [a.tenantId, a.conversationId],
+          `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind)
+           VALUES ($1, $2, $3, 'inbound', 'text')`,
+          [a.tenantId, a.conversationId, a.sessionId],
         ),
       );
       expect(Date.now() - started, "the message insert must not wait for the store").toBeLessThan(

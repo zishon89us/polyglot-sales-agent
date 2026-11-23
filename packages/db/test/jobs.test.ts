@@ -112,9 +112,9 @@ describe("queueing a job", () => {
   test("a message and its job are stored together or not at all", async () => {
     const attempt = withTenant(app, a.tenantId, async (tx) => {
       await tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, kind, channel_message_id)
-         VALUES ($1, $2, 'inbound', 'text', 'mock-message-atomic')`,
-        [a.tenantId, a.conversationId],
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind, channel_message_id)
+         VALUES ($1, $2, $3, 'inbound', 'text', 'mock-message-atomic')`,
+        [a.tenantId, a.conversationId, a.sessionId],
       );
       await enqueueJob(tx, { type: "process-conversation", tenantId: a.tenantId, runAt: T0 });
       throw new Error("the request failed after both inserts");

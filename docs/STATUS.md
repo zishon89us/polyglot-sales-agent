@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U0 under way; no code yet)
+## Current milestone: M3 AI core (U1 done; U2 in review)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -436,10 +436,44 @@ M0 Inception met its exit criteria on 2026-11-16; see
   less (`reviews/2026-11-23-adr-0014-review.md`). Row 37 asks about
   `faq-only`. The plan's U4 now creates the two packages. No code.
 
+- 2026-11-23 — #319 merged: ADR 0014 is accepted. **M3 U2** (#301)
+  begun with its design note, before any code
+  (`design/notes/m3-u2-sessions.md`): each case of a session, the reply
+  window, the batch and a reply overtaken by a newer message, as a table.
+  A second agent reviewed the note and made 30 findings, four High: a
+  message being stored could slip past a turn that was ending; ending a
+  session did not stop the old messages being answered; a reply overtaken
+  after 15 minutes reversed a rule already decided; and dropping a reply
+  when a message is stored, not when a turn reaches it, could lose a
+  ready answer (`reviews/2026-11-23-m3-u2-design-review.md`). The note
+  was rewritten: one lock per conversation; the send job holds an
+  overtaken reply back and the turn decides; `handled_at` stays. Row 39
+  was withdrawn; rows 38 and 40 ask about two rules. Then the code:
+  migration 0006 (sessions, each message's session, which reply answered
+  which message, the reply window), the turn and the send job changed as
+  the note says. Several messages sent close together now get one echo,
+  about three seconds after the last. The review of the code (Gate 4) ran
+  the tests and 43 mutants and found one High fault: a delivery or read
+  receipt was counted as the channel accepting a reply, which reset the
+  bound on dropped replies and kept a session open past its 24 hours.
+  Fixed, with the tests that had pinned it rewritten; thirteen mutants that
+  had survived now have a test each
+  (`reviews/2026-11-23-gate4-u2-sessions.md`). A verifier confirmed the
+  fix by experiment and found two of the new tests still unable to fail
+  for what they named; both are rewritten
+  (`reviews/2026-11-23-gate4-u2-sessions-verification.md`). 56 new tests,
+  964 in all. One commit's header was three characters over the limit
+  and failed the commit-message step in CI; the maintainer chose a fresh
+  branch, so the same commits, that header shortened, are pull request
+  #322 in place of #320. Replaying them a day later showed a fault no
+  review had seen: the new tests' clock was a fixed time on 2026-11-23,
+  and all 45 were refused once it had passed. It now starts an hour from
+  when the tests run. What the unit leaves is #321.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1
-   to 6 and 29 to 37 of `decisions-needed.md`, above all rows 1, 4, 29
+   to 6 and 29 to 40 of `decisions-needed.md`, above all rows 1, 4, 29
    and 33. Units also build on rows 7, 8, 18 and 21.
 2. The agent goes on to U2, U3, U4 and U5, with U0 still open for four
    answers. U3 builds on rows 34 and 36 as well, and U4 on row 37. U2 builds on rows 1 and 18, U5 is row 33's: a no to any of
@@ -495,7 +529,7 @@ v1.1.
 ## Blocked on the maintainer
 
 Everything waiting for a yes, a no or an action is on one page:
-[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 37 are needed
+[`decisions-needed.md`](decisions-needed.md). Rows 1 to 6 and 29 to 40 are needed
 before M3 builds on them; row 4, the supported languages, is the one
 nothing can go round.
 

@@ -34,6 +34,7 @@ const PRIVILEGES = {
     conversations: "INSERT,SELECT,UPDATE",
     jobs: "DELETE",
     messages: "INSERT,SELECT,UPDATE",
+    sessions: "INSERT,SELECT,UPDATE",
     tenants: "SELECT",
   },
   psa_cross: {
@@ -103,6 +104,7 @@ describe("the seed covers every tenant-owned table", () => {
       "contacts",
       "conversations",
       "messages",
+      "sessions",
       "tenants",
     ]);
   });
@@ -216,7 +218,32 @@ describe("as tenant A, tenant B's rows cannot be read or changed", () => {
     ).toBe("23503");
     expect(
       await asA(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, kind) VALUES ($1, $2, 'inbound', 'text')`,
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind) VALUES ($1, $2, $3, 'inbound', 'text')`,
+        [a.tenantId, b.conversationId, a.sessionId],
+      ),
+    ).toBe("23503");
+    // The three references of migration 0006: a message's session, the
+    // reply a message was answered by, and a session's conversation.
+    expect(
+      await asA(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind) VALUES ($1, $2, $3, 'inbound', 'text')`,
+        [a.tenantId, a.conversationId, b.sessionId],
+      ),
+    ).toBe("23503");
+    const administrator = await database.administrator();
+    const ofB = await administrator.query<{ id: string }>(
+      "SELECT id FROM messages WHERE tenant_id = $1 AND direction = 'outbound'",
+      [b.tenantId],
+    );
+    expect(
+      await asA("UPDATE messages SET answered_by = $1 WHERE direction = 'inbound'", [
+        ofB.rows[0]?.id,
+      ]),
+    ).toBe("23503");
+    expect(
+      await asA(
+        `INSERT INTO sessions (tenant_id, conversation_id, started_at, last_message_at)
+         VALUES ($1, $2, now(), now())`,
         [a.tenantId, b.conversationId],
       ),
     ).toBe("23503");
@@ -689,8 +716,8 @@ describe("constraints the skeleton relies on", () => {
   test("only an outbound message has a status", async () => {
     const insert = (direction: string, messageClass: string | null, status: string | null) =>
       asA(
-        "INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, status) VALUES ($1, $2, $3, $4, 'text', $5)",
-        [a.tenantId, a.conversationId, direction, messageClass, status],
+        "INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, status) VALUES ($1, $2, $6, $3, $4, 'text', $5)",
+        [a.tenantId, a.conversationId, direction, messageClass, status, a.sessionId],
       );
     expect(await insert("inbound", null, "pending")).toBe("23514");
     expect(await insert("outbound", "system-reply", null)).toBe("23514");
@@ -711,8 +738,8 @@ describe("constraints the skeleton relies on", () => {
   test("only an outbound message has a class", async () => {
     const insert = (direction: string, messageClass: string | null) =>
       asA(
-        "INSERT INTO messages (tenant_id, conversation_id, direction, class, kind) VALUES ($1, $2, $3, $4, 'text')",
-        [a.tenantId, a.conversationId, direction, messageClass],
+        "INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind) VALUES ($1, $2, $5, $3, $4, 'text')",
+        [a.tenantId, a.conversationId, direction, messageClass, a.sessionId],
       );
     expect(await insert("inbound", "system-reply")).toBe("23514");
     expect(await insert("outbound", null)).toBe("23514");
@@ -722,9 +749,9 @@ describe("constraints the skeleton relies on", () => {
 function insertMessage(tenant: SeededTenant, values: unknown[]): Promise<number | string> {
   return withTenant(app, tenant.tenantId, async (tx) => {
     const result = await tx.query(
-      `INSERT INTO messages (tenant_id, conversation_id, direction, kind, channel_message_id)
-       VALUES ($1, $2, 'inbound', 'text', $3)`,
-      values,
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind, channel_message_id)
+       VALUES ($1, $2, $4, 'inbound', 'text', $3)`,
+      [...values, tenant.sessionId],
     );
     return result.rowCount as number | string;
   }).catch((error: { code?: string }) => error.code ?? String(error));

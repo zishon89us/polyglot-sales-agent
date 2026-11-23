@@ -1,8 +1,10 @@
 // The two jobs of the walking skeleton (M2 unit U8).
 //
-// `process-conversation` answers what a customer wrote. Until M3 the answer
-// is an echo: steps 5 to 15 of the order of checks (state machines, section
-// 1) are not built, and no model is called.
+// `process-conversation` answers what a customer wrote, one batch at a time
+// (M3 unit U2: sessions, the reply window and the batching window; design
+// note docs/design/notes/m3-u2-sessions.md). The answer is still an echo:
+// steps 4a to 11 and 13 to 15 of the order of checks (state machines,
+// section 1) are not built, and no model is called.
 //
 // `send-messages` sends what waits in one conversation, oldest first, one
 // at a time. The channel is called outside any transaction, between a
@@ -36,8 +38,12 @@ export const BUSY_WAIT_MS = 1_000;
  */
 export const SENDS_PER_RUN = 20;
 
-/** Told of each message that ends `failed`, with its code. For a log: never anything of the message. */
-export type SendReport = (event: "send-failed", code: string) => void;
+/**
+ * Told of each message that ends `failed`, with its code, and of each batch
+ * that was not answered, with the reason. For a log: never anything of a
+ * message.
+ */
+export type SendReport = (event: "send-failed" | "turn-skipped", code: string) => void;
 
 export interface HandlerOptions {
   /** The application role's. */
@@ -51,6 +57,8 @@ export interface HandlerOptions {
    */
   readonly accessToken: string;
   readonly report?: SendReport;
+  /** For tests: the time, in place of the database's clock. */
+  readonly clock?: () => Date;
 }
 
 function ids(job: Job): { tenantId: string; conversationId: string } {
@@ -92,25 +100,42 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
   return {
     async [PROCESS_CONVERSATION_JOB](job) {
       const { tenantId, conversationId } = ids(job);
-      const turn = await beginTurn(options.app, tenantId, conversationId);
-      if (turn.busy) {
+      const turn = await beginTurn(options.app, tenantId, conversationId, options.clock?.());
+      if (turn.kind === "busy") {
         return { deferMs: BUSY_WAIT_MS };
+      }
+      if (turn.kind === "wait") {
+        // The batching window is open: the customer may still be writing.
+        return { deferMs: Math.min(turn.ms, JOB_MAX_DEFER_MS) };
+      }
+      if (turn.kind === "idle") {
+        return undefined;
+      }
+      if (turn.kind === "skipped") {
+        options.report?.("turn-skipped", turn.reason);
+        return undefined;
       }
       // The customer's text is data: it is echoed, never acted on.
       const reply = echoReply(
         turn.messages.map((message) => (message.kind === "text" ? message.body : null)),
       );
       try {
+        // "newer-message": the customer wrote again meanwhile. That message
+        // queued a job of its own, which answers everything together.
         const end = await finishTurn(
           options.app,
           tenantId,
           conversationId,
-          turn.token,
+          turn,
           turn.messages.map((message) => message.id),
           reply,
+          options.clock?.(),
         );
-        // The customer wrote again meanwhile: answer everything together.
-        return end === "newer-message" ? { deferMs: 0 } : undefined;
+        if (end === "session-over") {
+          // The session's 24 hours passed while the reply was being made.
+          options.report?.("turn-skipped", end);
+        }
+        return undefined;
       } catch (error) {
         // Nothing was stored. Free the conversation, so that the retry need not wait for the lease to run out.
         await abandonTurn(options.app, tenantId, conversationId, turn.token).catch(() => undefined);
@@ -121,7 +146,7 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
     async [SEND_MESSAGES_JOB](job) {
       const { tenantId, conversationId } = ids(job);
       for (let sent = 0; sent < SENDS_PER_RUN; sent += 1) {
-        const next = await claimNextSend(options.app, tenantId, conversationId);
+        const next = await claimNextSend(options.app, tenantId, conversationId, options.clock?.());
         for (const code of next.ended ?? []) {
           options.report?.("send-failed", code);
         }
@@ -132,7 +157,13 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
           return { deferMs: Math.min(next.ms, JOB_MAX_DEFER_MS) };
         }
         const result = await call(options, next.message);
-        const decision = await recordSend(options.app, tenantId, next.message, result);
+        const decision = await recordSend(
+          options.app,
+          tenantId,
+          next.message,
+          result,
+          options.clock?.(),
+        );
         if (decision !== "superseded" && decision.next === "failed") {
           options.report?.("send-failed", decision.code);
         }

@@ -205,9 +205,9 @@ describe("a validly signed event", () => {
     const id = failed.entry[0].changes[0].value.statuses[0].id as string;
     await withTenant(app, tenant.a, (tx) =>
       tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, channel_message_id, body, status)
-         SELECT tenant_id, id, 'outbound', 'assistant-reply', 'text', $1, 'reply', 'sent'
-         FROM conversations`,
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, channel_message_id, body, status)
+         SELECT tenant_id, conversation_id, id, 'outbound', 'assistant-reply', 'text', $1, 'reply', 'sent'
+         FROM sessions`,
         [id],
       ),
     );
@@ -243,9 +243,9 @@ describe("a validly signed event", () => {
     await signed(fixture("inbound-text.json"));
     await withTenant(app, tenant.a, (tx) =>
       tx.query(
-        `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, channel_message_id, body, status)
-         SELECT tenant_id, id, 'outbound', 'assistant-reply', 'text', 'wamid.SYNTHETIC0101', 'reply', 'sent'
-         FROM conversations`,
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, channel_message_id, body, status)
+         SELECT tenant_id, conversation_id, id, 'outbound', 'assistant-reply', 'text', 'wamid.SYNTHETIC0101', 'reply', 'sent'
+         FROM sessions`,
       ),
     );
     expect((await signed(fixture("status-delivered.json"))).statusCode).toBe(200);

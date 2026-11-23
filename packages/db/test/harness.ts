@@ -147,6 +147,8 @@ export interface SeededTenant {
   channelAccountId: string;
   contactId: string;
   conversationId: string;
+  /** The conversation's open session. */
+  sessionId: string;
   receivingNumberId: string;
 }
 
@@ -187,18 +189,24 @@ export async function seedTenant(
       [tenantId, contactId, channelAccountId],
     );
     const conversationId = conversation.rows[0]?.id as string;
+    const session = await tx.query<{ id: string }>(
+      `INSERT INTO sessions (tenant_id, conversation_id, started_at, last_message_at)
+       VALUES ($1, $2, clock_timestamp(), clock_timestamp()) RETURNING id`,
+      [tenantId, conversationId],
+    );
+    const sessionId = session.rows[0]?.id as string;
     await tx.query(
-      `INSERT INTO messages (tenant_id, conversation_id, direction, class, kind, channel_message_id, body, status)
-       VALUES ($1, $2, 'inbound', NULL, 'text', $3, 'hello', NULL),
-              ($1, $2, 'outbound', 'system-reply', 'text', NULL, 'hello', 'pending')`,
-      [tenantId, conversationId, `mock-message-${label}`],
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, channel_message_id, body, status)
+       VALUES ($1, $2, $4, 'inbound', NULL, 'text', $3, 'hello', NULL),
+              ($1, $2, $4, 'outbound', 'system-reply', 'text', NULL, 'hello', 'pending')`,
+      [tenantId, conversationId, `mock-message-${label}`, sessionId],
     );
     await tx.query(
       `INSERT INTO audit_log (tenant_id, action, subject_type, subject_id)
        VALUES ($1, 'seeded', 'contact', $2)`,
       [tenantId, contactId],
     );
-    return { tenantId, channelAccountId, contactId, conversationId, receivingNumberId };
+    return { tenantId, channelAccountId, contactId, conversationId, sessionId, receivingNumberId };
   });
 }
 
