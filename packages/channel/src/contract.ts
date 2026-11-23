@@ -218,6 +218,14 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
         [{ payload: "core.stop", title: "a\u202eb" }],
         [{ payload: "core.stop", title: "\u200b" }],
         [{ payload: "core.stop", title: "\u200c" }],
+        [{ payload: "core.stop", title: "\u3164" }],
+        [{ payload: "core.stop", title: "\u2800" }],
+        [{ payload: "core.stop", title: "\ufe0f" }],
+        [{ payload: "core.stop", title: "\u034f" }],
+        [{ payload: "core.stop", title: "\u0301" }],
+        [{ payload: "core.stop", title: "St\u200bop" }],
+        [{ payload: "core.stop", title: "a\u2060b" }],
+        [{ payload: "core.stop", title: "a\u2067b" }],
         [{ payload: "core.stop", title: "a\ud800" }],
         [{ payload: "core.stop\n", title: "Stop" }],
         [{ payload: `core.${"x".repeat(allowed.payloadMax)}`, title: "Stop" }],
@@ -241,6 +249,10 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
                   ["STRASSE", "stra\u00dfe"],
                   ["a b", "a  b"],
                   ["ab", "a\u200db"],
+                  ["Stop", "St\u034fop"],
+                  ["Stop", "Stop\u3164"],
+                  ["\u2764", "\u2764\ufe0f"],
+                  ["ab", "a\u00adb"],
                 ] as const
               ).map(([first, second]) => [
                 { payload: "core.stop", title: first },
@@ -257,6 +269,44 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
       }
       for (const body of ["", " \n\t", "\u200b", "a\u0000b", "b".repeat(allowed.bodyMax + 1)]) {
         expect(await channel.sendButtons(from, to, body, one), JSON.stringify(body)).toEqual(
+          refused("bad-body"),
+        );
+      }
+      // Honest titles: a dotless i beside an i, a mark of direction, a soft
+      // hyphen, a flag built of tag characters, an emoji joined of several.
+      const honest: readonly (readonly SendButton[])[] = [
+        [
+          { payload: "core.stop", title: "kir" },
+          ...(allowed.max > 1 ? [{ payload: "core.start", title: "k\u0131r" }] : []),
+        ],
+        [{ payload: "core.stop", title: "\u200f\u0625\u064a\u0642\u0627\u0641 Stop" }],
+        [{ payload: "core.stop", title: "Ter\u00admin" }],
+        [
+          {
+            payload: "core.stop",
+            title:
+              "\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc65\udb40\udc6e\udb40\udc67\udb40\udc7f",
+          },
+        ],
+        [{ payload: "core.stop", title: "\ud83d\udc69\u200d\ud83d\udcbb" }],
+      ];
+      for (const buttons of honest) {
+        expect(
+          await channel.sendButtons(from, to, "hello", buttons),
+          JSON.stringify(buttons),
+        ).toMatchObject({
+          accepted: true,
+        });
+      }
+      // A body may hold line breaks and marks of direction; it is refused only when it shows nothing.
+      expect(await channel.sendButtons(from, to, "one\ntwo \u200f", one)).toMatchObject({
+        accepted: true,
+      });
+      for (const body of ["\u0001", "\u007f", "\u3164", "\u2800\ufe0f"]) {
+        expect(await channel.sendButtons(from, to, body, one), JSON.stringify(body)).toEqual(
+          refused("bad-body"),
+        );
+        expect(await channel.sendText(from, to, body), JSON.stringify(body)).toEqual(
           refused("bad-body"),
         );
       }

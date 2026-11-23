@@ -75,29 +75,34 @@ export interface ChannelLimits {
 /** A control character or a line break of any kind. */
 const CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 /**
- * A character that shows nothing and can reorder or hide what is beside it.
- * The two joiners are left: some scripts need them inside a word.
+ * Characters that show nothing and can hide or reorder what is beside
+ * them: a zero-width space, a word joiner, a byte-order mark, and the
+ * embeddings, overrides and isolates of text direction. The joiners some
+ * scripts need inside a word, the marks of direction that mixed text
+ * uses, a soft hyphen and what an emoji is built with are not among them.
  */
-const HIDDEN = /(?![\u200c\u200d])\p{Cf}/u;
-/** Half of a pair with no other half: not text, and not every store or channel takes it. */
+const HIDDEN = /[\u200b\u2060\ufeff\u202a-\u202e\u2066-\u2069]/;
+/** Half of a pair with no other half: not text. Looked for in a title only. */
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+/** What shows nothing by itself: space, controls, format and ignorable characters, marks, the blank braille cell. */
+const SHOWS_NOTHING = /[\s\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{M}\u2800]/gu;
 /** Whether a text shows nothing at all. */
-const blank = (text: string): boolean => text.replace(/[\p{Cf}\s]/gu, "") === "";
+const blank = (text: string): boolean => text.replace(SHOWS_NOTHING, "") === "";
 /** Whether a body may be sent: something to read, and no U+0000. */
 const sendable = (body: unknown, max: number): body is string =>
   typeof body === "string" && body.length <= max && !blank(body) && !body.includes("\u0000");
-/** A title as two are compared: the same letters in another case or form are the same title. */
 /**
- * What two titles are compared by: one compatibility form, one case (upper
- * first, so that a letter with a longer upper-case form meets it), no
- * joiners, and one space wherever there is space.
+ * What two titles are compared by: one compatibility form, lower case
+ * (with the one letter whose capital is two letters written as two),
+ * nothing that is ignorable in display, and one space wherever there is
+ * space. Lower case only, so that a dotless i stays apart from an i.
  */
 const titleKey = (title: string): string =>
   title
     .normalize("NFKC")
-    .toUpperCase()
     .toLowerCase()
-    .replace(/[\u200c\u200d]/g, "")
+    .replaceAll("\u00df", "ss")
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
 

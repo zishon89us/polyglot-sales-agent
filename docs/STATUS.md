@@ -569,6 +569,14 @@ M0 Inception met its exit criteria on 2026-11-16; see
   break or a direction override, or differ from another only in form.
   It is fixed, keeping the two joiners some scripts need inside a word;
   so are the test gaps. What is left is #328.
+  Another agent checked the fixes
+  (`reviews/2026-11-24-gate4-u5-buttons-captions-verification.md`): eight
+  of the ten answers held, two in part; three Low findings: some
+  characters that show nothing still passed as a title or a body, and
+  some honest titles were refused (a flag, a soft hyphen, a dotless i
+  beside an i). Fixed: what is refused is now a short list, and what
+  counts as blank is wider. **These last fixes are checked by the
+  author only.**
 
 ## Next
 
