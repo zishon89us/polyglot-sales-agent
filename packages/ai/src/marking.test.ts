@@ -168,6 +168,60 @@ describe("marking data (I5)", () => {
     expect(kept.traces).toEqual([]);
   });
 
+  test("what the answer is checked against is what was sent: a request that reads differently later changes neither", async () => {
+    let reads = 0;
+    const schema = { type: "object", properties: { day: { type: "string" } } };
+    const shifting = {
+      ...REQUEST,
+      messages: [{ role: "customer" as const, text: "hello" }],
+      tools: [{ name: "find", description: "finds", argumentsSchema: schema }],
+      get claimKinds() {
+        reads += 1;
+        // Three reads while the request is checked and copied; anything after would be a second look.
+        return reads <= 3 ? ["price"] : ["made-up"];
+      },
+    } as LlmRequest;
+    const adapter = new FakeLlmAdapter([
+      {
+        kind: "answer",
+        value: { ...GOOD, claims: [{ kind: "price", item: "s1", value: "1" }], reply: "It is 1." },
+      },
+    ]);
+    const client = bounded(adapter, { record: keptTraces().record });
+    const pending = client.generate(shifting, FAKE_PLACE);
+    // Changed while the call waits: the schema that was sent is a copy.
+    schema.properties.day.type = "number";
+    expect((await pending).kind).toBe("ok");
+    const got = adapter.calls[0] as LlmRequest;
+    expect(reads).toBe(3);
+    expect(got.claimKinds).toEqual(["price"]);
+    expect(got.tools).toEqual([
+      {
+        name: "find",
+        description: "finds",
+        argumentsSchema: { type: "object", properties: { day: { type: "string" } } },
+      },
+    ]);
+  });
+
+  test("M7: the calls are copied all the way down: a change to them during the call is not sent", async () => {
+    const toolCalls = [{ id: "c1", name: "find", arguments: { day: { of: "Thursday" } } }];
+    const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);
+    const client = bounded(adapter, { record: keptTraces().record });
+    const pending = client.generate(
+      { ...REQUEST, messages: [{ role: "tool-calls", toolCalls }] },
+      FAKE_PLACE,
+    );
+    (toolCalls[0] as { arguments: { day: { of: string } } }).arguments.day.of = "changed";
+    await pending;
+    expect(adapter.calls[0]?.messages).toEqual([
+      {
+        role: "tool-calls",
+        toolCalls: [{ id: "c1", name: "find", arguments: { day: { of: "Thursday" } } }],
+      },
+    ]);
+  });
+
   test("markText is the two lines and the text between, unchanged", () => {
     expect(markText("a\nb", A)).toBe(`[[data:${A}]]\na\nb\n[[end:${A}]]`);
   });
@@ -271,6 +325,25 @@ describe("the stand-in for the model (section 2, A3)", () => {
       (await client.generate(request([{ role: "customer", text: long }]), FAKE_PLACE)).kind,
     ).toBe("ok");
   });
+
+  test.each([
+    ["a tab", "a\tb", "Echo: a b"],
+    ["a carriage return and a line break", "a\r\nb", "Echo: a \nb"],
+    ["a next-line control", "a\u0085b", "Echo: a b"],
+    ["U+0000", "a\u0000b", "Echo: a b"],
+    ["half of a surrogate pair", "a\ud800b", "Echo: a\ufffdb"],
+  ])(
+    "A3: a customer's text with %s still gets a reply the client accepts",
+    async (_name, text, reply) => {
+      const client = bounded(standInEcho(), { record: keptTraces().record });
+      expect(
+        await client.generate(request([{ role: "customer", text }]), FAKE_PLACE),
+      ).toMatchObject({
+        kind: "ok",
+        output: { reply },
+      });
+    },
+  );
 
   test("it reads what is between a mark's lines, and a text that is not marked as it is", () => {
     expect(standInReply(request([{ role: "customer", text: marked("a\nb") }]))).toBe("Echo: a\nb");

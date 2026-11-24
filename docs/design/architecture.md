@@ -389,7 +389,8 @@ findings S1, S2, S3 and A13.
 **As built in M3 unit U7** (design note `notes/m3-u7-turn.md`): steps 1,
 3, 5 without the checks, 7 and 8. The lease is renewed before each call
 to the model. A tool runs in a transaction that first checks the lease,
-with a limit of 5 seconds, and its `tool_calls` row is stored in that
+with a limit of 2 seconds on the tool and half a second on any one
+statement of it, and its `tool_calls` row is stored in that
 transaction; a tool that fails has everything it wrote undone and its row
 stored in a second one. The trace is stored by the model client in a
 transaction of its own, before the reply is, and not in step 8's (U6).

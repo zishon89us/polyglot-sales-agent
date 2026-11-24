@@ -21,6 +21,9 @@ ALTER TABLE messages
         OR (direction = 'outbound' AND class = 'assistant-reply'
             AND turn_id IS NOT NULL AND language IS NOT NULL));
 
+-- Every turn reads its session's messages for the request to the model.
+CREATE INDEX messages_session ON messages (tenant_id, session_id, created_at, id);
+
 -- One row for every tool a turn ran.
 --
 -- `arguments` and `result` are treated as the customer's text: the model

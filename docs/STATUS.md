@@ -640,6 +640,15 @@ M0 Inception met its exit criteria on 2026-11-16; see
   disclosure is sent until U8. The supported languages are still the
   agent's proposal (row 4). Rows 48 and 49 ask about the language mark
   and about a tool's arguments.
+  A third agent reviewed the code
+  (`reviews/2026-11-25-gate4-u7-turn.md`): 9 findings, none High, three
+  Medium, and 8 of 46 mutants alive. It found no path by which a
+  contact's identifier, another tenant's or session's text, or a staff
+  message reaches the model. The Medium ones: a tool's time limit did
+  not stop a statement already running, so the conversation's row could
+  be held about 9 seconds where the note said 5; the test of the lease's
+  renewal could not tell one renewal from two; a session's history had
+  no index to read through. All three are fixed. What is left is #332.
 
 ## Next
 

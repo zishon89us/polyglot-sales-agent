@@ -523,6 +523,50 @@ describe("a turn (sections 6 to 8)", () => {
     expect(await unhandled()).toBe(1);
   });
 
+  test("R8: a pack with a prompt of its own that was not loaded is the same fault: no call", async () => {
+    await arrives("hello");
+    const { adapter, model } = scripted([]);
+    const handlers = createHandlers({
+      app,
+      channels: {},
+      accessToken: MOCK_ACCESS_TOKEN,
+      model: {
+        ...model,
+        packs: {
+          "faq-only": { name: "faq-only", promptFragment: { name: "faq-only", version: 1 } },
+        },
+      },
+    });
+    expect(await turn(handlers)).toBe("retry");
+    expect(adapter.calls).toEqual([]);
+    expect(await rows("SELECT last_error FROM jobs WHERE type = 'process-conversation'")).toEqual([
+      { last_error: "unknown-pack" },
+    ]);
+  });
+
+  test("a pack's own prompt, when it has one, follows the core's in the system text and in the trace", async () => {
+    await arrives("hello");
+    const { adapter, model } = scripted([{ kind: "answer", value: REPLY }]);
+    const fragment = { ...PROMPT, name: "faq-only", text: "The pack's own words.\n" };
+    const handlers = createHandlers({
+      app,
+      channels: {},
+      accessToken: MOCK_ACCESS_TOKEN,
+      model: {
+        ...model,
+        packs: {
+          "faq-only": { name: "faq-only", promptFragment: { name: "faq-only", version: 1 } },
+        },
+        fragments: { "faq-only": fragment },
+      },
+    });
+    expect(await turn(handlers)).toBe("done");
+    expect((adapter.calls[0] as LlmRequest).system.endsWith("The pack's own words.\n")).toBe(true);
+    expect(await rows("SELECT prompt_names FROM ai_traces")).toEqual([
+      { prompt_names: ["reply", "faq-only"] },
+    ]);
+  });
+
   test.each([
     [
       "a provider's failure",
@@ -808,16 +852,23 @@ describe("the tool loop (section 6)", () => {
       },
       { record: traceRecorder(app) },
     );
-    const later = new Date(Date.now() + 60_000);
-    expect(await runTurn(app, { ...model, client }, at, later)).toMatchObject({
+    // A clock that moves a minute each time it is asked: once when the turn starts, once before each call.
+    const base = Date.now() + 60_000;
+    let asked = 0;
+    const clock = () => new Date(base + 60_000 * asked++);
+    expect(await runTurn(app, { ...model, client }, at, clock)).toMatchObject({
       kind: "ended",
       end: "stored",
     });
-    // Both calls saw a lease that ends two minutes after the time the turn was given.
-    expect(expiries).toHaveLength(2);
-    for (const expiry of expiries) {
-      expect(Math.abs(Date.parse(expiry) - (later.getTime() + 120_000))).toBeLessThan(5);
-    }
+    // Each call saw a lease renewed just before it: two minutes after the clock's reading then.
+    expect(expiries.map((expiry) => Date.parse(expiry) - base)).toEqual([
+      60_000 + 120_000,
+      2 * 60_000 + 120_000,
+    ]);
+    // And the turn began when it was started, not when the model was first called.
+    expect(await rows("SELECT DISTINCT turn_started_at FROM ai_traces")).toEqual([
+      { turn_started_at: new Date(base) },
+    ]);
   });
 
   test("L7: when the conversation is no longer this worker's, no call is made and nothing is stored", async () => {
@@ -844,6 +895,9 @@ describe("the tool loop (section 6)", () => {
       },
     });
     expect(await runTurn(app, { ...model, client }, at)).toEqual({ kind: "lost-lease" });
+    // It stopped at the tool: the model was not asked again.
+    expect(adapter.calls).toHaveLength(1);
+    expect(adapter.remaining()).toBe(0);
     expect(await calls()).toEqual([]);
     expect(await replies()).toEqual([]);
     // The call that was made left its trace.

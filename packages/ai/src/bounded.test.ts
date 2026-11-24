@@ -542,13 +542,13 @@ describe("a fault that is not the provider's", () => {
     expect((await second).kind).toBe("ok");
   });
 
-  test("the scripted adapter says so when a request is not plain data and cannot be kept", async () => {
+  test("a request whose tools are not plain data is refused by the client before any adapter is called", async () => {
     const { client, adapter } = scripted([{ kind: "answer", value: GOOD }]);
     const odd = {
       ...REQUEST,
       tools: [{ name: "find", description: "", argumentsSchema: { check: () => true } }],
     };
-    await expect(client.generate(odd, FAKE_PLACE)).rejects.toThrow("is not plain data");
+    await expect(client.generate(odd, FAKE_PLACE)).rejects.toThrow("could not be cloned");
     expect(adapter.calls).toEqual([]);
   });
 

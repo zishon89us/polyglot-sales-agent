@@ -121,7 +121,7 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
         options.app,
         options.model,
         { tenantId, conversationId, ...turn },
-        options.clock?.(),
+        options.clock,
       );
       if (outcome.kind === "not-answering" || outcome.kind === "lost-lease") {
         options.report?.("turn-skipped", outcome.kind);

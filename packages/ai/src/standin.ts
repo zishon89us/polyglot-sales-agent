@@ -34,7 +34,14 @@ export function standInReply(request: LlmRequest): string {
   const texts = request.messages
     .slice(from)
     .flatMap((message) => (message.role === "customer" ? [unmarked(message.text)] : []));
-  return [...`Echo: ${texts.join("\n")}`].slice(0, STAND_IN_REPLY_MAX).join("");
+  // A tab, a carriage return and the like become spaces: the client takes
+  // no control character but a line break, and a reply it refuses would
+  // leave the customer with nothing.
+  const echo = `Echo: ${texts.join("\n")}`
+    .replace(/(?!\n)\p{Cc}/gu, " ")
+    // Half of a surrogate pair is not text either.
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
+  return [...echo].slice(0, STAND_IN_REPLY_MAX).join("");
 }
 
 export function standInEcho(): LlmAdapter {

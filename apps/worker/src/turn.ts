@@ -170,9 +170,13 @@ export async function runTurn(
     readonly sessionId: string;
     readonly messages: readonly UnhandledMessage[];
   },
-  now?: Date,
+  /** The time, when it is asked; for tests. Each renewal of the lease asks again. */
+  clock?: () => Date,
 ): Promise<TurnOutcome> {
   const { tenantId, conversationId, token, sessionId } = at;
+  // When the turn began: read first, before anything is asked of the database.
+  const turnStartedAt = clock?.() ?? new Date();
+  const now = clock === undefined ? undefined : turnStartedAt;
   const handled = at.messages.map((message) => message.id);
   const end = (reply?: string, made?: { turnId: string; language: string }) =>
     finishTurn(app, tenantId, conversationId, { token, sessionId }, handled, reply, now, made);
@@ -211,10 +215,10 @@ export async function runTurn(
       return { kind: "no-reply", code: "no-text", end: await end() };
     }
     const turnId = randomUUID();
-    const place = { tenantId, sessionId, turnId, turnStartedAt: now ?? new Date() };
+    const place = { tenantId, sessionId, turnId, turnStartedAt };
     const messages = [...request.messages];
     for (let round = 0; ; round += 1) {
-      if (!(await renewTurn(app, tenantId, conversationId, token, now))) {
+      if (!(await renewTurn(app, tenantId, conversationId, token, clock?.()))) {
         return { kind: "lost-lease" };
       }
       // Outside any transaction: the trace is stored on a connection of its own.

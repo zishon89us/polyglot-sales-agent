@@ -29,6 +29,7 @@ import {
   type PromptIdentity,
   type TokenUse,
   type ToolCall,
+  type ToolOffer,
   type TraceRecord,
   type TraceRecorder,
 } from "./types.ts";
@@ -204,8 +205,14 @@ export function markText(text: string, mark: string): string {
  * that some text already holds is thrown away and another is drawn.
  */
 function markedCopy(
-  request: LlmRequest,
-  prompts: readonly PromptIdentity[],
+  request: Pick<LlmRequest, "messages" | "maxOutputTokens" | "timeoutMs">,
+  /** Read once, by the caller: what the answer is checked against is what is sent. */
+  read: {
+    readonly system: string;
+    readonly prompts: readonly PromptIdentity[];
+    readonly tools: readonly ToolOffer[];
+    readonly claimKinds: readonly string[];
+  },
   draw: () => string,
 ): LlmRequest {
   const messages: LlmMessage[] = [];
@@ -251,13 +258,13 @@ function markedCopy(
     }
   }
   return {
-    system: request.system,
-    prompts: prompts.map(({ name, version }) => ({ name, version })),
+    system: read.system,
+    prompts: read.prompts.map(({ name, version }) => ({ name, version })),
     messages: messages.map((message) =>
       "text" in message ? { ...message, text: markText(message.text, mark) } : message,
     ),
-    tools: request.tools.map((tool) => ({ ...tool })),
-    claimKinds: [...request.claimKinds],
+    tools: read.tools,
+    claimKinds: [...read.claimKinds],
     maxOutputTokens: request.maxOutputTokens,
     timeoutMs: request.timeoutMs,
   };
@@ -503,6 +510,8 @@ export class LlmClient {
     this.generate = async (request, place) => {
       let fault: Error | undefined;
       let prompts: PromptIdentity[] = [];
+      let system = "";
+      let tools: ToolOffer[] = [];
       let timeoutMs = 0;
       let offered: { claimKinds: string[]; tools: string[] } = { claimKinds: [], tools: [] };
       try {
@@ -512,9 +521,13 @@ export class LlmClient {
           // what the caller does to its request while the call waits changes
           // nothing of how the answer is checked.
           timeoutMs = request.timeoutMs;
+          system = request.system;
+          // A copy all the way down: a schema the caller changes during the
+          // call is not the one that was sent.
+          tools = structuredClone([...request.tools]) as ToolOffer[];
           offered = {
             claimKinds: [...request.claimKinds],
-            tools: request.tools.map((tool) => tool.name),
+            tools: tools.map((tool) => tool.name),
           };
           prompts = [...request.prompts].map(({ name, version }) => ({ name, version }));
         }
@@ -547,7 +560,14 @@ export class LlmClient {
       }
       // Built before the clock is read and the adapter called: a request
       // that cannot be marked is refused, and nothing is paid for.
-      const sent = markedCopy(request, prompts, this.#mark);
+      if (typeof system !== "string") {
+        throw new TypeError("the request changed while it was read");
+      }
+      const sent = markedCopy(
+        { messages: request.messages, maxOutputTokens: request.maxOutputTokens, timeoutMs },
+        { system, prompts, tools, claimKinds: offered.claimKinds },
+        this.#mark,
+      );
       const startedAt = storable(this.#now());
       if (startedAt === undefined) {
         // Found before the call: a trace with no time could not be stored.

@@ -2,8 +2,15 @@
 // model (M3 unit U7; design note docs/design/notes/m3-u7-turn.md, sections
 // 4 and 6). The two history numbers are that note's own and unmeasured.
 
-/** How long one run of a tool may take: its transaction holds the conversation's row. */
-export const TOOL_RUN_TIMEOUT_MS = 5_000;
+/**
+ * How long one run of a tool may take, and how long any one statement of
+ * it: its transaction holds the conversation's row, which storing a
+ * customer's message waits for at most 3 seconds. A tool is stopped
+ * waiting for at the first; a statement still running then is stopped by
+ * the database at the second. Together, 2.5 seconds at most.
+ */
+export const TOOL_RUN_TIMEOUT_MS = 2_000;
+export const TOOL_STATEMENT_TIMEOUT_MS = 500;
 /** The longest result of a tool, as JSON, that is given back to the model. */
 export const TOOL_RESULT_MAX = 4_000;
 /** How many earlier messages of a session a request may hold. */

@@ -106,7 +106,7 @@ can follow from what was said.
 | H2b | A row whose text has been removed | Not included |
 | H3 | A reply that was dropped, failed, or still waits to be sent | Not included: the customer may not have it. (A reply still waiting is included in no turn; the send job holds it back while a newer message waits, U2) |
 | H4 | A message of a type that is not read, a tap | Not included |
-| H5 | More than 30 messages, or more than 12,000 characters in all | The newest that fit both; the oldest are left out. Both numbers are this note's, unmeasured |
+| H5 | More than 30 messages, or more than 12,000 characters in all | The newest 30, and of those the newest run that fits the second bound: the first message that does not fit ends the history, so that no older one stands beside a newer with a hole between. One newest message over 12,000 characters therefore leaves no history at all. Both numbers are this note's, unmeasured |
 | H6 | A message of an earlier session of the same conversation | Not included: a session is the unit of context |
 
 ## 5. Marking data (I5; US-C8, 4)
@@ -137,7 +137,7 @@ system's random source, which a test can replace.
 | M4 | A tool's result that says "ignore your instructions" | Marked as any data. That the model does not follow it is the model's behaviour and is shown by the evals (U16), not here |
 | M5 | The prompt | Says what the two lines mean without naming a mark: it is fixed text and the mark is not |
 | M6 | Two calls of one turn | Two marks |
-| M7 | The calls an earlier answer of the turn made (section 6) | Given to the adapter as structure: a name and arguments, as the model wrote them. They are not text in a message and are not marked. The system text and a tool's description are this repository's own |
+| M7 | The calls an earlier answer of the turn made (section 6) | Given to the adapter as structure: an identifier, a name and arguments, as the model wrote them, copied all the way down. They are not text in a message and are not marked; a call's identifier is on its result too, also unmarked, and is bounded only in length. The system text and a tool's description are this repository's own |
 | M8 | The trace | Unchanged: it holds nothing of a request's text |
 
 The guardrail policy's I5 said a copy of the mark inside a text "is
@@ -154,7 +154,7 @@ results.
 | L1 | An answer with a reply | The loop ends; section 8 |
 | L2 | An answer with 1 to 4 calls | Each is run in order, each in a short transaction of its own that **first checks the turn's lease** (architecture, "Processing one turn", 3), then runs the tool and stores its `tool_calls` row with the outcome `done`. Then the model is called again with the calls and their results added |
 | L2a | A tool says the arguments are not ones it takes | The row's outcome is `refused`; the model is given `{"error":"refused"}`. Arguments are checked by the tool, where it runs |
-| L3 | A tool that throws, takes more than 5 seconds, or returns what is not plain data or is over 4,000 characters as JSON | Its transaction is undone whole, so nothing it wrote stays. Its row is then stored with the outcome `failed` in a second transaction that checks the lease again; the model is given `{"error":"failed"}`. The tool's message is not given to the model or stored. (The 5 seconds matter because the lease check holds the conversation's row, which storing an inbound message also needs) |
+| L3 | A tool that throws, takes more than 2 seconds, runs one statement for more than half a second, or returns what is not plain data or is over 4,000 characters as JSON | Its transaction is undone whole, so nothing it wrote stays. Its row is then stored with the outcome `failed` in a second transaction that checks the lease again; the model is given `{"error":"failed"}`. The tool's message is not given to the model or stored. (The limits matter because the lease check holds the conversation's row, which storing an inbound message also needs and waits 3 seconds for. The wait for a tool ends at 2 seconds; a statement still running then is stopped by the database within half a second more, so the row is held 2.5 seconds at most. The first form of this note gave one limit of 5 seconds, which did not stop a running statement) |
 | L4 | The lease is no longer this worker's when a tool is to run | The tool is not run and nothing is stored; the turn ends without a reply, as a lost lease does |
 | L5 | A fifth answer that still asks for tools (`TOOL_ROUNDS_MAX` is 4) | The turn ends with `tool-rounds`: no reply, and not tried again (section 8, S2) |
 | L6 | A call that names a tool that was not offered, or five calls | Already refused by the client (`invalid-output`, `tool-call`): no reply, and not tried again |
@@ -225,7 +225,9 @@ the turn's identifier, so that a reply can be joined to its traces
 client refuses one over 1,200 characters.
 
 The turn's identifier is made once for each run of the job's handler.
-The time the turn began is read when `beginTurn` returns.
+The time the turn began is the worker's clock when the turn's code
+starts, just after `beginTurn` returns and before anything else is
+asked of the database.
 
 `generate` is called outside any transaction, for a session that
 `beginTurn` has committed (the rule of U6).
@@ -234,10 +236,10 @@ The time the turn began is read when `beginTurn` returns.
 | --- | --- | --- |
 | S1 | The model replies | The reply is stored, the batch is marked as dealt with, the send job is queued; the language is recorded |
 | S2 | A timeout, a provider's failure, or a trace that could not be stored | Nothing is stored; the lease is given back; the job fails with a code (`model-timeout`, `model-provider-error`, `trace-not-stored`) and is tried again as any job is: 6 tries in all. **Each try calls the model again and runs the turn's tools again**: at worst 6 × 5 = 30 calls and 6 × 16 = 96 runs of a tool for one batch. After the last try the batch stays unanswered, and the customer's next message starts it again. U15 replaces this |
-| S2a | An answer the client refuses (`invalid-output`), or `tool-rounds` | Not tried again: the same request would likely give the same answer. The batch is marked as dealt with, with no reply, and a line is logged with the code. **The customer gets nothing** until U9 has a fallback to send |
-| S2b | How long one try can take | 5 calls of 20 seconds, 5 traces of 5 seconds, 16 tool runs of 5 seconds: 205 seconds, under the 240 a job is given. The lease is 120 seconds and is renewed before each call; the longest stretch between renewals is one call, its trace and four tools, 45 seconds |
+| S2a | An answer the client refuses (`invalid-output`), a reply of nothing but space, or `tool-rounds` | Not tried again by the job: the same request would likely give the same answer. The batch is marked as dealt with, with no reply, and a line is logged with the code. **The customer gets nothing** until U9 has a fallback to send. If the customer wrote again meanwhile, nothing is marked, and the next turn answers the whole batch, calling the model again |
+| S2b | How long one try can take | 5 calls of 20 seconds, 5 traces of 5 seconds, 16 tool runs of 2.5 seconds: 165 seconds, under the 240 a job is given. The lease is 120 seconds and is renewed before each call; the longest stretch between renewals is one call, its trace and four tools, 35 seconds |
 | S3 | The customer wrote again during the call | As U2: the reply is dropped, up to twice in a row |
-| S4 | The reply is empty and no tool is asked for | Already refused by the client as `shape` |
+| S4 | The reply is empty or only space and no tool is asked for | The client accepts such an answer; the turn does not send it: S2a, with the code `empty-reply` |
 
 ## 9. The prompt
 
@@ -245,7 +247,9 @@ The time the turn began is read when `beginTurn` returns.
 policy's section 9 lists, and: what the two lines of a data mark mean;
 what `unread` and `truncated` mean; that `language` is the language the
 customer wrote in, by its code, also when they wrote it in Latin
-letters; that the reply is in that language and its usual script.
+letters; that the reply is in that language and its usual script. It
+asks for at most 1,000 characters where the client takes 1,200: a
+margin, unmeasured.
 
 It is the first text a model is ever given by this product and **no
 eval has run on it**. A test checks that the file loads and holds each
@@ -270,12 +274,12 @@ Migration 0010:
 ## 11. Documents changed with this unit
 
 The data model (`sessions`, `messages.turn_id`, `tool_calls`, and the
-retention table); the architecture ("Processing one turn": what is built
+retention table, and an index on a session's messages, which every turn
+reads); the architecture ("Processing one turn": what is built
 of it); the state machines (step 15 as built); ADR 0005 (the fifth kind
 of message, the `language` field, the marking of data); the guardrail
 policy if section 9 or I5 says anything this contradicts; `prompts/`
-README; `.env.example`; the glossary for the two numbers of section 4;
-decisions rows 48 (the unsupported mark is sticky and taken from the
+README; `.env.example`; decisions rows 48 (the unsupported mark is sticky and taken from the
 model) and 49 (`tool_calls` is treated as a customer's text);
 traceability; STATUS; README.
 

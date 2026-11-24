@@ -23,6 +23,7 @@ import {
   type SendOutcome,
   TOOL_RESULT_MAX,
   TOOL_RUN_TIMEOUT_MS,
+  TOOL_STATEMENT_TIMEOUT_MS,
   type ToolOutcome,
   UNCONFIRMED,
 } from "@polyglot-sales-agent/core";
@@ -353,6 +354,8 @@ export function sessionHistory(
     let size = 0;
     for (const row of found.rows) {
       size += row.body.length;
+      // Stop at the first that does not fit: a history with a hole in it
+      // would put a reply beside a question it did not answer.
       if (size > HISTORY_TEXT_MAX) {
         break;
       }
@@ -401,17 +404,17 @@ export async function runTool(
                                created_at, ended_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::timestamptz,
                greatest(clock_timestamp(), $8::timestamptz))`,
-      [
-        tenantId,
-        call.sessionId,
-        call.turnId,
-        call.tool,
-        JSON.stringify(call.arguments ?? null),
-        result,
-        outcome,
-        began,
-      ],
+      [tenantId, call.sessionId, call.turnId, call.tool, asked, result, outcome, began],
     );
+  // What cannot be stored as JSON (a U+0000 in a text or a key) is not
+  // stored: the row says the tool ran, without what it was asked.
+  let asked: string | null = null;
+  try {
+    const text = JSON.stringify(call.arguments ?? null);
+    asked = typeof text === "string" && !text.includes("\\u0000") ? text : null;
+  } catch {
+    asked = null;
+  }
   const lost = Symbol("lost");
   let began: string | undefined;
   try {
@@ -420,6 +423,12 @@ export async function runTool(
         return lost;
       }
       began = await stamp(tx, undefined);
+      // The limit on the tool's wait does not stop a statement that is
+      // already running; this does, so the conversation's row is not held
+      // for longer than the two together.
+      await tx.query(
+        `SET LOCAL statement_timeout = ${Math.max(1, Math.min(TOOL_STATEMENT_TIMEOUT_MS, Math.floor(timeoutMs)))}`,
+      );
       let timer: ReturnType<typeof setTimeout> | undefined;
       // A tool that is still running after its time, or after its
       // transaction ended, can ask nothing more of the connection: the

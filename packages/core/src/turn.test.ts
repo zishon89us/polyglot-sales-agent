@@ -13,7 +13,8 @@ import * as turn from "./turn.ts";
 describe("the fixed values of a turn", () => {
   test("every value is the one decided", () => {
     expect({ ...turn }).toEqual({
-      TOOL_RUN_TIMEOUT_MS: 5_000,
+      TOOL_RUN_TIMEOUT_MS: 2_000,
+      TOOL_STATEMENT_TIMEOUT_MS: 500,
       TOOL_RESULT_MAX: 4_000,
       HISTORY_MESSAGES_MAX: 30,
       HISTORY_TEXT_MAX: 12_000,

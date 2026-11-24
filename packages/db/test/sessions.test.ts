@@ -1361,6 +1361,43 @@ describe("what a turn with the model records (M3 unit U7; design note m3-u7-turn
       expect(await history()).toEqual([]);
     });
 
+    test("H5: the first message that does not fit ends the history: no older one is put beside a newer, with a hole between", async () => {
+      await arrives("m0", 0);
+      await answer("r0", HOUR_MS);
+      await outbound("old and short", "assistant-reply", "sent", HOUR_MS + 1_000);
+      await outbound("x".repeat(11_990), "assistant-reply", "sent", HOUR_MS + 2_000);
+      await outbound("newest", "assistant-reply", "sent", HOUR_MS + 3_000);
+      // "newest" fits; the long one would make 11,996 and fits; "old and short" would make 12,009.
+      expect((await history()).map((message) => message.text.length)).toEqual([11_990, 6]);
+      await outbound("y".repeat(11_995), "assistant-reply", "sent", HOUR_MS + 4_000);
+      // Now the newest alone fits and the next does not: the short ones before it are not skipped to.
+      expect((await history()).map((message) => message.text.length)).toEqual([11_995]);
+    });
+
+    test("H4: a row that is not a text is not in it even if it holds words", async () => {
+      await arrives("hello", 0);
+      await answer("Hello.", HOUR_MS);
+      await accepted(HOUR_MS + 1);
+      await administrator.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, created_at)
+         SELECT tenant_id, conversation_id, id, 'outbound', 'assistant-reply', 'template', 'A template with words', 'delivered', $1 FROM sessions`,
+        [at(2 * HOUR_MS)],
+      );
+      expect((await history()).map((message) => message.text)).toEqual(["hello", "Hello."]);
+    });
+
+    test("the history is read through an index on the session, not by reading every message", async () => {
+      const indexes = await rows<{ indexdef: string }>(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = 'messages' AND indexname = 'messages_session'",
+      );
+      expect(indexes).toEqual([
+        {
+          indexdef:
+            "CREATE INDEX messages_session ON public.messages USING btree (tenant_id, session_id, created_at, id)",
+        },
+      ]);
+    });
+
     test("H6: a message of an earlier session of the same conversation is not in it, and another tenant sees nothing", async () => {
       await arrives("yesterday", 0);
       await answer("Echo: yesterday", HOUR_MS);
@@ -1517,6 +1554,66 @@ describe("what a turn with the model records (M3 unit U7; design note m3-u7-turn
       expect((await sessions())[0]?.discards).toBe(0);
       expect(await calls()).toMatchObject([{ outcome: "failed" }]);
     });
+
+    test("L3: a statement of a tool that is still running at the limit is stopped by the database, so the conversation's row is not held", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const started = Date.now();
+      const ran = await run(
+        turn,
+        async (tx) => {
+          await tx.query("SELECT pg_sleep(3)");
+          return { outcome: "done", result: 1 };
+        },
+        { timeoutMs: 100 },
+      );
+      expect(ran).toEqual({ kind: "ran", outcome: "failed", result: null });
+      // 100 ms for the tool and 100 ms for its statement, not the 3 seconds it asked for.
+      expect(Date.now() - started).toBeLessThan(1_500);
+    });
+
+    test("L3: when the lease is lost between a tool's failure and the record of it, no row is written", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      let stolen: Promise<unknown> = Promise.resolve();
+      const ran = await run(turn, async () => {
+        // Another worker's claim waits for the row this transaction holds, and gets it when the
+        // transaction is undone: before the second transaction can check the lease.
+        stolen = administrator.query("UPDATE conversations SET lease_token = gen_random_uuid()");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        throw new Error("fails");
+      });
+      await stolen;
+      expect(ran).toEqual({ kind: "lost-lease" });
+      expect(await calls()).toEqual([]);
+    });
+
+    test.each([
+      ["a text", { q: "a\u0000b" }],
+      ["a key", { "a\u0000b": 1 }],
+    ])(
+      "arguments with U+0000 in %s cannot be stored: the row is stored without them, and nothing throws",
+      async (_name, args) => {
+        await arrives("hello", 0);
+        const turn = await begin(HOUR_MS);
+        expect(
+          await run(turn, async () => ({ outcome: "done", result: 1 }), { args }),
+        ).toMatchObject({ outcome: "done" });
+        expect(
+          await run(
+            turn,
+            async () => {
+              throw new Error("fails");
+            },
+            { args },
+          ),
+        ).toMatchObject({ outcome: "failed" });
+        expect(await calls()).toMatchObject([
+          { arguments: null, outcome: "done" },
+          { arguments: null, outcome: "failed" },
+        ]);
+      },
+    );
 
     test("L4: when the conversation is another worker's, the tool is not run and nothing is stored", async () => {
       await arrives("hello", 0);
