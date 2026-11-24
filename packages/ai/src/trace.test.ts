@@ -17,7 +17,13 @@ const WORDS = "CANARY-WORDS do you have a slot on Thursday";
 const PHONE = "+15550142";
 const NAME = "Test Customer";
 
-const GOOD = { reply: `Hello ${NAME}. ${WORDS}`, claims: [], flags: [], toolCalls: [] };
+const GOOD = {
+  reply: `Hello ${NAME}. ${WORDS}`,
+  claims: [],
+  flags: [],
+  toolCalls: [],
+  language: "en",
+};
 const REQUEST: LlmRequest = {
   system: `instructions ${WORDS}`,
   prompts: [

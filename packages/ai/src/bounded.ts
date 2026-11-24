@@ -1,6 +1,7 @@
 // The one way from an adapter to a client (design note, section 2). It
 // keeps the time and checks the answer, so neither can be left out.
 
+import { randomBytes } from "node:crypto";
 import {
   MODEL_CALL_TIMEOUT_CEILING_MS,
   MODEL_HEALTH_TIMEOUT_MS,
@@ -21,11 +22,14 @@ import {
   type CallPlace,
   type Health,
   type LlmAdapter,
+  type LlmMessage,
   type LlmRequest,
   type LlmResult,
   PROVIDER_ERROR_CODES,
   type PromptIdentity,
   type TokenUse,
+  type ToolCall,
+  type ToolOffer,
   type TraceRecord,
   type TraceRecorder,
 } from "./types.ts";
@@ -183,6 +187,109 @@ function requestFault(request: LlmRequest): Error | undefined {
 const LATENCY_MAX_MS = 2_147_483_647;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Whether a value is what JSON carries and nothing else: no date, map, function or other object. */
+function plainData(value: unknown, depth = 0): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value !== "object" || depth > 32) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.every((item) => plainData(item, depth + 1));
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return (
+    (prototype === Object.prototype || prototype === null) &&
+    Object.values(value).every((item) => plainData(item, depth + 1))
+  );
+}
+
+/** A mark is 32 hexadecimal characters, drawn for one call. */
+const MARK = /^[0-9a-f]{32}$/;
+/** How many marks are drawn before the source is taken to be broken. */
+const MARK_DRAWS = 8;
+
+/** The two lines a text is put between (design note M3 U7, section 5). */
+export function markText(text: string, mark: string): string {
+  return `[[data:${mark}]]\n${text}\n[[end:${mark}]]`;
+}
+
+/**
+ * A copy of the request for the adapter in which every message's text is
+ * marked as data, the assistant's earlier replies included: only the
+ * system text is instruction. Nothing is removed from any text: a mark
+ * that some text already holds is thrown away and another is drawn.
+ */
+function markedCopy(
+  request: Pick<LlmRequest, "messages" | "maxOutputTokens" | "timeoutMs">,
+  /** Read once, by the caller: what the answer is checked against is what is sent. */
+  read: {
+    readonly system: string;
+    readonly prompts: readonly PromptIdentity[];
+    readonly tools: readonly ToolOffer[];
+    readonly claimKinds: readonly string[];
+  },
+  draw: () => string,
+): LlmRequest {
+  const messages: LlmMessage[] = [];
+  const texts: string[] = [];
+  for (const given of [...request.messages] as readonly unknown[]) {
+    const message = (given ?? {}) as Record<string, unknown>;
+    const { role, text, toolCallId, toolCalls } = message;
+    if (role === "tool-calls" && Array.isArray(toolCalls)) {
+      // Structure, not text: a name and arguments, as the model wrote them.
+      const calls = structuredClone(toolCalls) as ToolCall[];
+      texts.push(JSON.stringify(calls));
+      messages.push({ role, toolCalls: calls });
+    } else if (
+      role === "tool-result" &&
+      typeof text === "string" &&
+      typeof toolCallId === "string"
+    ) {
+      texts.push(text, toolCallId);
+      messages.push({ role, toolCallId, text });
+    } else if (
+      (role === "data" || role === "customer" || role === "assistant") &&
+      typeof text === "string"
+    ) {
+      texts.push(text);
+      messages.push({ role, text });
+    } else {
+      throw new TypeError("a message is a text of a known kind, or the calls an answer made");
+    }
+  }
+  let mark = "";
+  for (let draws = 0; ; draws += 1) {
+    if (draws >= MARK_DRAWS) {
+      throw new Error("no mark for the request's data could be drawn");
+    }
+    const drawn = draw();
+    if (
+      typeof drawn === "string" &&
+      MARK.test(drawn) &&
+      !texts.some((text) => text.includes(drawn))
+    ) {
+      mark = drawn;
+      break;
+    }
+  }
+  return {
+    system: read.system,
+    prompts: read.prompts.map(({ name, version }) => ({ name, version })),
+    messages: messages.map((message) =>
+      "text" in message ? { ...message, text: markText(message.text, mark) } : message,
+    ),
+    tools: read.tools,
+    claimKinds: [...read.claimKinds],
+    maxOutputTokens: request.maxOutputTokens,
+    timeoutMs: request.timeoutMs,
+  };
+}
 
 /** The last millisecond of the year 9999. */
 const TIME_MAX_MS = 253_402_300_799_999;
@@ -379,6 +486,8 @@ export interface BoundedOptions {
   readonly timers?: Timers;
   /** The clock latency is measured by. */
   readonly now?: () => Date;
+  /** The source of the marks data is put between: 32 hexadecimal characters each time. For tests. */
+  readonly mark?: () => string;
 }
 
 export class LlmClient {
@@ -387,6 +496,7 @@ export class LlmClient {
   readonly #record: TraceRecorder;
   readonly #prices: ModelPrices;
   readonly #now: () => Date;
+  readonly #mark: () => string;
 
   /**
    * One attempt, bounded in time, its answer checked against the
@@ -407,6 +517,7 @@ export class LlmClient {
     this.#record = options.record;
     this.#prices = pricesOf(options.prices);
     this.#now = options.now ?? (() => new Date());
+    this.#mark = options.mark ?? (() => randomBytes(16).toString("hex"));
     /** Stores a trace, within its own time limit. */
     const store = (record: TraceRecord): Promise<void> =>
       within<void, void>(
@@ -420,7 +531,10 @@ export class LlmClient {
     this.generate = async (request, place) => {
       let fault: Error | undefined;
       let prompts: PromptIdentity[] = [];
+      let system = "";
+      let tools: ToolOffer[] = [];
       let timeoutMs = 0;
+      let maxOutputTokens = 0;
       let offered: { claimKinds: string[]; tools: string[] } = { claimKinds: [], tools: [] };
       try {
         fault = requestFault(request);
@@ -429,9 +543,14 @@ export class LlmClient {
           // what the caller does to its request while the call waits changes
           // nothing of how the answer is checked.
           timeoutMs = request.timeoutMs;
+          system = request.system;
+          // A copy all the way down: a schema the caller changes during the
+          // call is not the one that was sent.
+          tools = structuredClone([...request.tools]) as ToolOffer[];
+          maxOutputTokens = request.maxOutputTokens;
           offered = {
             claimKinds: [...request.claimKinds],
-            tools: request.tools.map((tool) => tool.name),
+            tools: tools.map((tool) => tool.name),
           };
           prompts = [...request.prompts].map(({ name, version }) => ({ name, version }));
         }
@@ -462,6 +581,32 @@ export class LlmClient {
           "a call is made for a tenant, a session and a turn, each a UUID, and the time the turn began",
         );
       }
+      // Built before the clock is read and the adapter called: a request
+      // that cannot be marked is refused, and nothing is paid for.
+      // The copies are what is sent, so the copies are what is checked.
+      if (
+        typeof system !== "string" ||
+        !whole(maxOutputTokens, MODEL_OUTPUT_TOKENS_CEILING) ||
+        !offered.claimKinds.every((kind) => typeof kind === "string") ||
+        !tools.every(
+          (tool) =>
+            typeof tool?.name === "string" &&
+            typeof tool.description === "string" &&
+            plainData(tool.argumentsSchema) &&
+            typeof tool.argumentsSchema === "object" &&
+            tool.argumentsSchema !== null &&
+            !Array.isArray(tool.argumentsSchema),
+        )
+      ) {
+        throw new TypeError(
+          "a request's limits are whole numbers, its claim kinds texts, and its tools plain data",
+        );
+      }
+      const sent = markedCopy(
+        { messages: request.messages, maxOutputTokens, timeoutMs },
+        { system, prompts, tools, claimKinds: offered.claimKinds },
+        this.#mark,
+      );
       const startedAt = storable(this.#now());
       if (startedAt === undefined) {
         // Found before the call: a trace with no time could not be stored.
@@ -473,7 +618,7 @@ export class LlmClient {
         result = await within<AdapterAnswer, LlmResult>(
           this.#timers,
           timeoutMs,
-          (signal) => this.#adapter.generate(request, signal),
+          (signal) => this.#adapter.generate(sent, signal),
           (answer) => resultOf(answer, offered),
           { kind: "timeout" },
         );

@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 to U5 done; U6 under way)
+## Current milestone: M3 AI core (U1 to U6 done; U7 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -617,6 +617,47 @@ M0 Inception met its exit criteria on 2026-11-16; see
   each time it is read, or a second signal to the api. Fixed: a time and
   a price are read once and copied. **These last fixes are checked by
   the author only.** What is left is #330.
+
+- 2026-11-25 — #329 merged: U6 is done. **M3 U7** (#306, pull request
+  #331): the turn, with the model in place of the echo. The design note
+  (`design/notes/m3-u7-turn.md`) was read by a second agent before any
+  code (`reviews/2026-11-25-m3-u7-design-review.md`): 15 findings, three
+  High (a staff member's message, which can hold a contact's name, could
+  reach the model as the assistant's own words; the assistant's earlier
+  replies were left unmarked though they can repeat a customer's text;
+  the language field took aliases that would mark a session for good on
+  one unverified word). The note was rewritten and **has not been
+  reviewed again**. Built: the turn (the request, the tool loop, the
+  store step's additions); the first prompt, `reply` 1, **which no eval
+  has run on**; the marking of every message's text as data by the
+  client itself; the session's language and the unsupported mark;
+  `tool_calls` (migration 0010), whose arguments and results are now
+  treated as the customer's text; a stand-in for the model that echoes,
+  which production refuses. **Not built, and said in the note:** a reply
+  is sent unchecked until U9; the model's flags are read and dropped
+  until U10 and U11; a failed call only fails the job until U15; an
+  answer the client refuses gets no reply until U9 has a fallback; no
+  disclosure is sent until U8. The supported languages are still the
+  agent's proposal (row 4). Rows 48 and 49 ask about the language mark
+  and about a tool's arguments.
+  A third agent reviewed the code
+  (`reviews/2026-11-25-gate4-u7-turn.md`): 9 findings, none High, three
+  Medium, and 8 of 46 mutants alive. It found no path by which a
+  contact's identifier, another tenant's or session's text, or a staff
+  message reaches the model. The Medium ones: a tool's time limit did
+  not stop a statement already running, so the conversation's row could
+  be held about 9 seconds where the note said 5; the test of the lease's
+  renewal could not tell one renewal from two; a session's history had
+  no index to read through. All three are fixed. What is left is #332.
+  Another agent checked the fixes
+  (`reviews/2026-11-25-gate4-u7-turn-verification.md`) and measured
+  them: a tool that sleeps 3 seconds in the database is stopped in half
+  a second, and the timeout does not leak to the connection's next use.
+  Four Low findings: three more places where a request read twice could
+  differ, fixed; and the sum of a turn's longest time leaves out a
+  tool's wait for the conversation's row, **not fixed**, now said in the
+  note with its worst case. **The last fixes are checked by the author
+  only.**
 
 ## Next
 

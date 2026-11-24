@@ -212,6 +212,11 @@ export async function seedTenant(
       [tenantId, conversationId, `mock-message-${label}`, sessionId],
     );
     await tx.query(
+      `INSERT INTO tool_calls (tenant_id, session_id, turn_id, tool, arguments, result, outcome, ended_at)
+       VALUES ($1, $2, gen_random_uuid(), 'find_times', '{}', '[]', 'done', now())`,
+      [tenantId, sessionId],
+    );
+    await tx.query(
       `INSERT INTO ai_traces (tenant_id, session_id, turn_id, turn_started_at, started_at,
                               latency_ms, prompt_names, prompt_versions, outcome)
        VALUES ($1, $2, gen_random_uuid(), now(), now(), 0, '{reply}', '{1}', 'timeout')`,

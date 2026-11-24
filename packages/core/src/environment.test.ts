@@ -43,6 +43,7 @@ describe("why a program does not start, for a log line that carries no sentence 
     whatsappBaseUrl: "http://127.0.0.1:4010",
     secrets: { PSA_A: "local-only-x", PSA_B: "local-only-y" },
     sharedChannelCredential: true,
+    standInModel: true,
   };
 
   test("each refusal has a short name, given once, in the order of the sentences", () => {
@@ -50,9 +51,10 @@ describe("why a program does not start, for a log line that carries no sentence 
       "development-component",
       "stand-in-channel",
       "placeholder-secret",
+      "stand-in-model",
       "shared-channel-credential",
     ]);
-    expect(productionProblems("production", facts)).toHaveLength(5);
+    expect(productionProblems("production", facts)).toHaveLength(6);
     expect(productionReasons("development", facts)).toEqual([]);
     expect(
       productionReasons("production", { whatsappBaseUrl: "https://graph.facebook.com" }),

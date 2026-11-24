@@ -12,14 +12,12 @@
 // policy still holds (architecture, "Sending a message once").
 
 import type { Channel } from "@polyglot-sales-agent/channel";
-import { echoReply, JOB_MAX_DEFER_MS } from "@polyglot-sales-agent/core";
+import { JOB_MAX_DEFER_MS } from "@polyglot-sales-agent/core";
 import {
-  abandonTurn,
   beginTurn,
   type CallResult,
   claimNextSend,
   type Database,
-  finishTurn,
   type Job,
   type JobHandler,
   type MessageToSend,
@@ -27,6 +25,7 @@ import {
   recordSend,
   SEND_MESSAGES_JOB,
 } from "@polyglot-sales-agent/db";
+import { runTurn, type TurnModel } from "./turn.ts";
 
 /** How long to wait for a conversation another worker holds. */
 export const BUSY_WAIT_MS = 1_000;
@@ -56,6 +55,8 @@ export interface HandlerOptions {
    * are not built.
    */
   readonly accessToken: string;
+  /** The model, the prompt and the packs a turn answers with. */
+  readonly model: TurnModel;
   readonly report?: SendReport;
   /** For tests: the time, in place of the database's clock. */
   readonly clock?: () => Date;
@@ -115,32 +116,28 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
         options.report?.("turn-skipped", turn.reason);
         return undefined;
       }
-      // The customer's text is data: it is echoed, never acted on.
-      const reply = echoReply(
-        turn.messages.map((message) => (message.kind === "text" ? message.body : null)),
+      // The customer's text is data: it is given to the model as data, never acted on.
+      const outcome = await runTurn(
+        options.app,
+        options.model,
+        { tenantId, conversationId, ...turn },
+        options.clock,
       );
-      try {
-        // "newer-message": the customer wrote again meanwhile. That message
-        // queued a job of its own, which answers everything together.
-        const end = await finishTurn(
-          options.app,
-          tenantId,
-          conversationId,
-          turn,
-          turn.messages.map((message) => message.id),
-          reply,
-          options.clock?.(),
-        );
-        if (end === "session-over") {
-          // The session's 24 hours passed while the reply was being made.
-          options.report?.("turn-skipped", end);
-        }
+      if (outcome.kind === "not-answering" || outcome.kind === "lost-lease") {
+        options.report?.("turn-skipped", outcome.kind);
         return undefined;
-      } catch (error) {
-        // Nothing was stored. Free the conversation, so that the retry need not wait for the lease to run out.
-        await abandonTurn(options.app, tenantId, conversationId, turn.token).catch(() => undefined);
-        throw error;
       }
+      if (outcome.kind === "no-reply" && outcome.code !== "no-text") {
+        // The customer gets nothing: a fallback to send is a later unit's.
+        options.report?.("turn-skipped", outcome.code);
+      }
+      if (outcome.end === "session-over") {
+        // The session's 24 hours passed while the reply was being made.
+        // "newer-message" needs no line: the customer wrote again, and that
+        // message queued a job of its own, which answers everything together.
+        options.report?.("turn-skipped", outcome.end);
+      }
+      return undefined;
     },
 
     async [SEND_MESSAGES_JOB](job) {

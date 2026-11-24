@@ -53,6 +53,8 @@ export interface DeploymentFacts {
   readonly secrets?: Readonly<Record<string, string>>;
   /** True while the process sends with one channel credential for every tenant (NFR-S5 not built). */
   readonly sharedChannelCredential?: boolean;
+  /** The model is a stand-in that calls nothing: for development and tests only. */
+  readonly standInModel?: boolean;
 }
 
 /**
@@ -69,6 +71,7 @@ export const PRODUCTION_REASONS = [
   "stand-in-channel",
   "placeholder-secret",
   "shared-channel-credential",
+  "stand-in-model",
 ] as const;
 export type ProductionReason = (typeof PRODUCTION_REASONS)[number];
 
@@ -113,6 +116,12 @@ function refusals(
         text: `${name} holds a placeholder from the example file`,
       });
     }
+  }
+  if (facts.standInModel === true) {
+    problems.push({
+      reason: "stand-in-model",
+      text: "PSA_MODEL_ADAPTER names a stand-in for the model, which must never answer a customer",
+    });
   }
   if (facts.sharedChannelCredential === true) {
     problems.push({

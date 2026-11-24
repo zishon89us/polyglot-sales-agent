@@ -5,8 +5,9 @@ loaded by name and version (`AGENTS.md`, section 6). No prompt text is
 written in application code. The loader is `packages/ai/src/prompts.ts`;
 its rules are in `docs/design/notes/m3-u4-llm-client.md`, section 6.
 
-There is no prompt yet. The first, the reply prompt, is written with the
-turn that uses it (M3 unit U7).
+There is one prompt, `reply`: what the assistant is told before it answers
+a customer. Its first version was written with the turn that uses it (M3
+unit U7). **No eval has run on it**; its `meta.yaml` says so.
 
 ## Layout
 

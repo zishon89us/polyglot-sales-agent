@@ -24,8 +24,14 @@ import {
   migrateDown,
   migrateUp,
   recordSend,
+  renewTurn,
+  runTool,
+  sessionHistory,
   storeInbound,
+  type ToolReturn,
   type TurnStart,
+  type Tx,
+  withTenant,
 } from "../src/index.ts";
 import { adopt, createTestDatabase, MIGRATIONS_DIRECTORY, type TestDatabase } from "./harness.ts";
 
@@ -1090,4 +1096,638 @@ describe("migration 0006 on a database that has conversations (design note, sect
       await scratch.drop();
     }
   }, 30_000);
+});
+
+describe("what a turn with the model records (M3 unit U7; design note m3-u7-turn, sections 4, 6 and 7)", () => {
+  const TURN = "5a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+  const HOUR_MS = 10 * 60_000;
+  const made = (language: string) => ({ turnId: TURN, language });
+  async function reply(text: string, ms: number, language: string) {
+    const turn = await begin(ms);
+    return finishTurn(
+      app,
+      tenant,
+      await conversation(),
+      turn,
+      turn.messages.map((message) => message.id),
+      text,
+      at(ms),
+      made(language),
+    );
+  }
+  const session = async () =>
+    (
+      await rows<{ language: string | null; unsupported: boolean }>(
+        "SELECT language, unsupported_language AS unsupported FROM sessions ORDER BY started_at",
+      )
+    )[0];
+  const sessionId = (): Promise<string> => one<string>("SELECT id AS value FROM sessions");
+
+  test("G1: a supported language becomes the session's; the reply's row has the turn and the language", async () => {
+    await arrives("hello", 0);
+    expect(await reply("Hello.", HOUR_MS, "en")).toBe("stored");
+    expect(await session()).toEqual({ language: "en", unsupported: false });
+    expect(
+      await rows("SELECT turn_id, language FROM messages WHERE direction = 'outbound'"),
+    ).toEqual([{ turn_id: TURN, language: "en" }]);
+  });
+
+  test("G2 and G4: a language that is not supported marks the session, and the mark stays when a supported one follows", async () => {
+    await arrives("hallo", 0);
+    await reply("Hallo.", HOUR_MS, "de");
+    expect(await session()).toEqual({ language: "de", unsupported: true });
+    await arrives("hello", 2 * HOUR_MS);
+    await reply("Hello.", 3 * HOUR_MS, "en");
+    expect(await session()).toEqual({ language: "en", unsupported: true });
+    expect(
+      await rows("SELECT language FROM messages WHERE direction = 'outbound' ORDER BY created_at"),
+    ).toEqual([{ language: "de" }, { language: "en" }]);
+  });
+
+  test("G3: when the model could not tell, the session keeps what it had, and the reply records that", async () => {
+    await arrives("hello", 0);
+    await reply("Hello.", HOUR_MS, "ar");
+    await arrives("\u{1F600}", 2 * HOUR_MS);
+    await reply("?", 3 * HOUR_MS, "und");
+    expect(await session()).toEqual({ language: "ar", unsupported: false });
+    expect(
+      await rows("SELECT language FROM messages WHERE direction = 'outbound' ORDER BY created_at"),
+    ).toEqual([{ language: "ar" }, { language: "und" }]);
+    // And a session that has only ever had `und` has no language.
+    await administrator.query("TRUNCATE messages, conversations, contacts, jobs CASCADE");
+    await arrives("\u{1F600}", 0);
+    await reply("?", HOUR_MS, "und");
+    expect(await session()).toEqual({ language: null, unsupported: false });
+  });
+
+  test.each(["ar", "en", "ur", "hi", "bn", "tl"])("%s is supported", async (language) => {
+    await arrives("x", 0);
+    await reply("y", HOUR_MS, language);
+    expect(await session()).toEqual({ language, unsupported: false });
+  });
+
+  test("G5: a reply that is not stored records nothing of a language", async () => {
+    await arrives("hallo", 0);
+    const turn = await begin(HOUR_MS);
+    await arrives("noch etwas", HOUR_MS + 1);
+    expect(
+      await finishTurn(
+        app,
+        tenant,
+        await conversation(),
+        turn,
+        turn.messages.map((m) => m.id),
+        "Hallo.",
+        at(HOUR_MS + 2),
+        made("de"),
+      ),
+    ).toBe("newer-message");
+    expect(await session()).toEqual({ language: null, unsupported: false });
+    // And a turn that ends with no reply has nothing to record either.
+    const again = await begin(2 * HOUR_MS);
+    await finishTurn(
+      app,
+      tenant,
+      await conversation(),
+      again,
+      again.messages.map((m) => m.id),
+      undefined,
+      at(2 * HOUR_MS),
+      made("de"),
+    );
+    expect(await session()).toEqual({ language: null, unsupported: false });
+  });
+
+  test("a reply stored the old way, with no turn, has neither a turn nor a language", async () => {
+    await arrives("hello", 0);
+    await answer("Hello.", HOUR_MS);
+    expect(
+      await rows("SELECT turn_id, language FROM messages WHERE direction = 'outbound'"),
+    ).toEqual([{ turn_id: null, language: null }]);
+  });
+
+  test.each([
+    ["a language of three letters", "eng"],
+    ["a language in capitals", "EN"],
+    ["an empty language", ""],
+  ])("the table refuses %s, and nothing of the turn is stored", async (_name, language) => {
+    await arrives("hello", 0);
+    await expect(reply("Hello.", HOUR_MS, language)).rejects.toMatchObject({ code: "23514" });
+    expect(await replies()).toEqual([]);
+    expect(await unhandled()).toBe(1);
+  });
+
+  test("a turn and a language belong to an assistant's reply only, and together", async () => {
+    await arrives("hello", 0);
+    await answer("Hello.", HOUR_MS);
+    for (const change of [
+      `UPDATE messages SET turn_id = '${TURN}' WHERE direction = 'outbound'`,
+      "UPDATE messages SET language = 'en' WHERE direction = 'outbound'",
+      `UPDATE messages SET turn_id = '${TURN}', language = 'en' WHERE direction = 'inbound'`,
+      `UPDATE messages SET turn_id = '${TURN}', language = 'en', class = 'staff-message' WHERE direction = 'outbound'`,
+      "UPDATE sessions SET language = 'und'",
+      "UPDATE sessions SET language = 'eng'",
+    ]) {
+      await expect(administrator.query(change), change).rejects.toMatchObject({ code: "23514" });
+    }
+  });
+
+  describe("the session so far (section 4)", () => {
+    const history = async () => sessionHistory(app, tenant, await sessionId());
+    /** Puts an outbound row of a class and status straight in, as a later unit would. */
+    async function outbound(
+      body: string | null,
+      cls: string,
+      status: string,
+      ms: number,
+      error: string | null = null,
+    ) {
+      await administrator.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, error_code, created_at)
+         SELECT tenant_id, conversation_id, id, 'outbound', $1, 'text', $2, $3, $4, $5 FROM sessions`,
+        [cls, body, status, error, at(ms)],
+      );
+    }
+
+    test("H1, H2: the customer's texts a turn dealt with and the replies the channel accepted, oldest first", async () => {
+      await arrives("first", 0);
+      await answer("Echo: first", HOUR_MS);
+      await accepted(HOUR_MS + 1);
+      await arrives("second", 2 * HOUR_MS);
+      await answer("Echo: second", 3 * HOUR_MS);
+      await accepted(3 * HOUR_MS + 1);
+      await arrives("not dealt with yet", 4 * HOUR_MS);
+      expect(await history()).toEqual([
+        { role: "customer", text: "first" },
+        { role: "assistant", text: "Echo: first" },
+        { role: "customer", text: "second" },
+        { role: "assistant", text: "Echo: second" },
+      ]);
+    });
+
+    test("H2, H3: by status: sent, delivered, read and an unconfirmed failure are in; waiting, dropped and failed are not", async () => {
+      await arrives("hello", 0);
+      await answer("still waiting", HOUR_MS);
+      const statuses: [string, string | null][] = [
+        ["sent", null],
+        ["delivered", null],
+        ["read", null],
+        ["failed", "unconfirmed"],
+        ["failed", "expired"],
+        ["failed", "rate-limited"],
+        ["discarded", null],
+        ["held", null],
+        ["withheld", null],
+      ];
+      let ms = 2 * HOUR_MS;
+      for (const [status, error] of statuses) {
+        await outbound(`${status} ${error ?? ""}`.trim(), "assistant-reply", status, ms, error);
+        ms += 1;
+      }
+      expect((await history()).map((message) => message.text)).toEqual([
+        "hello",
+        "sent",
+        "delivered",
+        "read",
+        "failed unconfirmed",
+      ]);
+    });
+
+    test("H2a: a staff member's message, a fixed text, a notice and a message the business began are never in it", async () => {
+      await arrives("hello", 0);
+      await answer("Hello.", HOUR_MS);
+      await accepted(HOUR_MS + 1);
+      let ms = 2 * HOUR_MS;
+      for (const cls of ["staff-message", "system-reply", "service-notice", "business-initiated"]) {
+        await outbound(`Dear Test Customer, from ${cls}`, cls, "delivered", ms);
+        ms += 1;
+      }
+      const found = await history();
+      expect(found).toEqual([
+        { role: "customer", text: "hello" },
+        { role: "assistant", text: "Hello." },
+      ]);
+      expect(JSON.stringify(found)).not.toContain("Test Customer");
+    });
+
+    test("H2b, H4: a row with no text, a picture and a tap are not in it", async () => {
+      await arrives("hello", 0);
+      await arrives(null, 1);
+      await storeInbound(
+        app,
+        tenant,
+        NUMBER,
+        [
+          {
+            channelMessageId: "wamid.SESSIONTAP",
+            phone: "+15550161",
+            userId: "US.10000000000000000061",
+            kind: "button",
+            body: null,
+            buttonPayload: "core.stop",
+            sentAt: at(2),
+          },
+        ],
+        [],
+        at(2),
+      );
+      await answer("Hello.", HOUR_MS);
+      await accepted(HOUR_MS + 1);
+      await outbound(null, "assistant-reply", "delivered", 2 * HOUR_MS);
+      await outbound("", "assistant-reply", "delivered", 2 * HOUR_MS + 1);
+      expect(await history()).toEqual([
+        { role: "customer", text: "hello" },
+        { role: "assistant", text: "Hello." },
+      ]);
+    });
+
+    test("H5: the newest thirty, and of those the newest that fit 12,000 characters, still oldest first", async () => {
+      await arrives("m0", 0);
+      await answer("r0", HOUR_MS);
+      for (let n = 1; n <= 34; n += 1) {
+        await outbound(`r${n}`, "assistant-reply", "sent", HOUR_MS + 1_000 + n);
+      }
+      const thirty = await history();
+      expect(thirty).toHaveLength(30);
+      expect(thirty[0]?.text).toBe("r5");
+      expect(thirty.at(-1)?.text).toBe("r34");
+      await outbound("x".repeat(6_000), "assistant-reply", "sent", 2 * HOUR_MS);
+      await outbound("y".repeat(5_990), "assistant-reply", "sent", 2 * HOUR_MS + 1);
+      await outbound("zzzzz", "assistant-reply", "sent", 2 * HOUR_MS + 2);
+      // 5 + 5,990 + 6,000 is 11,995; one more of 3 makes 11,998 and fits; the next would make 12,001.
+      const bounded = await history();
+      expect(bounded.map((message) => message.text.length)).toEqual([3, 6_000, 5_990, 5]);
+      await outbound("w".repeat(12_001), "assistant-reply", "sent", 3 * HOUR_MS);
+      expect(await history()).toEqual([]);
+    });
+
+    test("H5: the first message that does not fit ends the history: no older one is put beside a newer, with a hole between", async () => {
+      await arrives("m0", 0);
+      await answer("r0", HOUR_MS);
+      await outbound("old and short", "assistant-reply", "sent", HOUR_MS + 1_000);
+      await outbound("x".repeat(11_990), "assistant-reply", "sent", HOUR_MS + 2_000);
+      await outbound("newest", "assistant-reply", "sent", HOUR_MS + 3_000);
+      // "newest" fits; the long one would make 11,996 and fits; "old and short" would make 12,009.
+      expect((await history()).map((message) => message.text.length)).toEqual([11_990, 6]);
+      await outbound("y".repeat(11_995), "assistant-reply", "sent", HOUR_MS + 4_000);
+      // Now the newest alone fits and the next does not: the short ones before it are not skipped to.
+      expect((await history()).map((message) => message.text.length)).toEqual([11_995]);
+    });
+
+    test("H4: a row that is not a text is not in it even if it holds words", async () => {
+      await arrives("hello", 0);
+      await answer("Hello.", HOUR_MS);
+      await accepted(HOUR_MS + 1);
+      await administrator.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, created_at)
+         SELECT tenant_id, conversation_id, id, 'outbound', 'assistant-reply', 'template', 'A template with words', 'delivered', $1 FROM sessions`,
+        [at(2 * HOUR_MS)],
+      );
+      expect((await history()).map((message) => message.text)).toEqual(["hello", "Hello."]);
+    });
+
+    test("the history is read through an index on the session, not by reading every message", async () => {
+      const indexes = await rows<{ indexdef: string }>(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = 'messages' AND indexname = 'messages_session'",
+      );
+      expect(indexes).toEqual([
+        {
+          indexdef:
+            "CREATE INDEX messages_session ON public.messages USING btree (tenant_id, session_id, created_at, id)",
+        },
+      ]);
+    });
+
+    test("H6: a message of an earlier session of the same conversation is not in it, and another tenant sees nothing", async () => {
+      await arrives("yesterday", 0);
+      await answer("Echo: yesterday", HOUR_MS);
+      await accepted(HOUR_MS + 1);
+      await arrives("today", 25 * HOUR);
+      const newest = await one<string>(
+        "SELECT id AS value FROM sessions ORDER BY started_at DESC LIMIT 1",
+      );
+      expect(await sessionHistory(app, tenant, newest)).toEqual([]);
+      const other = await administrator.query<{ id: string }>(
+        `INSERT INTO tenants (name, pack, time_zone, default_language)
+         VALUES ('Another', 'faq-only', 'UTC', 'en') RETURNING id`,
+      );
+      const first = await one<string>(
+        "SELECT id AS value FROM sessions ORDER BY started_at LIMIT 1",
+      );
+      expect(await sessionHistory(app, other.rows[0]?.id as string, first)).toEqual([]);
+      await administrator.query("DELETE FROM tenants WHERE id = $1", [other.rows[0]?.id]);
+    });
+  });
+
+  describe("running a tool (section 6)", () => {
+    const calls = () =>
+      rows<{ tool: string; arguments: unknown; result: unknown; outcome: string; turn_id: string }>(
+        "SELECT tool, arguments, result, outcome, turn_id FROM tool_calls ORDER BY created_at, id",
+      );
+    async function run(
+      turn: Turn,
+      tool: (tx: Tx) => Promise<ToolReturn>,
+      extra: { token?: string; timeoutMs?: number; args?: unknown } = {},
+    ) {
+      return runTool(
+        app,
+        tenant,
+        {
+          conversationId: await conversation(),
+          token: extra.token ?? turn.token,
+          sessionId: turn.sessionId,
+          turnId: TURN,
+          tool: "find_times",
+          arguments: "args" in extra ? extra.args : { day: "Thursday, please" },
+        },
+        tool,
+        extra.timeoutMs,
+      );
+    }
+
+    test("L2: the tool runs in a transaction that holds the lease, and its row is stored with what it was asked and what it answered", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const ran = await run(turn, async (tx) => {
+        const seen = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM messages");
+        return { outcome: "done", result: { messages: seen.rows[0]?.n, times: ["10:00"] } };
+      });
+      expect(ran).toEqual({
+        kind: "ran",
+        outcome: "done",
+        result: { messages: 1, times: ["10:00"] },
+      });
+      expect(await calls()).toEqual([
+        {
+          tool: "find_times",
+          arguments: { day: "Thursday, please" },
+          result: { messages: 1, times: ["10:00"] },
+          outcome: "done",
+          turn_id: TURN,
+        },
+      ]);
+    });
+
+    test("L2a: a tool that does not take the arguments: refused, with no result", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      expect(await run(turn, async () => ({ outcome: "refused" }))).toEqual({
+        kind: "ran",
+        outcome: "refused",
+        result: null,
+      });
+      expect(await calls()).toMatchObject([{ outcome: "refused", result: null }]);
+    });
+
+    test.each([
+      [
+        "throws",
+        async () => {
+          throw new Error("Do you have a slot on Thursday? +15550142");
+        },
+      ],
+      [
+        "returns too much",
+        async () => ({ outcome: "done", result: "x".repeat(4_000) }) as ToolReturn,
+      ],
+      [
+        "returns what is not plain data",
+        async () => ({ outcome: "done", result: 10n }) as ToolReturn,
+      ],
+      [
+        "returns nothing that JSON can hold",
+        async () => ({ outcome: "done", result: undefined }) as ToolReturn,
+      ],
+      [
+        "returns an outcome that is not one",
+        async () => ({ outcome: "fine" }) as unknown as ToolReturn,
+      ],
+      ["returns nothing", async () => undefined as unknown as ToolReturn],
+    ] as [string, (tx: Tx) => Promise<ToolReturn>][])(
+      "L3: a tool that %s: everything it wrote is undone, and its row says failed and nothing else",
+      async (_name, tool) => {
+        await arrives("hello", 0);
+        const turn = await begin(HOUR_MS);
+        const ran = await run(turn, async (tx) => {
+          await tx.query("UPDATE sessions SET reply_discards = 2");
+          return tool(tx);
+        });
+        expect(ran).toEqual({ kind: "ran", outcome: "failed", result: null });
+        expect(await calls()).toMatchObject([{ outcome: "failed", result: null }]);
+        expect((await sessions())[0]?.discards).toBe(0);
+        expect(JSON.stringify(await rows("SELECT * FROM tool_calls"))).not.toMatch(
+          /slot on Thursday\?|5550142/,
+        );
+      },
+    );
+
+    test("L3: the largest result that is given back is 4,000 characters as JSON", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const ran = await run(turn, async () => ({ outcome: "done", result: "x".repeat(3_998) }));
+      expect(ran).toMatchObject({ outcome: "done" });
+    });
+
+    test("L3: a tool that takes too long fails, what it wrote is undone, and it can ask nothing more of the connection", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      let late: unknown = "not asked";
+      let release = (): void => {};
+      const ran = await run(
+        turn,
+        async (tx) => {
+          await tx.query("UPDATE sessions SET reply_discards = 2");
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          late = await tx
+            .query("UPDATE sessions SET reply_discards = 2")
+            .catch((error: Error) => error.message);
+          return { outcome: "done", result: 1 };
+        },
+        { timeoutMs: 30 },
+      );
+      expect(ran).toEqual({ kind: "ran", outcome: "failed", result: null });
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(late).toBe("the tool's transaction is over");
+      expect((await sessions())[0]?.discards).toBe(0);
+      expect(await calls()).toMatchObject([{ outcome: "failed" }]);
+    });
+
+    test("L3: a statement of a tool that is still running at the limit is stopped by the database, so the conversation's row is not held", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const started = Date.now();
+      const ran = await run(
+        turn,
+        async (tx) => {
+          await tx.query("SELECT pg_sleep(3)");
+          return { outcome: "done", result: 1 };
+        },
+        { timeoutMs: 100 },
+      );
+      expect(ran).toEqual({ kind: "ran", outcome: "failed", result: null });
+      // 100 ms for the tool and 100 ms for its statement, not the 3 seconds it asked for.
+      expect(Date.now() - started).toBeLessThan(1_500);
+    });
+
+    test("L3: when the lease is lost between a tool's failure and the record of it, no row is written", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      let stolen: Promise<unknown> = Promise.resolve();
+      const ran = await run(turn, async () => {
+        // Another worker's claim waits for the row this transaction holds, and gets it when the
+        // transaction is undone: before the second transaction can check the lease.
+        stolen = administrator.query("UPDATE conversations SET lease_token = gen_random_uuid()");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        throw new Error("fails");
+      });
+      await stolen;
+      expect(ran).toEqual({ kind: "lost-lease" });
+      expect(await calls()).toEqual([]);
+    });
+
+    test.each([
+      ["a text", { q: "a\u0000b" }],
+      ["a key", { "a\u0000b": 1 }],
+    ])(
+      "arguments with U+0000 in %s cannot be stored: the row is stored without them, and nothing throws",
+      async (_name, args) => {
+        await arrives("hello", 0);
+        const turn = await begin(HOUR_MS);
+        expect(
+          await run(turn, async () => ({ outcome: "done", result: 1 }), { args }),
+        ).toMatchObject({ outcome: "done" });
+        expect(
+          await run(
+            turn,
+            async () => {
+              throw new Error("fails");
+            },
+            { args },
+          ),
+        ).toMatchObject({ outcome: "failed" });
+        expect(await calls()).toMatchObject([
+          { arguments: null, outcome: "done" },
+          { arguments: null, outcome: "failed" },
+        ]);
+      },
+    );
+
+    test("arguments that only look as if they held U+0000 are stored as they are", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const args = { q: "a\\u0000b", path: "C:\\u0000" };
+      await run(turn, async () => ({ outcome: "done", result: 1 }), { args });
+      expect(await calls()).toMatchObject([{ arguments: args, outcome: "done" }]);
+    });
+
+    test("at the limits a deployment has, a statement that runs on is stopped within half a second", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const started = Date.now();
+      const ran = await run(turn, async (tx) => {
+        await tx.query("SELECT pg_sleep(3)");
+        return { outcome: "done", result: 1 };
+      });
+      expect(ran).toEqual({ kind: "ran", outcome: "failed", result: null });
+      expect(Date.now() - started).toBeLessThan(1_500);
+    });
+
+    test("L4: when the conversation is another worker's, the tool is not run and nothing is stored", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      let ran = false;
+      const result = await run(
+        turn,
+        async () => {
+          ran = true;
+          return { outcome: "done", result: 1 };
+        },
+        { token: "00000000-0000-4000-8000-000000000000" },
+      );
+      expect(result).toEqual({ kind: "lost-lease" });
+      expect(ran).toBe(false);
+      expect(await calls()).toEqual([]);
+    });
+
+    test("L4: a tool that fails after the lease was lost leaves no row either", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const result = await run(turn, async () => {
+        await administrator.query("SELECT 1");
+        // Another worker takes the conversation: only possible once this transaction lets go, so it is done by the tool's own failure path below.
+        throw new Error("fails");
+      });
+      expect(result).toMatchObject({ outcome: "failed" });
+      await administrator.query("UPDATE conversations SET lease_token = gen_random_uuid()");
+      expect(
+        await run(turn, async () => {
+          throw new Error("fails");
+        }),
+      ).toEqual({ kind: "lost-lease" });
+      expect(await calls()).toHaveLength(1);
+    });
+
+    test("arguments that are missing are stored as null, and a tool's name the table does not take is a failure of the caller", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      await run(turn, async () => ({ outcome: "done", result: null }), { args: undefined });
+      expect(await calls()).toMatchObject([{ arguments: null, result: null, outcome: "done" }]);
+    });
+
+    test("the application cannot change or remove a tool's row", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      await run(turn, async () => ({ outcome: "done", result: 1 }));
+      for (const statement of [
+        "UPDATE tool_calls SET arguments = NULL",
+        "DELETE FROM tool_calls",
+      ]) {
+        await expect(withTenant(pool, tenant, (tx) => tx.query(statement))).rejects.toMatchObject({
+          code: "42501",
+        });
+      }
+    });
+
+    test("the table refuses a result on a call that did not end done, and a name that is a sentence", async () => {
+      await arrives("hello", 0);
+      await begin(HOUR_MS);
+      const insert = (tool: string, outcome: string, result: string | null) =>
+        administrator.query(
+          `INSERT INTO tool_calls (tenant_id, session_id, turn_id, tool, result, outcome, ended_at)
+           SELECT tenant_id, id, gen_random_uuid(), $1, $2::jsonb, $3, now() FROM sessions`,
+          [tool, result, outcome],
+        );
+      await insert("find_times", "done", "1");
+      await expect(insert("find_times", "failed", "1")).rejects.toMatchObject({ code: "23514" });
+      await expect(insert("find_times", "refused", "1")).rejects.toMatchObject({ code: "23514" });
+      await expect(insert("find_times", "fine", null)).rejects.toMatchObject({ code: "23514" });
+      await expect(insert("Do you have a slot?", "done", null)).rejects.toMatchObject({
+        code: "23514",
+      });
+    });
+  });
+
+  test("renewTurn extends the lease of the worker that holds it, and says no to any other", async () => {
+    await arrives("hello", 0);
+    const turn = await begin(HOUR_MS);
+    const expires = () => one<string>("SELECT lease_expires_at::text AS value FROM conversations");
+    const before = await expires();
+    expect(
+      await renewTurn(app, tenant, await conversation(), turn.token, at(HOUR_MS + 60_000)),
+    ).toBe(true);
+    expect(Date.parse(await expires()) - Date.parse(before)).toBe(60_000);
+    expect(
+      await renewTurn(
+        app,
+        tenant,
+        await conversation(),
+        "00000000-0000-4000-8000-000000000000",
+        at(2 * HOUR_MS),
+      ),
+    ).toBe(false);
+    expect(Date.parse(await expires()) - Date.parse(before)).toBe(60_000);
+  });
 });

@@ -82,6 +82,8 @@ beforeAll(async () => {
     PSA_WHATSAPP_BASE_URL: mockUrl,
     PSA_WHATSAPP_API_VERSION: "v27.0",
     PSA_WHATSAPP_ACCESS_TOKEN: "local-only-mock-token",
+    PSA_MODEL_ADAPTER: "stand-in-echo",
+    PSA_PROMPT_CANARY: "localonlycanary0000000000000000",
     PSA_MOCK_ACCESS_TOKEN: "local-only-mock-token",
     PSA_MOCK_PORT: String(mockPort),
     PSA_MOCK_WEBHOOK_URL: `http://127.0.0.1:${apiPort}/webhooks/whatsapp`,
@@ -108,6 +110,15 @@ beforeAll(async () => {
     "whatsapp",
     "--number-id",
     NUMBER,
+  );
+  // A tenant answers only once its profile is loaded (order of checks, step 8).
+  await ops(
+    "profile",
+    "load",
+    "--tenant",
+    tenant,
+    "--file",
+    "packages/core/fixtures/profile.salon.en.json",
   );
   start("mock", "apps/mock-whatsapp/src/main.ts");
   start("api", "apps/api/src/main.ts");
@@ -293,6 +304,8 @@ describe("in production the programs themselves refuse (issue #165)", () => {
       code: "not-for-production",
     });
     expect(JSON.parse(worker.text).names).toContain("shared-channel-credential");
+    // The stand-in for the model is refused on its own account.
+    expect(JSON.parse(worker.text).names).toContain("stand-in-model");
     expect(`${api.text}${worker.text}`).not.toMatch(/local-only|psa_app:|127\.0\.0\.1/);
   });
 

@@ -100,3 +100,22 @@ export type CoreClaimKind = (typeof CORE_CLAIM_KINDS)[number];
  */
 export const CORE_BUTTONS = ["stop", "start", "person"] as const;
 export type CoreButton = (typeof CORE_BUTTONS)[number];
+
+/**
+ * The language a model says a customer wrote in: two small letters (ISO
+ * 639-1), or `und` when it cannot tell (M3 unit U7; design note
+ * docs/design/notes/m3-u7-turn.md, section 7).
+ */
+export const LANGUAGE_CODE = /^[a-z]{2}$/;
+export const LANGUAGE_UNKNOWN = "und";
+
+/**
+ * The supported languages at run time: Arabic, English, Urdu, Hindi,
+ * Bengali, Tagalog. The agent's proposal; decisions row 4 is unanswered.
+ */
+export const SUPPORTED_LANGUAGES = ["ar", "en", "ur", "hi", "bn", "tl"] as const;
+
+/** Whether a reported language is one of the supported ones. */
+export function languageSupported(code: string): boolean {
+  return (SUPPORTED_LANGUAGES as readonly string[]).includes(code);
+}

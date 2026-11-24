@@ -10,6 +10,8 @@
 import {
   CLAIM_TEXT_MAX,
   CLAIMS_MAX,
+  LANGUAGE_CODE,
+  LANGUAGE_UNKNOWN,
   MODEL_FLAGS,
   type ModelFlag,
   TOOL_ARGUMENTS_DEPTH_MAX,
@@ -201,7 +203,14 @@ function read(
 
   // Shape: the four parts, each of its type, no other key at any level, no text that cannot be kept.
   const top = fieldsOf(value);
-  if (top === undefined || !exactly(top, ["reply", "claims", "flags", "toolCalls"])) {
+  if (top === undefined || !exactly(top, ["reply", "claims", "flags", "toolCalls", "language"])) {
+    return refused("shape");
+  }
+  const language = top["language"];
+  if (
+    typeof language !== "string" ||
+    !(LANGUAGE_CODE.test(language) || language === LANGUAGE_UNKNOWN)
+  ) {
     return refused("shape");
   }
   const reply = top["reply"];
@@ -328,6 +337,7 @@ function read(
       claims: Object.freeze(claims),
       flags: Object.freeze(set),
       toolCalls: Object.freeze(asked),
+      language,
     }),
   };
 }

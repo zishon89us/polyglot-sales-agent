@@ -12,13 +12,19 @@ export interface PromptIdentity {
 
 /**
  * One message of a request. `data` is what code gives the model: the
- * business's profile, a note of what was left out. Everything but
- * `assistant` is information for the model, never instruction.
+ * business's profile, facts of the turn. **No message is instruction;**
+ * only the system text is. An assistant's earlier reply can repeat a
+ * customer's words, so it is information like the rest. The client marks
+ * every text before an adapter sees it (design note M3 U7, section 5).
+ *
+ * `tool-calls` is what an earlier answer of the same turn asked for; the
+ * `tool-result` messages that follow it answer its calls, by identifier.
  */
 export type LlmMessage =
   | { readonly role: "data"; readonly text: string }
   | { readonly role: "customer"; readonly text: string }
   | { readonly role: "assistant"; readonly text: string }
+  | { readonly role: "tool-calls"; readonly toolCalls: readonly ToolCall[] }
   | { readonly role: "tool-result"; readonly toolCallId: string; readonly text: string };
 
 /** A tool as the model is told of it. Its arguments are checked where it is run. */
@@ -76,6 +82,11 @@ export interface LlmOutput {
   readonly claims: readonly Claim[];
   readonly flags: readonly ModelFlag[];
   readonly toolCalls: readonly ToolCall[];
+  /**
+   * The language the customer wrote in, as the model says: two small
+   * letters, or `und`. The model's word, not a fact.
+   */
+  readonly language: string;
 }
 
 export interface TokenUse {

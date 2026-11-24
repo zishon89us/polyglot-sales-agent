@@ -9,7 +9,9 @@
     "@polyglot-sales-agent/channel": "workspace:*",
     "@polyglot-sales-agent/channel-whatsapp": "workspace:*",
     "@polyglot-sales-agent/core": "workspace:*",
-    "@polyglot-sales-agent/db": "workspace:*"
+    "@polyglot-sales-agent/db": "workspace:*",
+    "@polyglot-sales-agent/pack-interface": "workspace:*",
+    "@polyglot-sales-agent/packs-registry": "workspace:*"
   },
   "devDependencies": {
     "@polyglot-sales-agent/channel-mock": "workspace:*",

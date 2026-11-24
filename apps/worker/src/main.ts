@@ -1,5 +1,7 @@
 // Starts the worker: `node --env-file-if-exists=.env apps/worker/src/main.ts`.
 
+import { fileURLToPath } from "node:url";
+import { bounded, type LoadedPrompt, loadPrompt, standInEcho } from "@polyglot-sales-agent/ai";
 import {
   createWhatsAppChannel,
   DEFAULT_SEND_TIMEOUT_MS,
@@ -18,8 +20,11 @@ import {
   databaseReady,
   openDatabase,
 } from "@polyglot-sales-agent/db";
+import { PACKS } from "@polyglot-sales-agent/packs-registry";
 import { readConfig } from "./config.ts";
 import { createHandlers } from "./handlers.ts";
+import { traceRecorder } from "./traces.ts";
+import { REPLY_PROMPT } from "./turn.ts";
 import { jobName, runWorker } from "./worker.ts";
 
 // Each line to standard output, or to standard error for an error.
@@ -58,11 +63,34 @@ try {
   process.once("SIGTERM", () => stop.abort());
   process.once("SIGINT", () => stop.abort());
   log({ level: "info", event: "running" });
+  // The prompts are files beside the code; a worker that cannot load them does not start.
+  const prompts = fileURLToPath(new URL("../../../prompts/", import.meta.url));
+  const fragments: Record<string, LoadedPrompt> = {};
+  for (const pack of Object.values(PACKS)) {
+    if (pack.promptFragment !== undefined) {
+      fragments[pack.name] = loadPrompt(
+        prompts,
+        pack.promptFragment.name,
+        pack.promptFragment.version,
+      );
+    }
+  }
   const handlers = createHandlers({
     app,
     channels: { [whatsapp.name]: whatsapp },
     accessToken: config.whatsappAccessToken,
     report,
+    model: {
+      // The one adapter there is: a stand-in that calls nothing (config refuses it in production).
+      client: bounded(standInEcho(), {
+        record: traceRecorder(app),
+        prices: config.modelPrices,
+      }),
+      prompt: loadPrompt(prompts, REPLY_PROMPT.name, REPLY_PROMPT.version),
+      fragments,
+      canary: config.promptCanary,
+      packs: PACKS,
+    },
   });
   await runWorker({
     cross,

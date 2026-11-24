@@ -248,7 +248,7 @@ null when no worker holds it).
 | `disclosed` | Disclosure has been sent |
 | `guardrail_fallbacks`, `unreadable_batches`, `assistant_replies` | The counters of state machines, section 3 |
 | `awaiting_retry_since`, `provider_fallback_sent_at` | State machines, section 8 |
-| `language`, `unsupported_language` | For US-C3 and metrics |
+| `language`, `unsupported_language` | For US-C3 and metrics. Built in M3 unit U7 (migration 0010; design note `notes/m3-u7-turn.md`, section 7). `language` is two small letters: what the model said the customer wrote in, at the session's latest reply; a reply whose language the model could not tell leaves it as it was. `unsupported_language` becomes true when a reply's language is not one of the supported ones, and is never set back. Both are the model's word, not a fact |
 | `is_inquiry`, `pack_outcome`, `had_handover`, `contained` | Written when the session ends (US-C19). `is_inquiry` is set by the model; the others by code. `pack_outcome` is a short label the pack supplies (for the booking pack: created, changed, cancelled or none); the core stores it without interpreting it |
 
 ### `messages` — tenant-owned
@@ -258,6 +258,7 @@ null when no worker holds it).
 | `conversation_id`, `session_id` | Nothing in the schema ties the session to the same conversation; one function writes both |
 | `answered_by` | For a customer's message: the reply that answered it. Null while not dealt with, and for one dealt with by no reply. It is how a discarded reply's messages are found again |
 | `direction` | `inbound` or `outbound` |
+| `turn_id`, `language` | For an assistant's reply made by a turn with the model (M3 unit U7): the turn, which joins the reply to the traces of the calls behind it, and the language that turn reported (`und` when the model could not tell). Null on every other row. The language is kept on each reply so that a session's mark can be checked and worked out again |
 | `class` | For outbound: one of the five message classes |
 | `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on). The first three are the system's own: a channel's type of one of those names that was not read is stored as `unknown`, and a template's quick reply that could not be read as `quick-reply`. From a customer, `button` is a tap that was read, and has a payload (a constraint; migration 0008) |
 | `channel_sent_at` | For a message from a customer, the time the channel says it was sent. `created_at` is when the row was stored, taken per row, so the messages of one webhook keep their order |
@@ -367,17 +368,29 @@ tenant, key and language.
 
 ### `tool_calls` — tenant-owned
 
-Not built yet: M3 unit U7 builds it, with the tool loop that writes it.
+Built in M3 unit U7 (migration 0010; design note `notes/m3-u7-turn.md`,
+section 6), without `repeat_of`, which comes with the first tool that
+changes anything (M5).
 
-`session_id`, `turn_id`, `tool`, `arguments`, `result`, `result_at`,
-`repeat_of` (nullable). A record of each call; **it has no unique key and
+`session_id`, `turn_id`, `tool`, `arguments`, `result`, `outcome` (`done`,
+`refused`, `failed`), `created_at`, `ended_at` (the design's `result_at`:
+a call that failed has no result). The application may insert and read.
+A record of each call; **it has no unique key and
 does not make calls idempotent** (Gate 2 verification, V1). Idempotency is
 carried by the thing changed: a partial unique index on active bookings for
 create, a conditional update for move, and cancel is idempotent by nature
 (`architecture.md`, "Processing one turn", step 4). Read-only tools are never
 deduplicated. The row gives claims a result to name,
-with the time the 10-minute rule needs. `arguments` and `result` hold service
-and slot identifiers and times, not customer text.
+with the time the 10-minute rule needs.
+
+**`arguments` and `result` are treated as the customer's text** (decisions
+row 49). The design said they hold "identifiers and times, not customer
+text"; but the model writes a tool's arguments and can copy a customer's
+words into them, and a result can repeat them, so that could not be made
+true. Each is removed (set to null) when the row is older than the
+tenant's retention period, by the row's own time, and when the contact's
+data is deleted or anonymised. Those jobs are M5's and will need a grant
+to update the two columns. The rest of the row holds no text and is kept.
 
 ### `ai_traces` — tenant-owned
 
@@ -493,7 +506,8 @@ hours.
 | `bookings.contact_id` | Customer | Set to null with the contact's anonymisation, for past bookings | Future bookings are cancelled and their slots freed; then set to null |
 | `consent_records` | Customer | Deleted with the contact's anonymisation | Included in the export; then deleted |
 | `handovers.contact_id` | Customer | Kept; the contact row it points to is anonymised | Open handovers end as `closed-unanswered` or `answered`; kept |
-| `sessions`, `ai_traces`, `tool_calls` | Customer, indirectly | Kept: they hold no text, number or name. For `tool_calls` this is **unproved**: its arguments are written by the model, which can copy a customer's words into them. The table is built in M3 unit U7, which must settle it (design note `notes/m3-u6-traces.md`, section 1) | Kept |
+| `sessions`, `ai_traces` | Customer, indirectly | Kept: they hold no text, number or name. A session's `language` is a language code | Kept |
+| `tool_calls` | Customer, indirectly | `arguments` and `result` removed with the conversation's text, by the row's own age: they can hold a customer's words (decisions row 49). The rest of the row kept | `arguments` and `result` removed; the rest kept |
 | `audit_log` | Staff and system | Kept | Kept; it never held the number |
 | `users.email` | Staff | Kept while the user exists | Not covered by US-D5. Set to null 12 months after `removed_at` |
 | `tenants.support_contact`, `notification_email` | Business | Kept | Not personal data of a customer |
