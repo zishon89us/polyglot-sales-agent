@@ -21,7 +21,8 @@ export const JOB_FIRST_RETRY_MS = 2_000;
  * claimed; after this long another worker takes it. It must be longer than
  * any job runs: the longest is a turn. As M3 unit U7 built it, a turn is
  * at most five calls to the model of 20 seconds, five traces of 5 seconds
- * and sixteen runs of a tool of 2.5 seconds: 165 seconds (design note
+ * and sixteen runs of a tool of 2.5 seconds: 165 seconds, not counting a
+ * tool's wait for the conversation's row (design note
  * m3-u7-turn, S2b). The three attempts with waits of 1 and 4 seconds that
  * the glossary gives a failed call are a later unit's (U15).
  */

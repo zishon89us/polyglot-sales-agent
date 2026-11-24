@@ -1615,6 +1615,26 @@ describe("what a turn with the model records (M3 unit U7; design note m3-u7-turn
       },
     );
 
+    test("arguments that only look as if they held U+0000 are stored as they are", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const args = { q: "a\\u0000b", path: "C:\\u0000" };
+      await run(turn, async () => ({ outcome: "done", result: 1 }), { args });
+      expect(await calls()).toMatchObject([{ arguments: args, outcome: "done" }]);
+    });
+
+    test("at the limits a deployment has, a statement that runs on is stopped within half a second", async () => {
+      await arrives("hello", 0);
+      const turn = await begin(HOUR_MS);
+      const started = Date.now();
+      const ran = await run(turn, async (tx) => {
+        await tx.query("SELECT pg_sleep(3)");
+        return { outcome: "done", result: 1 };
+      });
+      expect(ran).toEqual({ kind: "ran", outcome: "failed", result: null });
+      expect(Date.now() - started).toBeLessThan(1_500);
+    });
+
     test("L4: when the conversation is another worker's, the tool is not run and nothing is stored", async () => {
       await arrives("hello", 0);
       const turn = await begin(HOUR_MS);

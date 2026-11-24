@@ -204,6 +204,76 @@ describe("marking data (I5)", () => {
     ]);
   });
 
+  test.each([
+    [
+      "a limit on the output that reads as a huge number the second time",
+      () => {
+        let reads = 0;
+        return {
+          get maxOutputTokens() {
+            reads += 1;
+            return reads <= 1 ? 4_096 : 1e12;
+          },
+        };
+      },
+    ],
+    [
+      "a limit that reads as text the second time",
+      () => {
+        let reads = 0;
+        return {
+          get maxOutputTokens() {
+            reads += 1;
+            return reads <= 1 ? 4_096 : "lots";
+          },
+        };
+      },
+    ],
+    [
+      "claim kinds that are not texts by the time they are copied",
+      () => {
+        let reads = 0;
+        return {
+          get claimKinds() {
+            reads += 1;
+            return reads <= 2 ? ["price"] : [42, {}];
+          },
+        };
+      },
+    ],
+    [
+      "a tool's schema that holds a date",
+      () => ({ tools: [{ name: "find", description: "", argumentsSchema: { at: new Date(0) } }] }),
+    ],
+    [
+      "a tool's schema that holds a map",
+      () => ({ tools: [{ name: "find", description: "", argumentsSchema: { at: new Map() } }] }),
+    ],
+    [
+      "a tool's schema that is a list",
+      () => ({ tools: [{ name: "find", description: "", argumentsSchema: [] }] }),
+    ],
+    ["a tool with no description", () => ({ tools: [{ name: "find", argumentsSchema: {} }] })],
+    [
+      "a tool's schema that holds a number that is not one",
+      () => ({ tools: [{ name: "find", description: "", argumentsSchema: { n: Number.NaN } }] }),
+    ],
+  ] as [string, () => object][])(
+    "%s is refused before the call: what is sent is what was checked",
+    async (_name, change) => {
+      const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);
+      const kept = keptTraces();
+      const client = bounded(adapter, { record: kept.record });
+      const odd = Object.defineProperties(
+        { ...REQUEST, messages: [{ role: "customer", text: "hello" }] },
+        Object.getOwnPropertyDescriptors(change()),
+      ) as unknown as LlmRequest;
+      await expect(client.generate(odd, FAKE_PLACE)).rejects.toBeInstanceOf(Error);
+      expect(adapter.remaining()).toBe(1);
+      expect(kept.traces).toEqual([]);
+    },
+  );
+
   test("M7: the calls are copied all the way down: a change to them during the call is not sent", async () => {
     const toolCalls = [{ id: "c1", name: "find", arguments: { day: { of: "Thursday" } } }];
     const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);

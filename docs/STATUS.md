@@ -649,6 +649,15 @@ M0 Inception met its exit criteria on 2026-11-16; see
   be held about 9 seconds where the note said 5; the test of the lease's
   renewal could not tell one renewal from two; a session's history had
   no index to read through. All three are fixed. What is left is #332.
+  Another agent checked the fixes
+  (`reviews/2026-11-25-gate4-u7-turn-verification.md`) and measured
+  them: a tool that sleeps 3 seconds in the database is stopped in half
+  a second, and the timeout does not leak to the connection's next use.
+  Four Low findings: three more places where a request read twice could
+  differ, fixed; and the sum of a turn's longest time leaves out a
+  tool's wait for the conversation's row, **not fixed**, now said in the
+  note with its worst case. **The last fixes are checked by the author
+  only.**
 
 ## Next
 

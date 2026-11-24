@@ -410,8 +410,12 @@ export async function runTool(
   // stored: the row says the tool ran, without what it was asked.
   let asked: string | null = null;
   try {
-    const text = JSON.stringify(call.arguments ?? null);
-    asked = typeof text === "string" && !text.includes("\\u0000") ? text : null;
+    let nul = false;
+    const text = JSON.stringify(call.arguments ?? null, (key, value) => {
+      nul ||= key.includes("\u0000") || (typeof value === "string" && value.includes("\u0000"));
+      return value;
+    });
+    asked = typeof text === "string" && !nul ? text : null;
   } catch {
     asked = null;
   }

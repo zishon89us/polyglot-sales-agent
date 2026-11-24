@@ -188,6 +188,27 @@ const LATENCY_MAX_MS = 2_147_483_647;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Whether a value is what JSON carries and nothing else: no date, map, function or other object. */
+function plainData(value: unknown, depth = 0): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value !== "object" || depth > 32) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.every((item) => plainData(item, depth + 1));
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return (
+    (prototype === Object.prototype || prototype === null) &&
+    Object.values(value).every((item) => plainData(item, depth + 1))
+  );
+}
+
 /** A mark is 32 hexadecimal characters, drawn for one call. */
 const MARK = /^[0-9a-f]{32}$/;
 /** How many marks are drawn before the source is taken to be broken. */
@@ -513,6 +534,7 @@ export class LlmClient {
       let system = "";
       let tools: ToolOffer[] = [];
       let timeoutMs = 0;
+      let maxOutputTokens = 0;
       let offered: { claimKinds: string[]; tools: string[] } = { claimKinds: [], tools: [] };
       try {
         fault = requestFault(request);
@@ -525,6 +547,7 @@ export class LlmClient {
           // A copy all the way down: a schema the caller changes during the
           // call is not the one that was sent.
           tools = structuredClone([...request.tools]) as ToolOffer[];
+          maxOutputTokens = request.maxOutputTokens;
           offered = {
             claimKinds: [...request.claimKinds],
             tools: tools.map((tool) => tool.name),
@@ -560,11 +583,27 @@ export class LlmClient {
       }
       // Built before the clock is read and the adapter called: a request
       // that cannot be marked is refused, and nothing is paid for.
-      if (typeof system !== "string") {
-        throw new TypeError("the request changed while it was read");
+      // The copies are what is sent, so the copies are what is checked.
+      if (
+        typeof system !== "string" ||
+        !whole(maxOutputTokens, MODEL_OUTPUT_TOKENS_CEILING) ||
+        !offered.claimKinds.every((kind) => typeof kind === "string") ||
+        !tools.every(
+          (tool) =>
+            typeof tool?.name === "string" &&
+            typeof tool.description === "string" &&
+            plainData(tool.argumentsSchema) &&
+            typeof tool.argumentsSchema === "object" &&
+            tool.argumentsSchema !== null &&
+            !Array.isArray(tool.argumentsSchema),
+        )
+      ) {
+        throw new TypeError(
+          "a request's limits are whole numbers, its claim kinds texts, and its tools plain data",
+        );
       }
       const sent = markedCopy(
-        { messages: request.messages, maxOutputTokens: request.maxOutputTokens, timeoutMs },
+        { messages: request.messages, maxOutputTokens, timeoutMs },
         { system, prompts, tools, claimKinds: offered.claimKinds },
         this.#mark,
       );
