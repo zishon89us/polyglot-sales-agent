@@ -1,0 +1,6 @@
+name: reply
+version: 1
+owner: zishon89us
+model: not-evaluated
+parameters: {}
+intended_use: The reply to a customer's batch of messages, from the business's own data, in the customer's language. Not evaluated against any model yet.
