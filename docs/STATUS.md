@@ -608,9 +608,15 @@ M0 Inception met its exit criteria on 2026-11-16; see
   found out only after a paid call; the price list could be changed
   after the client was made; the check on how lines are written could
   be walked round; and a line's words were not all from closed lists.
-  Three are fixed. The fourth is fixed for reasons and job types and
-  not for a failure's code, and the note now says so. What is left is
-  #330.
+  Two are fixed. The check on lines is wider and now claims only what it
+  is, a check of names. The fourth is fixed for reasons and job types
+  and not for a failure's code, and the note now says so. Another agent
+  checked the fixes
+  (`reviews/2026-11-24-gate4-u6-traces-verification.md`): six Low
+  findings, all ways past a fix with an object that reads differently
+  each time it is read, or a second signal to the api. Fixed: a time and
+  a price are read once and copied. **These last fixes are checked by
+  the author only.** What is left is #330.
 
 ## Next
 

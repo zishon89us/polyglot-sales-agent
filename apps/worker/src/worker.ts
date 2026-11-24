@@ -8,6 +8,18 @@ import { beat, type Database, type JobHandler, workOnce } from "@polyglot-sales-
 /** One line for the log: what happened, and a short code. Never anything of a message. */
 export type WorkerReport = (event: "loop-error", code: string) => void;
 
+/** What a log line names a job by when this worker has no handler for its type. */
+export const UNKNOWN_JOB = "unknown-job";
+
+/**
+ * The name a log line gives a job: its type if this worker has a handler
+ * for it, and otherwise one fixed word. A type is stored text; only the
+ * types this worker knows are written.
+ */
+export function jobName(handlers: Readonly<Record<string, unknown>>, type: string): string {
+  return typeof type === "string" && Object.hasOwn(handlers, type) ? type : UNKNOWN_JOB;
+}
+
 /** What is said of every job the worker runs (design note M3 U6, L4). */
 export interface JobLine {
   readonly jobId: string;

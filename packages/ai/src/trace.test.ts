@@ -293,6 +293,99 @@ describe("one call, one trace", () => {
     expect(kept.traces).toEqual([]);
   });
 
+  test("a time is read once and copied: nothing done to a clock's or a place's date afterwards reaches the trace", async () => {
+    const shared = new Date(1_795_000_000_000);
+    const turn = new Date(1_000);
+    const { traces, timers } = { traces: [] as TraceRecord[], timers: new HandTimers() };
+    const client = bounded(new FakeLlmAdapter([{ kind: "hang" }]), {
+      record: async (trace) => {
+        traces.push(trace);
+      },
+      timers,
+      now: () => shared,
+    });
+    const pending = client.generate(
+      { ...REQUEST, timeoutMs: 10 },
+      { ...FAKE_PLACE, turnStartedAt: turn },
+    );
+    shared.setTime(-8.64e15);
+    turn.setTime(-8.64e15);
+    timers.pass(10);
+    await pending;
+    expect(traces[0]).toMatchObject({
+      startedAt: new Date(1_795_000_000_000),
+      turnStartedAt: new Date(1_000),
+      latencyMs: 0,
+    });
+  });
+
+  test("an object that only says it is a date, or says a time it does not have, is not taken for one", async () => {
+    class Lying extends Date {
+      override getTime(): number {
+        return 1_000;
+      }
+    }
+    const notADate = Object.assign(Object.create(Date.prototype), { getTime: () => 1_000 });
+    for (const odd of [new Lying(-8.64e15), notADate]) {
+      for (const [place, now] of [
+        [{ ...FAKE_PLACE, turnStartedAt: odd }, undefined],
+        [FAKE_PLACE, () => odd],
+      ] as const) {
+        const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);
+        const kept = keptTraces();
+        const client = bounded(adapter, {
+          record: kept.record,
+          ...(now === undefined ? {} : { now }),
+        });
+        await expect(client.generate(REQUEST, place)).rejects.toBeInstanceOf(TypeError);
+        expect(adapter.remaining()).toBe(1);
+        expect(kept.traces).toEqual([]);
+      }
+    }
+    // One that lies about a time it does have is read by its real time.
+    const kept = keptTraces();
+    const client = bounded(new FakeLlmAdapter([{ kind: "answer", value: GOOD }]), {
+      record: kept.record,
+    });
+    class Shifted extends Date {
+      override getTime(): number {
+        return -8.64e15;
+      }
+    }
+    await client.generate(REQUEST, { ...FAKE_PLACE, turnStartedAt: new Shifted(2_000) });
+    expect(kept.traces[0]?.turnStartedAt).toEqual(new Date(2_000));
+  });
+
+  test("a prompt's or a tool's name that is text when checked and something else when copied is refused before the call", async () => {
+    const twice = (key: "prompts" | "tools") => {
+      let reads = 0;
+      const item = {
+        ...(key === "prompts" ? { version: 1 } : REQUEST.tools[0]),
+        get name() {
+          reads += 1;
+          return reads <= 1 ? "reply" : { toString: () => "reply" };
+        },
+      };
+      return { ...REQUEST, [key]: [item] } as unknown as LlmRequest;
+    };
+    for (const key of ["prompts", "tools"] as const) {
+      const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);
+      const kept = keptTraces();
+      const client = bounded(adapter, { record: kept.record });
+      const outcome = await client.generate(twice(key), FAKE_PLACE).then(
+        () => "called",
+        () => "refused",
+      );
+      if (outcome === "called") {
+        const names = key === "prompts" ? kept.traces[0]?.prompts.map((p) => p.name) : [];
+        expect(names?.every((name) => typeof name === "string")).toBe(true);
+      } else {
+        expect(adapter.remaining()).toBe(1);
+        expect(kept.traces).toEqual([]);
+      }
+    }
+  });
+
   test("a clock that fails after the call does not lose it: the trace is stored with no latency, and the result is given", async () => {
     let readings = 0;
     const kept = keptTraces();
@@ -585,6 +678,29 @@ describe("what a call cost, on its trace (section 4)", () => {
     (prices as Record<string, unknown>)["other-model"] = { input: 1, output: 1 };
     await client.generate(REQUEST, FAKE_PLACE);
     expect(kept.traces.map((trace) => trace.costMicros)).toEqual([10_500, 10_500]);
+  });
+
+  test("a price is read once: one that reads differently each time is the first reading, or the client is not made", async () => {
+    for (const later of [1.5, 1, "x"]) {
+      let reads = 0;
+      const prices = {
+        scripted: {
+          get input() {
+            reads += 1;
+            return reads <= 1 ? 3_000_000 : later;
+          },
+          output: 15_000_000,
+        },
+      };
+      const kept = keptTraces();
+      const client = bounded(new FakeLlmAdapter([{ kind: "answer", value: GOOD, usage: USE }]), {
+        record: kept.record,
+        prices: prices as never,
+      });
+      await client.generate(REQUEST, FAKE_PLACE);
+      expect(kept.traces[0]).toMatchObject({ costMicros: 10_500, priceInput: 3_000_000 });
+      expect(reads).toBe(1);
+    }
   });
 
   test.each([

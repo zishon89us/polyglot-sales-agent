@@ -188,30 +188,42 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TIME_MAX_MS = 253_402_300_799_999;
 
 /**
- * Whether a time is one a trace can store: a date from 1970 to 9999. A
- * date outside what the database holds would be found out only after the
- * call was paid for.
+ * A copy of a time a trace can store, a date from 1970 to 9999, or
+ * undefined. A date outside what the database holds would be found out
+ * only after the call was paid for. The time is read once, by the
+ * built-in reading and not the object's own, and what is kept is a plain
+ * date of that reading: nothing done to the original afterwards, and no
+ * object that only says it is a date, changes it.
  */
-function storable(time: unknown): time is Date {
+function storable(time: unknown): Date | undefined {
   if (!(time instanceof Date)) {
-    return false;
+    return undefined;
   }
-  const ms = time.getTime();
-  return !Number.isNaN(ms) && ms >= 0 && ms <= TIME_MAX_MS;
+  let ms: number;
+  try {
+    ms = Date.prototype.getTime.call(time);
+  } catch {
+    return undefined;
+  }
+  return !Number.isNaN(ms) && ms >= 0 && ms <= TIME_MAX_MS ? new Date(ms) : undefined;
 }
 
 /** A copy of the price list that nothing outside can change, or an error if an entry is not a price. */
-function pricesOf(given: ModelPrices | undefined): ModelPrices {
+function pricesOf(given_: ModelPrices | undefined): ModelPrices {
   const copy: Record<string, { input: number; output: number }> = Object.create(null);
-  for (const [name, price] of Object.entries(given ?? {})) {
+  for (const [name, given] of Object.entries(given_ ?? {})) {
+    // Each number is read once: what is checked is what is kept.
+    const price =
+      typeof given === "object" && given !== null
+        ? Object.freeze({ input: given.input, output: given.output })
+        : undefined;
     if (
-      typeof price !== "object" ||
-      price === null ||
+      price === undefined ||
       modelCostMicros({ inputTokens: 0, outputTokens: 0 }, price) === null
     ) {
       throw new TypeError("a model's price is two whole numbers within the limits");
     }
-    copy[name] = Object.freeze({ input: price.input, output: price.output });
+    copy[name] = price;
   }
   return Object.freeze(copy);
 }
@@ -221,14 +233,15 @@ function placeOf(place: CallPlace): CallPlace | undefined {
   if (typeof place !== "object" || place === null) {
     return undefined;
   }
-  const { tenantId, sessionId, turnId, turnStartedAt } = place;
+  const { tenantId, sessionId, turnId } = place;
+  const turnStartedAt = storable(place.turnStartedAt);
   if (
     ![tenantId, sessionId, turnId].every((id) => typeof id === "string" && UUID.test(id)) ||
-    !storable(turnStartedAt)
+    turnStartedAt === undefined
   ) {
     return undefined;
   }
-  return { tenantId, sessionId, turnId, turnStartedAt: new Date(turnStartedAt.getTime()) };
+  return { tenantId, sessionId, turnId, turnStartedAt };
 }
 
 /** A call that left no record: its result is not handed on (design note M3 U6, T8). */
@@ -434,9 +447,12 @@ export class LlmClient {
         prompts.length < 1 ||
         prompts.length > PROMPTS_PER_REQUEST_MAX ||
         !prompts.every(
-          ({ name, version }) => PROMPT_NAME.test(name) && whole(version, PROMPT_VERSION_MAX),
+          ({ name, version }) =>
+            typeof name === "string" &&
+            PROMPT_NAME.test(name) &&
+            whole(version, PROMPT_VERSION_MAX),
         ) ||
-        !offered.tools.every((name) => TOOL_NAME.test(name))
+        !offered.tools.every((name) => typeof name === "string" && TOOL_NAME.test(name))
       ) {
         throw new TypeError("the request changed while it was read");
       }
@@ -446,8 +462,8 @@ export class LlmClient {
           "a call is made for a tenant, a session and a turn, each a UUID, and the time the turn began",
         );
       }
-      const startedAt = this.#now();
-      if (!storable(startedAt)) {
+      const startedAt = storable(this.#now());
+      if (startedAt === undefined) {
         // Found before the call: a trace with no time could not be stored.
         throw new TypeError("the client's clock gave no time a trace can store");
       }
@@ -466,7 +482,7 @@ export class LlmClient {
       }
       let elapsed = 0;
       try {
-        elapsed = this.#now().getTime() - startedAt.getTime();
+        elapsed = Date.prototype.getTime.call(this.#now()) - startedAt.getTime();
       } catch {
         // A clock that fails now must not lose a call that was paid for: no latency is known.
       }

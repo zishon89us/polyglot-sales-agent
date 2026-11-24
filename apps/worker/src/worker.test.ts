@@ -28,7 +28,7 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { readConfig } from "./config.ts";
 import { createHandlers, SENDS_PER_RUN } from "./handlers.ts";
-import { runWorker } from "./worker.ts";
+import { jobName, runWorker, UNKNOWN_JOB } from "./worker.ts";
 
 let database: TestDatabase;
 let appPool: pg.Pool;
@@ -1240,6 +1240,16 @@ describe("the worker's loop", () => {
     });
     expect(read[1]).toMatchObject({ names: [SEND_MESSAGES_JOB], code: "retry", level: "warn" });
     expect(lines.join(" ")).not.toMatch(/5550142|hello|ECONNRESET/);
+  });
+
+  test("a job is named by its type only if this worker has a handler for it", () => {
+    const handlers = handlersFor(mock);
+    expect(jobName(handlers, SEND_MESSAGES_JOB)).toBe(SEND_MESSAGES_JOB);
+    expect(jobName(handlers, PROCESS_CONVERSATION_JOB)).toBe(PROCESS_CONVERSATION_JOB);
+    for (const type of ["test-customer", "toString", "constructor", "__proto__", "", 7 as never]) {
+      expect(jobName(handlers, type)).toBe("unknown-job");
+    }
+    expect(UNKNOWN_JOB).toBe("unknown-job");
   });
 
   test("a line that cannot be written does not stop the work", async () => {

@@ -62,7 +62,13 @@ try {
   await server.listen({ host: config.host, port: config.port });
   log({ level: "info", event: "listening", n: { port: config.port } });
   // Stop taking requests, let those in hand finish, then let go of the database.
+  let stopping = false;
   const stop = (): void => {
+    // A second signal changes nothing: the first is being acted on.
+    if (stopping) {
+      return;
+    }
+    stopping = true;
     server
       .close()
       .then(() => Promise.all([closeDatabase(app), closeDatabase(cross)]))
@@ -74,8 +80,8 @@ try {
         },
       );
   };
-  process.once("SIGTERM", stop);
-  process.once("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
 } catch (error) {
   // The settings the failure names and a code, never its message: an error
   // can carry a connection string.

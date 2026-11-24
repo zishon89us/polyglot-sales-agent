@@ -216,7 +216,8 @@ duration, a count of attempts, the port it listens on) and none of
 which is read from what arrived. A word in `event` is from a closed
 list. A word in `names` is a setting's name found in a failure's
 message, one of the listed reasons for refusing to start, or the type
-of a job this worker has a handler for. **A `code` is not from a closed
+of a job this worker has a handler for (any other is written as
+`unknown-job`). **A `code` is not from a closed
 list:** it is whatever short name an error carries as its code, or its
 class's name, never its message. Today every such error is thrown by
 this repository's code or a library; a library that put a customer's

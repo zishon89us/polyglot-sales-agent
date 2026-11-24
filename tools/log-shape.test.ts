@@ -5,7 +5,8 @@
 //
 // This is a check of names in source text. It finds the ordinary ways to
 // write a line and the roundabout ones its last test lists; it does not
-// prove that no code can write one. The end-to-end test reads what the two
+// prove that no code can write one, and two reviews each found ways round
+// an earlier form of it. The end-to-end test reads what the two
 // programs actually wrote.
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -28,7 +29,7 @@ const NOT_A_SERVICE = ["packages/db/src/cli.ts"];
 
 /** Any way to reach the console, the process's streams, or a file descriptor. */
 const DIRECT =
-  /\bconsole\b|\bprocess\s*\.\s*(stdout|stderr)|\bprocess\s*\[|\{[^}]*\b(stdout|stderr)\b[^}]*\}\s*=\s*process|node:process|["']process["']|\bwriteSync\b|\bcreateWriteStream\b|\bglobalThis\b|node:(tty|console)/;
+  /\bconsole\b|\bwriteFileSync\b|\bemitWarning\b|\bReflect\b|=\s*process\b|\bprocess\s*\?\.|\bprocess\s*\.\s*(stdout|stderr)|\bprocess\s*\[|\{[^}]*\b(stdout|stderr)\b[^}]*\}\s*=\s*process|node:process|["']process["']|\bwriteSync\b|\bcreateWriteStream\b|\bglobalThis\b|node:(tty|console)/;
 const code = (path: string): string =>
   readFileSync(`${root}${path}`, "utf8")
     // Comments may speak of the console; code may not use it.
@@ -48,6 +49,14 @@ describe("how the api and the worker write a line", () => {
     expect(files).toContain(`${folder}/main.ts`);
     const writing = files.filter((path) => DIRECT.test(code(path)));
     expect(writing).toEqual([`${folder}/main.ts`]);
+    // With comments left in, too: a comment's marks inside a text hide nothing.
+    for (const path of files) {
+      expect(readFileSync(`${root}${path}`, "utf8"), path).not.toMatch(/\bconsole\b/);
+    }
+    // Outside the main file the process is not named in code at all.
+    for (const path of files.filter((file) => file !== `${folder}/main.ts`)) {
+      expect(code(path), path).not.toMatch(/\bprocess\b/);
+    }
     const main = code(`${folder}/main.ts`);
     // One writer, given to logTo; no console at all, and no other way round.
     expect(main).not.toMatch(/\bconsole\b|node:process|writeSync|createWriteStream|globalThis/);
@@ -84,6 +93,11 @@ describe("how the api and the worker write a line", () => {
       "createWriteStream('/dev/stdout')",
       'globalThis["console"]["log"](x)',
       'import { Console } from "node:console";',
+      "process?.stdout.write(x)",
+      "writeFileSync(1, x)",
+      "process.emitWarning(x)",
+      "const p = process;",
+      'Reflect.get(process, "stdout")',
     ]) {
       expect(DIRECT.test(text), text).toBe(true);
     }

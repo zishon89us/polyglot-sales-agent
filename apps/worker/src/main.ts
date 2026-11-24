@@ -20,7 +20,7 @@ import {
 } from "@polyglot-sales-agent/db";
 import { readConfig } from "./config.ts";
 import { createHandlers } from "./handlers.ts";
-import { runWorker } from "./worker.ts";
+import { jobName, runWorker } from "./worker.ts";
 
 // Each line to standard output, or to standard error for an error.
 const log = logTo("worker", (line, level) => {
@@ -77,8 +77,7 @@ try {
         jobId: job.jobId,
         tenantId: job.tenantId,
         conversationId: job.conversationId,
-        // A type this worker has a handler for, or it is not written.
-        names: [Object.hasOwn(handlers, job.type) ? job.type : "unknown-job"],
+        names: [jobName(handlers, job.type)],
         n: { durationMs: job.durationMs, attempts: job.attempts },
       }),
   });

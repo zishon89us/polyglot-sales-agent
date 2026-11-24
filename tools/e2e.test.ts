@@ -213,9 +213,15 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
     for (const name of ["worker", "api"]) {
       running[name]?.child.kill("SIGTERM");
     }
+    // A second signal while it is stopping changes nothing.
+    running["api"]?.child.kill("SIGINT");
     expect(await running["worker"]?.exit).toBe(0);
     expect(running["worker"]?.output).toContain('"service":"worker","event":"stopped"');
-    await running["api"]?.exit;
+    expect(await running["api"]?.exit).toBe(0);
+    const api = running["api"]?.output ?? "";
+    expect(api.match(/"event":"stopped"/g)).toHaveLength(1);
+    expect(api).toContain('"level":"info","service":"api","event":"stopped"');
+    expect(api).toContain(`"n":{"port":${settings["PSA_API_PORT"]}}`);
     await expect(fetch(`http://127.0.0.1:${settings["PSA_API_PORT"]}/healthz`)).rejects.toThrow();
   }, 30_000);
 });
