@@ -28,6 +28,8 @@ import {
 /** Every table privilege the two working roles hold. A change here is a decision, not a detail. */
 const PRIVILEGES = {
   psa_app: {
+    // Written once and read: a trace is never changed or removed by the application.
+    ai_traces: "INSERT,SELECT",
     audit_log: "INSERT,SELECT",
     channel_accounts: "SELECT",
     contacts: "INSERT,SELECT,UPDATE",
@@ -102,6 +104,7 @@ async function asA(text: string, values: unknown[]): Promise<number | string> {
 describe("the seed covers every tenant-owned table", () => {
   test("the catalogue lists the tables this change creates", () => {
     expect(tables).toEqual([
+      "ai_traces",
       "audit_log",
       "channel_accounts",
       "contacts",
@@ -252,6 +255,16 @@ describe("as tenant A, tenant B's rows cannot be read or changed", () => {
         [a.tenantId, b.conversationId],
       ),
     ).toBe("23503");
+    // Migration 0009: a trace's session.
+    const trace = (sessionId: string) =>
+      asA(
+        `INSERT INTO ai_traces (tenant_id, session_id, turn_id, turn_started_at, started_at,
+                                latency_ms, prompt_names, prompt_versions, outcome)
+         VALUES ($1, $2, gen_random_uuid(), now(), now(), 0, '{reply}', '{1}', 'timeout')`,
+        [a.tenantId, sessionId],
+      );
+    expect(await trace(b.sessionId)).toBe("23503");
+    expect(await trace(a.sessionId)).toBe(1);
   });
 });
 

@@ -5,7 +5,7 @@
 
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { PROMPT_FILE_MAX } from "@polyglot-sales-agent/core";
+import { PROMPT_FILE_MAX, PROMPT_NAME, PROMPT_VERSION_MAX } from "@polyglot-sales-agent/core";
 import { isAlias, isMap, isNode, isScalar, parseAllDocuments, Scalar, visit } from "yaml";
 import type { PromptIdentity } from "./types.ts";
 
@@ -39,8 +39,8 @@ export const NOT_EVALUATED = "not-evaluated";
 /** Where the canary goes, written exactly so. */
 export const CANARY_PLACEHOLDER = "{{canary}}";
 
-const NAME = /^[a-z][a-z0-9-]{0,39}$/;
-const VERSION_MAX = 9_999;
+const NAME = PROMPT_NAME;
+const VERSION_MAX = PROMPT_VERSION_MAX;
 const CANARY = /^[A-Za-z0-9]{16,64}$/;
 const CONTROL = /\p{Cc}/u;
 const length = (text: string): number => [...text].length;

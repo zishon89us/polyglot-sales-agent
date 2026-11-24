@@ -195,11 +195,11 @@ same keys, always present, null where there is none:
 | `time` | When, in UTC, to the millisecond |
 | `level` | `info`, `warn` or `error` |
 | `service` | `api` or `worker` |
-| `event` | What happened: one of a closed list, below |
-| `code` | What `errorCode` gives for a failure (letters, `_` and `-`, or the five characters of a database's error class), or a job's outcome; or null |
+| `event` | What happened: one of a closed list: the five below, and the three M2 already reported (`webhook-unavailable`, `turn-skipped`, `send-failed`) |
+| `code` | What `errorCode` gives for a failure (letters, `_` and `-`, or the five characters of a database's error class), a job's outcome, or the channel's own number for a refused send as the WhatsApp channel writes it (`meta-` and six digits at most); or null |
 | `requestId` | A UUID the api makes for the request being served; never read from a header. Null elsewhere |
 | `tenantId`, `conversationId`, `jobId` | UUIDs, or null |
-| `names` | The settings a failure to start named (`PSA_` and capital letters), or a job's type (small letters and hyphens, no digit); or empty |
+| `names` | The settings a failure to start named (`PSA_` and capital letters), the short reasons of a refusal to start in production (`stand-in-channel`, `placeholder-secret` and so on), or a job's type; small letters and hyphens, no digit. Or empty |
 | `n` | Whole numbers from 0 to 10^9 under keys from a closed list: `status`, `durationMs`, `attempts` |
 
 NFR-O2 says "request and conversation IDs on every line". A line about
@@ -222,10 +222,10 @@ the scan of a whole run (U18) checks that it was.
 | # | Line | From |
 | --- | --- | --- |
 | L1 | `listening`, `running`, `stopped` | Each service, once |
-| L2 | `could-not-start`, with a code, and in `names` the settings the failure named | Each service. The sentence that M2 printed is no longer printed |
+| L2 | `could-not-start`, with a code (`settings`, `not-for-production`, `database-unreachable`), and in `names` the settings the failure named and its short reasons | Each service. The sentence that M2 printed is no longer printed: an operator reads which settings and why from the names. That is less than a sentence said, and is the price of a line that cannot carry one |
 | L3 | `request`: the request's identifier, the status, the duration | The api, once for every request it answers, the webhook's among them |
-| L4 | `job`: the job's identifier and type, the tenant, the conversation if the job has one, the outcome as the code (`done`, `retry`, `dead`), the duration | The worker, once for every job it runs. M2 reported only a retry and a dead job, without saying which |
-| L5 | `loop-error`, with a code | The worker, as now |
+| L4 | `job`: the job's identifier and type, the tenant, the conversation if the job has one, the outcome as the code (`done`, `deferred`, `retry`, `dead`, `not-held`), the attempts, the duration | The worker, once for every job it runs. M2 reported only a retry and a dead job, without saying which |
+| L5 | `loop-error`, `turn-skipped`, `send-failed`, `webhook-unavailable`, each with a code | As M2 reported them, now in the one shape |
 
 A model call is not a log line: its record is the trace.
 

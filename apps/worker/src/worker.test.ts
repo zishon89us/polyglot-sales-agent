@@ -9,7 +9,7 @@ import {
   MOCK_ACCESS_TOKEN,
   type MockChannel,
 } from "@polyglot-sales-agent/channel-mock";
-import { BATCH_MAX_MS, BATCH_QUIET_MS } from "@polyglot-sales-agent/core";
+import { BATCH_MAX_MS, BATCH_QUIET_MS, logTo } from "@polyglot-sales-agent/core";
 import {
   APP_ROLE,
   beginTurn,
@@ -1171,7 +1171,96 @@ describe("the worker's loop", () => {
     expect(await jobs()).toEqual([]);
   }, 30_000);
 
-  test("a job that fails is reported by its type, and the loop goes on", async () => {
+  test("every job that is run is told once, with its identifiers, its outcome and nothing of a message (NFR-O2, L4)", async () => {
+    const lines: string[] = [];
+    const log = logTo("worker", (line) => lines.push(line));
+    const stop = new AbortController();
+    let fails = true;
+    const running = runWorker({
+      cross,
+      handlers: {
+        ...handlersFor(mock),
+        [SEND_MESSAGES_JOB]: async (job, signal) => {
+          if (fails) {
+            fails = false;
+            throw Object.assign(new Error("+15550142 said hello"), { code: "ECONNRESET" });
+          }
+          return handlersFor(mock)[SEND_MESSAGES_JOB]?.(job, signal);
+        },
+      },
+      signal: stop.signal,
+      ran: (job) =>
+        log({
+          level: job.result === "done" ? "info" : "warn",
+          event: "job",
+          code: job.result,
+          jobId: job.jobId,
+          tenantId: job.tenantId,
+          conversationId: job.conversationId,
+          names: [job.type],
+          n: { durationMs: job.durationMs, attempts: job.attempts },
+        }),
+      pollMs: 10,
+    });
+    await arrives("hello");
+    await until(() => lines.length >= 2);
+    stop.abort();
+    await running;
+    const read = lines.map((line) => JSON.parse(line));
+    const conversation = await administrator.query<{ id: string }>("SELECT id FROM conversations");
+    const UUID = /^[0-9a-f-]{36}$/;
+    for (const line of read) {
+      expect(Object.keys(line)).toEqual([
+        "time",
+        "level",
+        "service",
+        "event",
+        "code",
+        "requestId",
+        "tenantId",
+        "conversationId",
+        "jobId",
+        "names",
+        "n",
+      ]);
+      expect(line).toMatchObject({
+        service: "worker",
+        event: "job",
+        requestId: null,
+        tenantId: tenant.a,
+        jobId: expect.stringMatching(UUID),
+      });
+      expect(line.n.durationMs).toBeGreaterThanOrEqual(0);
+      expect(line.n.attempts).toBeGreaterThanOrEqual(1);
+    }
+    expect(read[0]).toMatchObject({
+      names: [PROCESS_CONVERSATION_JOB],
+      code: "done",
+      conversationId: conversation.rows[0]?.id,
+    });
+    expect(read[1]).toMatchObject({ names: [SEND_MESSAGES_JOB], code: "retry", level: "warn" });
+    expect(lines.join(" ")).not.toMatch(/5550142|hello|ECONNRESET/);
+  });
+
+  test("a line that cannot be written does not stop the work", async () => {
+    const stop = new AbortController();
+    const running = runWorker({
+      cross,
+      handlers: handlersFor(mock),
+      signal: stop.signal,
+      ran: () => {
+        throw new Error("the log is away");
+      },
+      pollMs: 10,
+    });
+    await arrives("hello");
+    await until(() => mock.sent.length > 0);
+    stop.abort();
+    await running;
+    expect(mock.sent.map((message) => message.body)).toEqual(["Echo: hello"]);
+  });
+
+  test("a job that fails does not stop the loop", async () => {
     const reported: string[] = [];
     const stop = new AbortController();
     const running = runWorker({
@@ -1183,14 +1272,17 @@ describe("the worker's loop", () => {
         },
       },
       signal: stop.signal,
-      report: (event, code) => reported.push(`${event} ${code}`),
+      ran: (job) => reported.push(`${job.result} ${job.type}`),
       pollMs: 10,
     });
     await arrives("hello");
-    await until(() => reported.length > 0);
+    await until(() => reported.length > 1);
     stop.abort();
     await running;
-    expect(reported[0]).toBe(`job-retry ${SEND_MESSAGES_JOB}`);
+    expect(reported.slice(0, 2)).toEqual([
+      `done ${PROCESS_CONVERSATION_JOB}`,
+      `retry ${SEND_MESSAGES_JOB}`,
+    ]);
     expect(reported.join(" ")).not.toMatch(/5550142|hello/);
   });
 
@@ -1270,7 +1362,27 @@ describe("settings", () => {
       whatsappBaseUrl: "http://127.0.0.1:4010",
       whatsappApiVersion: "v27.0",
       whatsappAccessToken: "token",
+      modelPrices: {},
     });
+  });
+
+  test("the prices of models are read, and a wrong one stops the worker, named and not repeated (design note M3 U6, C11)", () => {
+    expect(
+      readConfig({
+        ...complete,
+        PSA_MODEL_PRICES: '{"model-a":{"input":3000000,"output":15000000}}',
+      }).modelPrices,
+    ).toEqual({ "model-a": { input: 3_000_000, output: 15_000_000 } });
+    for (const text of ["", "  ", "{}"]) {
+      expect(readConfig({ ...complete, PSA_MODEL_PRICES: text }).modelPrices).toEqual({});
+    }
+    const wrong = () =>
+      readConfig({ ...complete, PSA_MODEL_PRICES: '{"model-a":{"input":3.5,"output":15}}' });
+    expect(wrong).toThrow("worker: PSA_MODEL_PRICES has a price that is not a whole number");
+    expect(wrong).not.toThrow(/model-a|3\.5/);
+    expect(() => readConfig({ PSA_MODEL_PRICES: "{" })).toThrow(
+      /PSA_DB_APP_URL is not set.*PSA_MODEL_PRICES is not JSON/,
+    );
   });
 
   test("everything missing or blank is named together, and no value is repeated", () => {

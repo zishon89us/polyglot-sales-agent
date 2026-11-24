@@ -212,6 +212,12 @@ export async function seedTenant(
       [tenantId, conversationId, `mock-message-${label}`, sessionId],
     );
     await tx.query(
+      `INSERT INTO ai_traces (tenant_id, session_id, turn_id, turn_started_at, started_at,
+                              latency_ms, prompt_names, prompt_versions, outcome)
+       VALUES ($1, $2, gen_random_uuid(), now(), now(), 0, '{reply}', '{1}', 'timeout')`,
+      [tenantId, sessionId],
+    );
+    await tx.query(
       `INSERT INTO audit_log (tenant_id, action, subject_type, subject_id)
        VALUES ($1, 'seeded', 'contact', $2)`,
       [tenantId, contactId],

@@ -584,6 +584,20 @@ conversation identifiers. No message text, phone number or contact name in
 logs or traces (NFR-V2); a test scans the logs of an end-to-end run. One
 trace per model call (US-C10).
 
+As built in M3 unit U6 (design note `notes/m3-u6-traces.md`): the api and
+the worker write every line through one function in `core`, which gives
+each line the same keys, null where there is none, and has **no key that
+can hold a sentence**: a value that does not fit its pattern is written
+as `invalid`. The api writes one line for each request it answers, with
+an identifier it makes itself; the worker writes one for each job it
+runs. A failure to start is a code, the settings it names and short
+reasons, not a sentence. A test finds any write to the console or a
+stream outside the two `main.ts` files. The trace of a model call is
+written by the model client itself: `generate` takes the call's place
+(tenant, session, turn) and hands the result on only after the trace is
+stored, so a reply is never made from a call that left no record. The
+scan of a whole run's logs is M3 unit U18's.
+
 **Configuration and secrets.** Configuration from the environment, validated
 at start-up. Secrets from the environment or a secret manager; tenants'
 channel credentials encrypted at rest with a key held outside the database

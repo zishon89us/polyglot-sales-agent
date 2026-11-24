@@ -63,13 +63,28 @@ export interface DeploymentFacts {
  * Not checked, because neither exists yet: a fake model client and an
  * email writer that only logs (M3 and M4; issue #165 stays open for them).
  */
-export function productionProblems(environment: Environment, facts: DeploymentFacts): string[] {
+/** Why a program will not start in production, as short names a log line can carry. */
+export const PRODUCTION_REASONS = [
+  "development-component",
+  "stand-in-channel",
+  "placeholder-secret",
+  "shared-channel-credential",
+] as const;
+export type ProductionReason = (typeof PRODUCTION_REASONS)[number];
+
+function refusals(
+  environment: Environment,
+  facts: DeploymentFacts,
+): { readonly reason: ProductionReason; readonly text: string }[] {
   if (environment !== "production") {
     return [];
   }
-  const problems: string[] = [];
+  const problems: { reason: ProductionReason; text: string }[] = [];
   if (facts.developmentOnly === true) {
-    problems.push("this is a development component and has no place in production");
+    problems.push({
+      reason: "development-component",
+      text: "this is a development component and has no place in production",
+    });
   }
   if (facts.whatsappBaseUrl !== undefined) {
     // The whole origin: https, that host, the default port, and nobody's name in front of it.
@@ -84,23 +99,58 @@ export function productionProblems(environment: Environment, facts: DeploymentFa
       real = false;
     }
     if (!real) {
-      problems.push(
-        `PSA_WHATSAPP_BASE_URL is not https://${WHATSAPP_PRODUCTION_HOST}, so the channel is a stand-in`,
-      );
+      problems.push({
+        reason: "stand-in-channel",
+        text: `PSA_WHATSAPP_BASE_URL is not https://${WHATSAPP_PRODUCTION_HOST}, so the channel is a stand-in`,
+      });
     }
   }
   for (const [name, value] of Object.entries(facts.secrets ?? {})) {
     // Written any way: with other punctuation, in capitals, or percent-encoded in a URL.
     if (plain(value).includes(plain(PLACEHOLDER_MARK))) {
-      problems.push(`${name} holds a placeholder from the example file`);
+      problems.push({
+        reason: "placeholder-secret",
+        text: `${name} holds a placeholder from the example file`,
+      });
     }
   }
   if (facts.sharedChannelCredential === true) {
-    problems.push(
-      "the worker sends with one channel credential for every tenant, which is for development only",
-    );
+    problems.push({
+      reason: "shared-channel-credential",
+      text: "the worker sends with one channel credential for every tenant, which is for development only",
+    });
   }
   return problems;
+}
+
+export function productionProblems(environment: Environment, facts: DeploymentFacts): string[] {
+  return refusals(environment, facts).map((problem) => problem.text);
+}
+
+/** The same refusals as `productionProblems`, each once, by its short name. */
+export function productionReasons(
+  environment: Environment,
+  facts: DeploymentFacts,
+): ProductionReason[] {
+  return [...new Set(refusals(environment, facts).map((problem) => problem.reason))];
+}
+
+/**
+ * A failure to start: a sentence for whoever reads the error, a code and
+ * short reasons for the log, which carries no sentence.
+ */
+export function startFailure(
+  text: string,
+  code: "settings" | "not-for-production" | "database-unreachable",
+  reasons: readonly string[] = [],
+): Error {
+  return Object.assign(new Error(text), { code, reasons: [...reasons] });
+}
+
+/** The short reasons a failure to start carries, if it carries any. */
+export function startReasons(error: unknown): string[] {
+  const reasons = (error as { reasons?: unknown } | null)?.reasons;
+  return Array.isArray(reasons) ? reasons.filter((reason) => typeof reason === "string") : [];
 }
 
 /** Throws one error listing every problem, if there is any. `who` is the process, such as `api`. */

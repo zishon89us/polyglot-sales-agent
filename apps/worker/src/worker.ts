@@ -6,7 +6,20 @@ import { errorCode, HEARTBEAT_INTERVAL_MS, POLL_INTERVAL_MS } from "@polyglot-sa
 import { beat, type Database, type JobHandler, workOnce } from "@polyglot-sales-agent/db";
 
 /** One line for the log: what happened, and a short code. Never anything of a message. */
-export type WorkerReport = (event: "job-retry" | "job-dead" | "loop-error", code: string) => void;
+export type WorkerReport = (event: "loop-error", code: string) => void;
+
+/** What is said of every job the worker runs (design note M3 U6, L4). */
+export interface JobLine {
+  readonly jobId: string;
+  readonly type: string;
+  readonly tenantId: string | null;
+  /** The conversation the job is about, if it names one. */
+  readonly conversationId: string | null;
+  readonly result: "done" | "deferred" | "retry" | "dead" | "not-held";
+  readonly attempts: number;
+  /** From looking for a job to its outcome being recorded. */
+  readonly durationMs: number;
+}
 
 export interface WorkerOptions {
   /** The cross-tenant role's: claims jobs and records the heartbeat. */
@@ -15,6 +28,8 @@ export interface WorkerOptions {
   /** Stops the loop after the job in hand. */
   readonly signal: AbortSignal;
   readonly report?: WorkerReport;
+  /** Called once for every job that was run, whatever its outcome. */
+  readonly ran?: (line: JobLine) => void;
   readonly workerId?: string;
   readonly pollMs?: number;
   readonly heartbeatMs?: number;
@@ -63,11 +78,24 @@ export async function runWorker(options: WorkerOptions): Promise<void> {
   const jobs = async (): Promise<void> => {
     while (!options.signal.aborted) {
       try {
+        const began = Date.now();
         const outcome = await workOnce(options.cross, options.handlers);
         if (!outcome.ran) {
           await sleep(pollMs, options.signal);
-        } else if (outcome.result === "retry" || outcome.result === "dead") {
-          report?.(outcome.result === "dead" ? "job-dead" : "job-retry", outcome.job.type);
+        } else {
+          try {
+            options.ran?.({
+              jobId: outcome.job.id,
+              type: outcome.job.type,
+              tenantId: outcome.job.tenantId,
+              conversationId: outcome.job.payload["conversationId"] ?? null,
+              result: outcome.result,
+              attempts: outcome.job.attempts,
+              durationMs: Math.max(0, Date.now() - began),
+            });
+          } catch {
+            // A line that cannot be written does not stop the work.
+          }
         }
       } catch (error) {
         report?.("loop-error", errorCode(error));

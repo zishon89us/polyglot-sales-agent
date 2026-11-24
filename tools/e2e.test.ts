@@ -183,8 +183,29 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
     expect((await fetch(`${api}/healthz`)).status).toBe(200);
     expect((await fetch(`${api}/readyz`)).status).toBe(200);
     const printed = `${running["api"]?.output}${running["worker"]?.output}`;
-    expect(printed).toContain("api: listening on 127.0.0.1");
-    expect(printed).toContain("worker: running");
+    expect(printed).toContain('"service":"api","event":"listening"');
+    expect(printed).toContain('"service":"worker","event":"running"');
+    // NFR-O2: every line each of the two wrote is the one shape, and no other.
+    for (const name of ["api", "worker"]) {
+      const lines = (running[name]?.output ?? "").split("\n").filter((line) => line !== "");
+      expect(lines.length, name).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(Object.keys(JSON.parse(line)), line).toEqual([
+          "time",
+          "level",
+          "service",
+          "event",
+          "code",
+          "requestId",
+          "tenantId",
+          "conversationId",
+          "jobId",
+          "names",
+          "n",
+        ]);
+        expect(line).not.toContain('"invalid"');
+      }
+    }
     expect(printed).not.toMatch(/5550142|end to end|anyone\?|local-only/);
   });
 
@@ -193,7 +214,7 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
       running[name]?.child.kill("SIGTERM");
     }
     expect(await running["worker"]?.exit).toBe(0);
-    expect(running["worker"]?.output).toContain("worker: stopped");
+    expect(running["worker"]?.output).toContain('"service":"worker","event":"stopped"');
     await running["api"]?.exit;
     await expect(fetch(`http://127.0.0.1:${settings["PSA_API_PORT"]}/healthz`)).rejects.toThrow();
   }, 30_000);
@@ -242,14 +263,30 @@ describe("in production the programs themselves refuse (issue #165)", () => {
       PSA_API_PORT: String(await freePort()),
     });
     expect(api.code).toBe(1);
-    expect(api.text).toContain(
-      "api: will not start in production: PSA_WHATSAPP_BASE_URL is not https://graph.facebook.com",
-    );
-    expect(api.text).toContain("PSA_DB_APP_URL holds a placeholder from the example file");
+    // One line, in the one shape: a code, the settings at fault and why, and no sentence.
+    expect(JSON.parse(api.text)).toMatchObject({
+      level: "error",
+      service: "api",
+      event: "could-not-start",
+      code: "not-for-production",
+      names: [
+        "PSA_WHATSAPP_BASE_URL",
+        "PSA_DB_APP_URL",
+        "PSA_DB_CROSS_URL",
+        "PSA_WHATSAPP_APP_SECRET",
+        "PSA_WHATSAPP_VERIFY_TOKEN",
+        "stand-in-channel",
+        "placeholder-secret",
+      ],
+    });
     const worker = await refused("apps/worker/src/main.ts", production);
     expect(worker.code).toBe(1);
-    expect(worker.text).toContain("worker: will not start in production:");
-    expect(worker.text).toContain("one channel credential for every tenant");
+    expect(JSON.parse(worker.text)).toMatchObject({
+      service: "worker",
+      event: "could-not-start",
+      code: "not-for-production",
+    });
+    expect(JSON.parse(worker.text).names).toContain("shared-channel-credential");
     expect(`${api.text}${worker.text}`).not.toMatch(/local-only|psa_app:|127\.0\.0\.1/);
   });
 
@@ -261,7 +298,15 @@ describe("in production the programs themselves refuse (issue #165)", () => {
     ]) {
       const result = await refused(file, { PSA_ENV: "" });
       expect(result.code, file).toBe(1);
-      expect(result.text, file).toContain("PSA_ENV must be set to development or production");
+      if (file.includes("mock-whatsapp")) {
+        expect(result.text, file).toContain("PSA_ENV must be set to development or production");
+      } else {
+        expect(JSON.parse(result.text), file).toMatchObject({
+          event: "could-not-start",
+          code: "settings",
+          names: ["PSA_ENV"],
+        });
+      }
     }
   });
 

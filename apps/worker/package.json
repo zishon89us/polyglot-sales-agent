@@ -5,6 +5,7 @@
   "description": "The process that runs jobs: answers conversations and sends what is waiting.",
   "type": "module",
   "dependencies": {
+    "@polyglot-sales-agent/ai": "workspace:*",
     "@polyglot-sales-agent/channel": "workspace:*",
     "@polyglot-sales-agent/channel-whatsapp": "workspace:*",
     "@polyglot-sales-agent/core": "workspace:*",

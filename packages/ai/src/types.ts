@@ -2,7 +2,7 @@
 // docs/design/notes/m3-u4-llm-client.md, sections 2 and 3). No provider's
 // type appears here or anywhere outside an adapter.
 
-import type { ModelFlag } from "@polyglot-sales-agent/core";
+import type { ModelFlag, TraceOutcome } from "@polyglot-sales-agent/core";
 
 /** A prompt a request's system text was assembled from. Written to the trace. */
 export interface PromptIdentity {
@@ -146,3 +146,47 @@ export interface LlmAdapter {
   generate(request: LlmRequest, signal: AbortSignal): Promise<AdapterAnswer>;
   health(signal: AbortSignal): Promise<Health>;
 }
+
+/**
+ * Where a call belongs: whose it is, the session it is for, and the turn
+ * that makes it. A turn's identifier is made each time its job's handler
+ * runs. (M3 unit U6; design note docs/design/notes/m3-u6-traces.md.)
+ */
+export interface CallPlace {
+  readonly tenantId: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+  /** When the turn began. */
+  readonly turnStartedAt: Date;
+}
+
+/**
+ * The record of one call. It has no field for free text: every text in it
+ * is an identifier, a name from this repository's own lists, or the
+ * model's name. The request, the reply, the claims, a tool's arguments and
+ * a provider's message are never put in one.
+ */
+export interface TraceRecord extends CallPlace {
+  /** When the adapter was called. */
+  readonly startedAt: Date;
+  /** Until it answered, failed, or the limit ran out. */
+  readonly latencyMs: number;
+  readonly prompts: readonly PromptIdentity[];
+  /** Null when the call gave no answer. `other` for a name the table would not take. */
+  readonly model: string | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  /** Millionths of a US dollar; null when unknown, which is not nothing. */
+  readonly costMicros: number | null;
+  /** The two prices the cost was worked out from; null exactly when the cost is. */
+  readonly priceInput: number | null;
+  readonly priceOutput: number | null;
+  /** The tools an `ok` answer asked for, in order. */
+  readonly toolNames: readonly string[];
+  readonly outcome: TraceOutcome;
+  /** The code of an `invalid-output` or a `provider-error`. */
+  readonly outcomeCode: InvalidOutputCode | ProviderErrorCode | null;
+}
+
+/** Stores one trace, in a transaction of its own. Rejects if it could not. */
+export type TraceRecorder = (record: TraceRecord) => Promise<void>;

@@ -1,9 +1,13 @@
 import { describe, expect, test } from "vitest";
 import {
   type DeploymentFacts,
+  PRODUCTION_REASONS,
   productionProblems,
+  productionReasons,
   readEnvironment,
   refuseInProduction,
+  startFailure,
+  startReasons,
 } from "./environment.ts";
 
 const real: DeploymentFacts = {
@@ -31,6 +35,47 @@ describe("where a process runs", () => {
       }
     },
   );
+});
+
+describe("why a program does not start, for a log line that carries no sentence (M3 unit U6)", () => {
+  const facts = {
+    developmentOnly: true,
+    whatsappBaseUrl: "http://127.0.0.1:4010",
+    secrets: { PSA_A: "local-only-x", PSA_B: "local-only-y" },
+    sharedChannelCredential: true,
+  };
+
+  test("each refusal has a short name, given once, in the order of the sentences", () => {
+    expect(productionReasons("production", facts)).toEqual([
+      "development-component",
+      "stand-in-channel",
+      "placeholder-secret",
+      "shared-channel-credential",
+    ]);
+    expect(productionProblems("production", facts)).toHaveLength(5);
+    expect(productionReasons("development", facts)).toEqual([]);
+    expect(
+      productionReasons("production", { whatsappBaseUrl: "https://graph.facebook.com" }),
+    ).toEqual([]);
+    expect([...PRODUCTION_REASONS].sort()).toEqual(
+      [...productionReasons("production", facts)].sort(),
+    );
+  });
+
+  test("a failure to start is an error with its sentence, a code and its reasons", () => {
+    const failure = startFailure("api: PSA_X is not set", "settings");
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).toMatchObject({ message: "api: PSA_X is not set", code: "settings" });
+    expect(startReasons(failure)).toEqual([]);
+    const reasons = ["stand-in-channel"];
+    const refused = startFailure("no", "not-for-production", reasons);
+    reasons.push("changed-afterwards");
+    expect(startReasons(refused)).toEqual(["stand-in-channel"]);
+    expect(startReasons(new Error("plain"))).toEqual([]);
+    expect(startReasons(null)).toEqual([]);
+    expect(startReasons({ reasons: ["a", 7, null, "b"] })).toEqual(["a", "b"]);
+    expect(startReasons({ reasons: "a" })).toEqual([]);
+  });
 });
 
 describe("what production refuses (issue #165)", () => {

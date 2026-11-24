@@ -15,6 +15,7 @@ import {
   SIGNATURE_HEADER,
   sign,
 } from "@polyglot-sales-agent/channel-whatsapp";
+import { logTo } from "@polyglot-sales-agent/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, test } from "vitest";
 import { BadSignatureLimiter } from "./bad-signature-limiter.ts";
@@ -777,5 +778,77 @@ describe("the guard does not depend on which channel it guards (NFR-M2)", () => 
     });
     expect(bad.statusCode).toBe(401);
     expect((await app.inject({ method: "POST", url: "/webhooks/whatsapp" })).statusCode).toBe(404);
+  });
+});
+
+describe("the line written for every request (NFR-O2; design note M3 U6, L3)", () => {
+  test("one line for each request answered, with an identifier made here and nothing of the request", async () => {
+    const lines: string[] = [];
+    const app = createApiServer({
+      trustedProxies: false,
+      log: logTo("api", (line) => lines.push(line)),
+    });
+    app.get("/ok", async () => "fine");
+    app.get("/broken", async () => {
+      throw new Error("Do you have a slot on Thursday? +15550142");
+    });
+    try {
+      await app.inject({
+        method: "GET",
+        url: "/ok?text=Thursday",
+        headers: { "x-request-id": "from-outside" },
+      });
+      await app.inject({ method: "GET", url: "/nowhere/15550142" });
+      await app.inject({ method: "GET", url: "/broken" });
+    } finally {
+      await app.close();
+    }
+    const read = lines.map((line) => JSON.parse(line));
+    expect(read.map((line) => [line.level, line.event, line.n.status])).toEqual([
+      ["info", "request", 200],
+      ["info", "request", 404],
+      ["error", "request", 503],
+    ]);
+    const ids = new Set<string>();
+    for (const line of read) {
+      expect(Object.keys(line)).toEqual([
+        "time",
+        "level",
+        "service",
+        "event",
+        "code",
+        "requestId",
+        "tenantId",
+        "conversationId",
+        "jobId",
+        "names",
+        "n",
+      ]);
+      expect(line).toMatchObject({
+        service: "api",
+        code: null,
+        tenantId: null,
+        conversationId: null,
+        jobId: null,
+        names: [],
+      });
+      expect(line.requestId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      expect(line.n.durationMs).toBeGreaterThanOrEqual(0);
+      ids.add(line.requestId);
+    }
+    expect(ids.size).toBe(3);
+    expect(lines.join(" ")).not.toMatch(/Thursday|5550142|from-outside|nowhere|broken/);
+  });
+
+  test("with no log, nothing is written and requests are answered as before", async () => {
+    const app = createApiServer({ trustedProxies: false });
+    app.get("/ok", async () => "fine");
+    try {
+      expect((await app.inject({ method: "GET", url: "/ok" })).statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
   });
 });

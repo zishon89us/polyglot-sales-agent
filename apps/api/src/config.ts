@@ -1,7 +1,14 @@
 // The API's settings, read from the environment once, at start. Everything
 // that is wrong is reported together, by name and never by value.
 
-import { type Environment, productionProblems, readEnvironment } from "@polyglot-sales-agent/core";
+import {
+  type DeploymentFacts,
+  type Environment,
+  productionProblems,
+  productionReasons,
+  readEnvironment,
+  startFailure,
+} from "@polyglot-sales-agent/core";
 
 export interface ApiConfig {
   readonly environment: Environment;
@@ -64,10 +71,10 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): A
     problems.push("PSA_API_PORT is not a port number");
   }
   if (problems.length > 0) {
-    throw new Error(`api: ${problems.join("; ")}`);
+    throw startFailure(`api: ${problems.join("; ")}`, "settings");
   }
   // Development components and placeholder secrets have no place in production (#165).
-  const refused = productionProblems(environment, {
+  const facts: DeploymentFacts = {
     whatsappBaseUrl: config.whatsappBaseUrl,
     secrets: {
       PSA_DB_APP_URL: config.appDatabaseUrl,
@@ -75,9 +82,14 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): A
       PSA_WHATSAPP_APP_SECRET: config.whatsappAppSecrets.join(","),
       PSA_WHATSAPP_VERIFY_TOKEN: config.whatsappVerifyToken,
     },
-  });
+  };
+  const refused = productionProblems(environment, facts);
   if (refused.length > 0) {
-    throw new Error(`api: will not start in production: ${refused.join("; ")}`);
+    throw startFailure(
+      `api: will not start in production: ${refused.join("; ")}`,
+      "not-for-production",
+      productionReasons(environment, facts),
+    );
   }
   return config;
 }
