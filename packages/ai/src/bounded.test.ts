@@ -10,7 +10,11 @@ import {
   MODEL_OUTPUT_TOKENS_MAX,
 } from "@polyglot-sales-agent/core";
 import { describe, expect, test } from "vitest";
-import { AdapterFault, bounded, type Timers } from "./bounded.ts";
+import { AdapterFault, bounded, markText, type Timers } from "./bounded.ts";
+
+/** The mark every scripted client of this file draws. */
+const MARK = "0123456789abcdef0123456789abcdef";
+
 import {
   FAKE_MODEL,
   FAKE_PLACE,
@@ -65,7 +69,7 @@ const settled = async (): Promise<void> => {
   }
 };
 
-const GOOD = { reply: "Hello.", claims: [], flags: [], toolCalls: [] };
+const GOOD = { reply: "Hello.", claims: [], flags: [], toolCalls: [], language: "en" };
 const REQUEST: LlmRequest = {
   system: "instructions",
   prompts: [{ name: "reply", version: 1 }],
@@ -84,7 +88,7 @@ function scripted(
   return {
     timers,
     adapter,
-    client: bounded(adapter, { record: keptTraces().record, timers: timers }),
+    client: bounded(adapter, { record: keptTraces().record, timers: timers, mark: () => MARK }),
   };
 }
 
@@ -140,6 +144,7 @@ describe("a call that answers in time", () => {
       claims: [],
       flags: [],
       toolCalls: [{ id: "1", name: "find", arguments: {} }],
+      language: "en",
     };
     const { client } = scripted([
       { kind: "answer", value: answer },
@@ -505,6 +510,7 @@ describe("a fault that is not the provider's", () => {
         claims: [],
         flags: [],
         toolCalls: [{ id: "1", name: "find", arguments: {} }],
+        language: "en",
       },
       truncated: false,
       usage: { inputTokens: 1, outputTokens: 1 },
@@ -527,6 +533,7 @@ describe("a fault that is not the provider's", () => {
         claims: [{ kind: "price", item: "s1", value: "150.00" }],
         flags: [],
         toolCalls: [],
+        language: "en",
       },
       truncated: false,
       usage: { inputTokens: 1, outputTokens: 1 },
@@ -635,13 +642,22 @@ describe("the scripted adapter", () => {
     const second = { ...REQUEST, messages: [{ role: "customer" as const, text: "second" }] };
     await client.generate(second, FAKE_PLACE);
     expect(adapter.remaining()).toBe(1);
-    expect(adapter.calls).toEqual([REQUEST, second]);
+    // What an adapter is given is a copy with every message's text marked as data.
+    const marked = (request: LlmRequest) => ({
+      ...request,
+      messages: request.messages.map((message) =>
+        "text" in message ? { ...message, text: markText(message.text, MARK) } : message,
+      ),
+    });
+    expect(adapter.calls).toEqual([marked(REQUEST), marked(second)]);
     expect(() => adapter.assertDone()).toThrow("1 steps");
     // What was asked is kept as it was: a caller that changes its request afterwards changes no record.
     const messages = [{ role: "customer" as const, text: "third" }];
     await client.generate({ ...REQUEST, messages }, FAKE_PLACE);
     messages.push({ role: "customer", text: "added after the call" });
-    expect(adapter.calls[2]?.messages).toEqual([{ role: "customer", text: "third" }]);
+    expect(adapter.calls[2]?.messages).toEqual([
+      { role: "customer", text: markText("third", MARK) },
+    ]);
     adapter.assertDone();
   });
 

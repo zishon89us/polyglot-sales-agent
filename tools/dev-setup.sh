@@ -35,6 +35,15 @@ if [ -z "$tenant" ]; then
   echo "dev-setup: made the demo tenant $tenant"
 fi
 
+# A tenant answers only once its profile is loaded. Loading it again
+# changes nothing.
+if ! ops profile load --tenant "$tenant" \
+    --file tools/demo-profile.json >/dev/null; then
+  echo "dev-setup: the demo tenant's profile could not be loaded" >&2
+  exit 1
+fi
+echo "dev-setup: loaded the demo profile"
+
 # The mock's page sends to this number by default. If it is connected
 # already (the database's code 23505), that is what was wanted.
 number="${PSA_DEV_NUMBER_ID:-100000000000002}"

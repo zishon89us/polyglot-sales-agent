@@ -53,6 +53,20 @@ export function loadBusinessProfile(app: Database, tenantId: string): Promise<Bu
   return withTenant(poolOf(app), tenantId, (tx) => readBusinessProfile(tx, tenantId));
 }
 
+/** The name of the tenant's pack, as stored. */
+export function packOf(app: Database, tenantId: string): Promise<string> {
+  return withTenant(poolOf(app), tenantId, async (tx) => {
+    const found = await tx.query<{ pack: string }>("SELECT pack FROM tenants WHERE id = $1", [
+      tenantId,
+    ]);
+    const row = found.rows[0];
+    if (row === undefined) {
+      throw noTenant("packOf");
+    }
+    return row.pack;
+  });
+}
+
 /** What a tenant still lacks to answer (design note, section 4). */
 export function answering(app: Database, tenantId: string): Promise<Answering> {
   return withTenant(poolOf(app), tenantId, async (tx) => {

@@ -30,6 +30,8 @@ const PRIVILEGES = {
   psa_app: {
     // Written once and read: a trace is never changed or removed by the application.
     ai_traces: "INSERT,SELECT",
+    // Its two columns of text are removed by jobs that are not built; no grant for that yet.
+    tool_calls: "INSERT,SELECT",
     audit_log: "INSERT,SELECT",
     channel_accounts: "SELECT",
     contacts: "INSERT,SELECT,UPDATE",
@@ -114,6 +116,7 @@ describe("the seed covers every tenant-owned table", () => {
       "services",
       "sessions",
       "tenants",
+      "tool_calls",
     ]);
   });
 
@@ -265,6 +268,15 @@ describe("as tenant A, tenant B's rows cannot be read or changed", () => {
       );
     expect(await trace(b.sessionId)).toBe("23503");
     expect(await trace(a.sessionId)).toBe(1);
+    // Migration 0010: a tool's run and its session.
+    const tool = (sessionId: string) =>
+      asA(
+        `INSERT INTO tool_calls (tenant_id, session_id, turn_id, tool, outcome, ended_at)
+         VALUES ($1, $2, gen_random_uuid(), 'find_times', 'failed', now())`,
+        [a.tenantId, sessionId],
+      );
+    expect(await tool(b.sessionId)).toBe("23503");
+    expect(await tool(a.sessionId)).toBe(1);
   });
 });
 

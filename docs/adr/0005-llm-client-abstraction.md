@@ -188,3 +188,25 @@ Proposed by the agent with the code; design note
   for each outcome, none for a refused request, and no marked text in any
   field); `apps/worker/src/traces.test.ts` (every record the client can
   make is stored by the real table).
+
+## Amendment, 2026-11-25 (M3 unit U7)
+
+Proposed by the agent with the code; design note
+`docs/design/notes/m3-u7-turn.md`.
+
+- **An answer says which language the customer wrote in.** `language`
+  joins the four parts: two small letters, or `und`. Anything else is a
+  fault of shape. It is the model's word, not a fact.
+- **A fifth kind of message, `tool-calls`:** what an earlier answer of
+  the same turn asked for. There was a result of a call and nowhere to
+  say what the call was, and a provider needs both.
+- **No message is instruction; only the system text is.** The client
+  gives an adapter a copy of the request in which every message's text
+  is between two lines that carry a random value drawn for that call.
+  The assistant's own earlier replies are marked too. Nothing is removed
+  from a text; a value some text already holds is thrown away and another
+  drawn. An adapter cannot be given an unmarked request.
+- **A stand-in for the model**, `stand-in-echo`, for development and the
+  end-to-end test: it calls nothing and answers with the customer's own
+  texts. The worker refuses to start with it in production. It is the
+  only adapter until U14.

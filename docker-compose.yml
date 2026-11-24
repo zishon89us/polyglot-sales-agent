@@ -21,6 +21,9 @@ x-settings: &settings
   PSA_WHATSAPP_BASE_URL: http://mock:4010
   PSA_WHATSAPP_API_VERSION: v27.0
   PSA_WHATSAPP_ACCESS_TOKEN: local-only-mock-token
+  # The stand-in for the model: it calls nothing and answers "Echo: ...".
+  PSA_MODEL_ADAPTER: stand-in-echo
+  PSA_PROMPT_CANARY: localonlycanary0000000000000000
 
 services:
   db:

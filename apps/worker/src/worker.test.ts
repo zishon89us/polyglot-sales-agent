@@ -2,14 +2,17 @@
 // message is answered with an echo, once; the send policy holds wherever
 // the worker stops (NFR-R2); messages of a conversation go in order.
 
+import { readFileSync } from "node:fs";
 import { createServer, connect as dial, type Server, type Socket } from "node:net";
+import { fileURLToPath } from "node:url";
+import { bounded, loadPrompt, standInEcho } from "@polyglot-sales-agent/ai";
 import type { Channel, SendResult } from "@polyglot-sales-agent/channel";
 import {
   createMockChannel,
   MOCK_ACCESS_TOKEN,
   type MockChannel,
 } from "@polyglot-sales-agent/channel-mock";
-import { BATCH_MAX_MS, BATCH_QUIET_MS, logTo } from "@polyglot-sales-agent/core";
+import { BATCH_MAX_MS, BATCH_QUIET_MS, logTo, readProfileFile } from "@polyglot-sales-agent/core";
 import {
   APP_ROLE,
   beginTurn,
@@ -18,6 +21,7 @@ import {
   type Job,
   type JobHandler,
   PROCESS_CONVERSATION_JOB,
+  replaceProfile,
   SEND_MESSAGES_JOB,
   storeInbound,
   withTenant,
@@ -28,6 +32,8 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { readConfig } from "./config.ts";
 import { createHandlers, SENDS_PER_RUN } from "./handlers.ts";
+import { traceRecorder } from "./traces.ts";
+import { REPLY_PROMPT, type TurnModel } from "./turn.ts";
 import { jobName, runWorker, UNKNOWN_JOB } from "./worker.ts";
 
 let database: TestDatabase;
@@ -59,8 +65,35 @@ beforeAll(async () => {
       "INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id) VALUES ($1, 'mock', $2)",
       [tenant[key], NUMBER[key]],
     );
+    // A tenant answers only with its required settings set (order of checks, step 8).
+    await replaceProfile(app, tenant[key], SALON, { operator: "test" });
   }
+  model = {
+    // The stand-in for the model: it answers "Echo: " and the batch's texts.
+    client: bounded(standInEcho(), { record: traceRecorder(app) }),
+    prompt: loadPrompt(PROMPTS, REPLY_PROMPT.name, REPLY_PROMPT.version),
+    fragments: {},
+    canary: "testcanary0000000000",
+    // The tests' own registry: the deployment's is imported by main.ts alone.
+    packs: { "faq-only": { name: "faq-only" } },
+  };
 }, 30_000);
+
+const PROMPTS = fileURLToPath(new URL("../../../prompts/", import.meta.url));
+const SALON = (() => {
+  const read = readProfileFile(
+    readFileSync(
+      fileURLToPath(
+        new URL("../../../packages/core/fixtures/profile.salon.en.json", import.meta.url),
+      ),
+    ),
+  );
+  if (!read.ok) {
+    throw new Error("the profile fixture does not load");
+  }
+  return read.profile;
+})();
+let model: TurnModel;
 
 afterAll(async () => {
   await crossPool.end();
@@ -113,6 +146,7 @@ const handlersFor = (channel: Channel): Record<string, JobHandler> =>
     channels: { mock: channel },
     accessToken: MOCK_ACCESS_TOKEN,
     report: (event, code) => failed.push(`${event} ${code}`),
+    model,
   });
 
 /** Runs every job that is due, as a worker would. `ahead` moves the queue's clock, to outlast a claim or a wait. */
@@ -406,6 +440,7 @@ describe("several messages in a row get one answer (US-C11; design note, section
       app,
       channels: { mock },
       accessToken: MOCK_ACCESS_TOKEN,
+      model,
       report: (event, code) => failed.push(`${event} ${code}`),
       clock: () => when,
     });
@@ -778,7 +813,7 @@ describe("the send policy when the channel answers", () => {
 
   test("a conversation on a channel this worker does not have: failed, with nothing sent", async () => {
     await arrives("hello");
-    const handlers = createHandlers({ app, channels: {}, accessToken: MOCK_ACCESS_TOKEN });
+    const handlers = createHandlers({ app, channels: {}, accessToken: MOCK_ACCESS_TOKEN, model });
     await workOnce(cross, handlers);
     await workOnce(cross, handlers);
     expect(await outbound()).toMatchObject([{ status: "failed", error_code: "no-channel" }]);
@@ -1361,6 +1396,8 @@ describe("settings", () => {
     PSA_WHATSAPP_BASE_URL: "http://127.0.0.1:4010",
     PSA_WHATSAPP_API_VERSION: "v27.0",
     PSA_WHATSAPP_ACCESS_TOKEN: " token ",
+    PSA_MODEL_ADAPTER: "stand-in-echo",
+    PSA_PROMPT_CANARY: "canary0123456789",
   };
 
   test("are read once", () => {
@@ -1373,7 +1410,34 @@ describe("settings", () => {
       whatsappApiVersion: "v27.0",
       whatsappAccessToken: "token",
       modelPrices: {},
+      modelAdapter: "stand-in-echo",
+      promptCanary: "canary0123456789",
     });
+  });
+
+  test("the model's adapter and the prompt's canary are required, and only the stand-in is known (design note M3 U7, A1)", () => {
+    const { PSA_MODEL_ADAPTER: _adapter, PSA_PROMPT_CANARY: _canary, ...without } = complete;
+    expect(() => readConfig(without)).toThrow(
+      "worker: PSA_PROMPT_CANARY is not set; PSA_MODEL_ADAPTER is not set",
+    );
+    for (const adapter of ["bedrock", "Stand-In-Echo", "echo"]) {
+      expect(() => readConfig({ ...complete, PSA_MODEL_ADAPTER: adapter })).toThrow(
+        "worker: PSA_MODEL_ADAPTER must be set to stand-in-echo",
+      );
+    }
+    for (const canary of [
+      "short",
+      "has a space in it 123",
+      "x".repeat(65),
+      "dash-dash-dash-dash-",
+    ]) {
+      expect(() => readConfig({ ...complete, PSA_PROMPT_CANARY: canary })).toThrow(
+        "worker: PSA_PROMPT_CANARY must be 16 to 64 letters and digits",
+      );
+    }
+    expect(
+      readConfig({ ...complete, PSA_PROMPT_CANARY: "x".repeat(64) }).promptCanary,
+    ).toHaveLength(64);
   });
 
   test("the prices of models are read, and a wrong one stops the worker, named and not repeated (design note M3 U6, C11)", () => {
@@ -1416,11 +1480,28 @@ describe("settings", () => {
       PSA_WHATSAPP_BASE_URL: "https://graph.facebook.com",
       PSA_WHATSAPP_API_VERSION: "v27.0",
       PSA_WHATSAPP_ACCESS_TOKEN: "a-real-one",
+      PSA_MODEL_ADAPTER: "stand-in-echo",
+      PSA_PROMPT_CANARY: "Rk3v9QmT2xLp8WzA",
     };
-    // Even with every value a real one.
+    // Even with every value a real one. And the stand-in for the model is
+    // refused on its own account (design note M3 U7, A2).
     expect(() => readConfig(real)).toThrow(
-      "worker: will not start in production: the worker sends with one channel credential for every tenant, which is for development only",
+      "worker: will not start in production: PSA_MODEL_ADAPTER names a stand-in for the model, which must never answer a customer; the worker sends with one channel credential for every tenant, which is for development only",
     );
+    expect(
+      (() => {
+        try {
+          readConfig(real);
+          return undefined;
+        } catch (error) {
+          return (error as { reasons?: string[] }).reasons;
+        }
+      })(),
+    ).toEqual(["stand-in-model", "shared-channel-credential"]);
+    // A canary left as the example file has it is a placeholder like any other.
+    expect(() =>
+      readConfig({ ...real, PSA_PROMPT_CANARY: "localonlycanary0000000000000000" }),
+    ).toThrow("PSA_PROMPT_CANARY holds a placeholder from the example file");
     expect(readConfig({ ...real, PSA_ENV: "development" }).environment).toBe("development");
     const attempt = () => readConfig({ ...complete, PSA_ENV: "production" });
     expect(attempt).toThrow("PSA_WHATSAPP_BASE_URL is not https://graph.facebook.com");

@@ -116,6 +116,12 @@ importers:
       '@polyglot-sales-agent/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@polyglot-sales-agent/pack-interface':
+        specifier: workspace:*
+        version: link:../../packages/pack-interface
+      '@polyglot-sales-agent/packs-registry':
+        specifier: workspace:*
+        version: link:../../packages/packs/registry
     devDependencies:
       '@polyglot-sales-agent/channel-mock':
         specifier: workspace:*

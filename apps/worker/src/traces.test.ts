@@ -55,7 +55,13 @@ beforeEach(async () => {
 });
 
 const WORDS = "CANARY do you have a slot on Thursday";
-const GOOD = { reply: `Hello Test Customer. ${WORDS}`, claims: [], flags: [], toolCalls: [] };
+const GOOD = {
+  reply: `Hello Test Customer. ${WORDS}`,
+  claims: [],
+  flags: [],
+  toolCalls: [],
+  language: "en",
+};
 const LONG = `a${"_-9".repeat(21)}`;
 const REQUEST: LlmRequest = {
   system: WORDS,

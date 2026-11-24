@@ -10,6 +10,10 @@ import {
   decideAfterSend,
   EXPIRED,
   HELD_BACK_WAIT_MS,
+  HISTORY_MESSAGES_MAX,
+  HISTORY_TEXT_MAX,
+  LANGUAGE_UNKNOWN,
+  languageSupported,
   type MessageClass,
   REPLY_DISCARDS_MAX,
   REPLY_WINDOW_MS,
@@ -17,11 +21,14 @@ import {
   SENDING_STALE_MS,
   type SendDecision,
   type SendOutcome,
+  TOOL_RESULT_MAX,
+  TOOL_RUN_TIMEOUT_MS,
+  type ToolOutcome,
   UNCONFIRMED,
 } from "@polyglot-sales-agent/core";
 import { type Database, poolOf } from "./connect.ts";
 import { enqueueJob } from "./jobs.ts";
-import { holdsLease, releaseLease, takeLease } from "./lease.ts";
+import { holdsLease, releaseLease, renewLease, takeLease } from "./lease.ts";
 import { lockConversation, noteAccepted, openSession, stamp } from "./sessions.ts";
 import { type Tx, withTenant } from "./tenant.ts";
 
@@ -216,6 +223,14 @@ export function finishTurn(
   handled: readonly string[],
   reply: string | undefined,
   now?: Date,
+  /**
+   * For a reply a turn with the model made: the turn, and the language
+   * the model said the customer wrote in (two small letters, or `und`).
+   * Stored on the reply; a language that is not `und` becomes the
+   * session's, and one that is not supported marks the session for good
+   * (design note M3 U7, section 7).
+   */
+  made?: { readonly turnId: string; readonly language: string },
 ): Promise<TurnEnd> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
     if (!(await holdsLease(tx, conversationId, turn.token))) {
@@ -249,12 +264,28 @@ export function finishTurn(
     if (reply !== undefined) {
       const stored = await tx.query<{ id: string }>(
         `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
-                               status, created_at)
-         VALUES ($1, $2, $3, 'outbound', 'assistant-reply', 'text', $4, 'pending', $5::timestamptz)
+                               status, created_at, turn_id, language)
+         VALUES ($1, $2, $3, 'outbound', 'assistant-reply', 'text', $4, 'pending', $5::timestamptz,
+                 $6, $7)
          RETURNING id`,
-        [tenantId, conversationId, turn.sessionId, reply, at],
+        [
+          tenantId,
+          conversationId,
+          turn.sessionId,
+          reply,
+          at,
+          made?.turnId ?? null,
+          made?.language ?? null,
+        ],
       );
       replyId = stored.rows[0]?.id as string;
+      if (made !== undefined && made.language !== LANGUAGE_UNKNOWN) {
+        await tx.query(
+          `UPDATE sessions SET language = $2, unsupported_language = unsupported_language OR $3
+           WHERE id = $1`,
+          [turn.sessionId, made.language, !languageSupported(made.language)],
+        );
+      }
       await enqueueJob(tx, {
         type: SEND_MESSAGES_JOB,
         tenantId,
@@ -271,6 +302,172 @@ export function finishTurn(
     await releaseLease(tx, conversationId, turn.token);
     return "stored";
   });
+}
+
+/**
+ * Extends a turn's lease, before each call to the model. False if the
+ * conversation is no longer this worker's: the turn must then stop.
+ */
+export function renewTurn(
+  app: Database,
+  tenantId: string,
+  conversationId: string,
+  token: string,
+  now?: Date,
+): Promise<boolean> {
+  return withTenant(poolOf(app), tenantId, (tx) => renewLease(tx, conversationId, token, now));
+}
+
+/** An earlier message of a session, as a request holds it. */
+export interface HistoryMessage {
+  readonly role: "customer" | "assistant";
+  /** Written by the customer, or by a model answering one. Untrusted either way. */
+  readonly text: string;
+}
+
+/**
+ * The session so far, oldest first, for a request to the model (design
+ * note M3 U7, section 4): the customer's texts a turn has dealt with, and
+ * the assistant's replies the customer has or may have. Never a staff
+ * member's message, a fixed text, a notice or a message the business
+ * began; never a row whose text is gone. The newest that fit both bounds.
+ */
+export function sessionHistory(
+  app: Database,
+  tenantId: string,
+  sessionId: string,
+): Promise<HistoryMessage[]> {
+  return withTenant(poolOf(app), tenantId, async (tx) => {
+    const found = await tx.query<{ direction: string; body: string }>(
+      `SELECT direction, body FROM messages
+       WHERE session_id = $1 AND kind = 'text' AND body IS NOT NULL AND body <> ''
+         AND ((direction = 'inbound' AND handled_at IS NOT NULL)
+           OR (direction = 'outbound' AND class = 'assistant-reply'
+               AND (status IN ('sent', 'delivered', 'read')
+                    OR (status = 'failed' AND error_code = $3))))
+       ORDER BY created_at DESC, id DESC
+       LIMIT $2`,
+      [sessionId, HISTORY_MESSAGES_MAX, UNCONFIRMED],
+    );
+    const kept: HistoryMessage[] = [];
+    let size = 0;
+    for (const row of found.rows) {
+      size += row.body.length;
+      if (size > HISTORY_TEXT_MAX) {
+        break;
+      }
+      kept.push({ role: row.direction === "inbound" ? "customer" : "assistant", text: row.body });
+    }
+    return kept.reverse();
+  });
+}
+
+/** What a tool gives back: plain data, or that the arguments are not ones it takes. */
+export type ToolReturn =
+  | { readonly outcome: "done"; readonly result: unknown }
+  | { readonly outcome: "refused" };
+
+export type ToolRun =
+  /** The conversation is no longer this worker's. The tool was not run and nothing was stored. */
+  | { readonly kind: "lost-lease" }
+  | { readonly kind: "ran"; readonly outcome: ToolOutcome; readonly result: unknown };
+
+/**
+ * Runs one tool for a turn and records it (design note M3 U7, section 6).
+ * The transaction first checks the turn's lease, then runs the tool and
+ * stores its row. A tool that throws, takes too long, or returns what is
+ * not plain data of a bounded size has its whole transaction undone; its
+ * row is then stored as `failed` in a second transaction that checks the
+ * lease again. A tool's own message is never stored.
+ */
+export async function runTool(
+  app: Database,
+  tenantId: string,
+  call: {
+    readonly conversationId: string;
+    readonly token: string;
+    readonly sessionId: string;
+    readonly turnId: string;
+    readonly tool: string;
+    /** As the model wrote them. Treated as the customer's text. */
+    readonly arguments: unknown;
+  },
+  run: (tx: Tx) => Promise<ToolReturn>,
+  timeoutMs: number = TOOL_RUN_TIMEOUT_MS,
+): Promise<ToolRun> {
+  const store = (tx: Tx, outcome: ToolOutcome, result: string | null, began: string) =>
+    tx.query(
+      `INSERT INTO tool_calls (tenant_id, session_id, turn_id, tool, arguments, result, outcome,
+                               created_at, ended_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::timestamptz,
+               greatest(clock_timestamp(), $8::timestamptz))`,
+      [
+        tenantId,
+        call.sessionId,
+        call.turnId,
+        call.tool,
+        JSON.stringify(call.arguments ?? null),
+        result,
+        outcome,
+        began,
+      ],
+    );
+  const lost = Symbol("lost");
+  let began: string | undefined;
+  try {
+    const ran = await withTenant(poolOf(app), tenantId, async (tx) => {
+      if (!(await holdsLease(tx, call.conversationId, call.token))) {
+        return lost;
+      }
+      began = await stamp(tx, undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // A tool that is still running after its time, or after its
+      // transaction ended, can ask nothing more of the connection: the
+      // connection goes back to the pool and may be another tenant's next.
+      let over = false;
+      const guarded = {
+        query: ((...query: unknown[]) => {
+          if (over) {
+            return Promise.reject(new Error("the tool's transaction is over"));
+          }
+          return (tx.query as (...given: unknown[]) => unknown)(...query);
+        }) as Tx["query"],
+      } as Tx;
+      const returned = await Promise.race([
+        run(guarded),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("the tool took too long")), timeoutMs);
+        }),
+      ]).finally(() => {
+        clearTimeout(timer);
+        over = true;
+      });
+      if (returned?.outcome === "refused") {
+        await store(tx, "refused", null, began);
+        return { kind: "ran", outcome: "refused", result: null } as const;
+      }
+      if (returned?.outcome !== "done") {
+        throw new Error("a tool returns done with a result, or refused");
+      }
+      const text = JSON.stringify(returned.result);
+      if (typeof text !== "string" || text.length > TOOL_RESULT_MAX) {
+        throw new Error("a tool's result is plain data of a bounded size");
+      }
+      await store(tx, "done", text, began);
+      // What is given on is what was stored: the result as JSON reads it back.
+      return { kind: "ran", outcome: "done", result: JSON.parse(text) } as const;
+    });
+    return ran === lost ? { kind: "lost-lease" } : (ran as ToolRun);
+  } catch {
+    // Everything the tool wrote is undone. What is recorded is that it failed.
+    return withTenant(poolOf(app), tenantId, async (tx) => {
+      if (!(await holdsLease(tx, call.conversationId, call.token))) {
+        return { kind: "lost-lease" } as const;
+      }
+      await store(tx, "failed", null, began ?? (await stamp(tx, undefined)));
+      return { kind: "ran", outcome: "failed", result: null } as const;
+    });
+  }
 }
 
 /**

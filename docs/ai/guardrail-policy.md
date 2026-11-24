@@ -68,7 +68,7 @@ All of this is code. The model is not called until every step has passed.
 | I2 | Only text reaches the model | Voice notes, images and other unsupported types are never stored or sent; a caption is treated as text | US-C12 tests |
 | I3 | Input length | A batch's text beyond 8,000 code points is left out: the newest messages are kept whole, the older are not given, and the model is told how many (#158; glossary, "A batch's customer text"). The session's earlier messages and tool results are not bounded by this | Unit test of the rule (M3 unit U4); its use in the turn is U7's |
 | I4 | No identity in the prompt | No phone number, no profile name (G14) | Unit test |
-| I5 | Data is marked as data | Customer messages, business data and tool results are each wrapped in a delimiter that the wrapped text cannot close: the delimiter carries a random value made for that call, and any copy of it inside the text is removed | Unit test with text that contains the delimiter |
+| I5 | Data is marked as data | Customer messages, business data and tool results are each wrapped in a delimiter that the wrapped text cannot close: the delimiter carries a random value made for that call. As built in M3 unit U7: every message's text is wrapped, the assistant's own earlier replies too, since they can repeat a customer's words; nothing is removed from any text, and a value that some text already holds is thrown away and another drawn | Unit test with text that contains the delimiter |
 | I6 | Only this tenant, only this session | The prompt holds the tenant's profile as identified items, a calendar (section 4), and this session's messages | Unit test on prompt assembly |
 
 No check tries to recognise an attack in the customer's text. Such filters

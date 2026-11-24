@@ -1,6 +1,7 @@
 // The worker's settings, read from the environment once, at start.
 // Everything that is wrong is reported together, by name and never by value.
 
+import { STAND_IN_ECHO } from "@polyglot-sales-agent/ai";
 import {
   type DeploymentFacts,
   type Environment,
@@ -27,6 +28,13 @@ export interface WorkerConfig {
    * A model with no price here has no cost on its traces, never zero.
    */
   readonly modelPrices: ModelPrices;
+  /**
+   * Which adapter the turn calls. The one value this version knows is a
+   * stand-in that calls nothing, for development; production refuses it.
+   */
+  readonly modelAdapter: typeof STAND_IN_ECHO;
+  /** The text the prompt carries so that a reply that repeats it can be stopped. */
+  readonly promptCanary: string;
 }
 
 export function readConfig(env: Readonly<Record<string, string | undefined>>): WorkerConfig {
@@ -59,8 +67,19 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): W
     whatsappApiVersion: need("PSA_WHATSAPP_API_VERSION"),
     whatsappAccessToken: need("PSA_WHATSAPP_ACCESS_TOKEN"),
     modelPrices: prices.ok ? prices.prices : {},
+    modelAdapter: STAND_IN_ECHO,
+    promptCanary: need("PSA_PROMPT_CANARY"),
   };
+  const adapter = need("PSA_MODEL_ADAPTER");
   const problems = missing.map((name) => `${name} is not set`);
+  if (adapter !== "" && adapter !== STAND_IN_ECHO) {
+    problems.push(
+      `PSA_MODEL_ADAPTER must be set to ${STAND_IN_ECHO}: no other model can be called yet`,
+    );
+  }
+  if (config.promptCanary !== "" && !/^[A-Za-z0-9]{16,64}$/.test(config.promptCanary)) {
+    problems.push("PSA_PROMPT_CANARY must be 16 to 64 letters and digits");
+  }
   if (!prices.ok) {
     // A wrong price is worse than no price: the worker does not start.
     problems.push(`PSA_MODEL_PRICES ${prices.problem}`);
@@ -81,7 +100,11 @@ export function readConfig(env: Readonly<Record<string, string | undefined>>): W
       PSA_DB_CROSS_URL: config.crossDatabaseUrl,
       PSA_WHATSAPP_APP_SECRET: config.whatsappAppSecrets.join(","),
       PSA_WHATSAPP_ACCESS_TOKEN: config.whatsappAccessToken,
+      PSA_PROMPT_CANARY: config.promptCanary,
     },
+    // A stand-in must never answer a customer. This refusal stands on its
+    // own: it does not depend on the one below.
+    standInModel: config.modelAdapter === STAND_IN_ECHO,
     sharedChannelCredential: true,
   };
   const refused = productionProblems(environment, facts);

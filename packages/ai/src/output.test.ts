@@ -21,6 +21,7 @@ const good = (change: Record<string, unknown> = {}): Record<string, unknown> => 
   claims: [{ kind: "opening-hours", item: "1", value: "09:00" }],
   flags: [],
   toolCalls: [],
+  language: "en",
   ...change,
 });
 const asks = (calls: unknown[], change: Record<string, unknown> = {}) => ({
@@ -28,6 +29,7 @@ const asks = (calls: unknown[], change: Record<string, unknown> = {}) => ({
   claims: [],
   flags: [],
   toolCalls: calls,
+  language: "en",
   ...change,
 });
 const call = (change: Record<string, unknown> = {}) => ({
@@ -49,6 +51,7 @@ describe("an answer that keeps the structure", () => {
         claims: [{ kind: "opening-hours", item: "1", value: "09:00" }],
         flags: ["asks-for-person"],
         toolCalls: [],
+        language: "en",
       },
     });
     if (!result.ok) {

@@ -1,0 +1,92 @@
+{
+  "settings": {
+    "currency": "SAR",
+    "support_contact": "+15550100",
+    "notification_email": "owner@example.com",
+    "business_hours": [
+      { "weekday": 7, "opens": "09:00", "closes": "17:00" },
+      { "weekday": 1, "opens": "09:00", "closes": "17:00" },
+      { "weekday": 2, "opens": "09:00", "closes": "17:00" },
+      { "weekday": 3, "opens": "09:00", "closes": "17:00" },
+      { "weekday": 4, "opens": "09:00", "closes": "17:00" }
+    ],
+    "opening_hours": [
+      { "weekday": 7, "opens": "10:00", "closes": "22:00" },
+      { "weekday": 1, "opens": "10:00", "closes": "22:00" },
+      { "weekday": 2, "opens": "10:00", "closes": "22:00" },
+      { "weekday": 3, "opens": "10:00", "closes": "22:00" },
+      { "weekday": 4, "opens": "10:00", "closes": "24:00" },
+      { "weekday": 5, "opens": "16:00", "closes": "24:00" },
+      { "weekday": 6, "opens": "10:00", "closes": "13:00" },
+      { "weekday": 6, "opens": "16:00", "closes": "22:00" }
+    ]
+  },
+  "services": [
+    {
+      "name": "Haircut",
+      "description": "Wash, cut and blow-dry. About 45 minutes.",
+      "price_minor": 12000
+    },
+    {
+      "name": "Children's haircut",
+      "description": "For children under twelve. About 30 minutes.",
+      "price_minor": 7000
+    },
+    {
+      "name": "Hair colour, full",
+      "description": "One colour from root to tip, with a wash and blow-dry. Long or very thick hair may cost more; we tell you before we start.",
+      "price_minor": 35000
+    },
+    {
+      "name": "Highlights",
+      "description": "Half or full head, with toner. Two to three hours.",
+      "price_minor": 45000
+    },
+    {
+      "name": "Keratin treatment",
+      "description": "Smoothing treatment that lasts about three months. Please do not wash your hair for 48 hours afterwards.",
+      "price_minor": 80000
+    },
+    { "name": "Blow-dry", "description": "Wash and style.", "price_minor": 8000 },
+    {
+      "name": "Bridal hair",
+      "description": "A trial two weeks before and styling on the day. Travel to the venue inside the city is included.",
+      "price_minor": 150000
+    },
+    { "name": "Manicure", "description": "Shape, cuticles and polish.", "price_minor": 9000 },
+    {
+      "name": "Gel manicure",
+      "description": "Lasts up to three weeks. Removal of old gel is included.",
+      "price_minor": 14000
+    },
+    { "name": "Pedicure", "description": "Soak, scrub, shape and polish.", "price_minor": 11000 },
+    {
+      "name": "Facial",
+      "description": "Deep clean, mask and massage. One hour. Tell us about any skin condition or allergy when you arrive.",
+      "price_minor": 20000
+    },
+    { "name": "Eyebrow threading", "description": "", "price_minor": 3000 }
+  ],
+  "policies": [
+    {
+      "title": "Cancelling or moving a visit",
+      "body": "You can cancel or move a visit free of charge up to 24 hours before it starts. Later than that, or if you do not come, we may ask for half the price before taking your next booking."
+    },
+    {
+      "title": "Arriving late",
+      "body": "We keep your place for 15 minutes. After that we may have to shorten the service or offer you another time."
+    },
+    {
+      "title": "Payment",
+      "body": "We take cash, cards and bank transfer. Prices include tax. We do not take payment through chat."
+    },
+    {
+      "title": "Children",
+      "body": "Children are welcome with an adult. We ask that children under five are not left in the waiting area alone."
+    },
+    {
+      "title": "If you are not happy",
+      "body": "Tell us within seven days and we will put it right free of charge. Refunds are decided by the manager, not by the assistant."
+    }
+  ]
+}
