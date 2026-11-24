@@ -257,6 +257,9 @@ describe("one call, one trace", () => {
     ["no turn", { ...FAKE_PLACE, turnId: undefined }],
     ["a time that is text", { ...FAKE_PLACE, turnStartedAt: "2026-11-24" }],
     ["a time that is not one", { ...FAKE_PLACE, turnStartedAt: new Date(Number.NaN) }],
+    ["a time before 1970", { ...FAKE_PLACE, turnStartedAt: new Date(-1) }],
+    ["a time the database cannot hold", { ...FAKE_PLACE, turnStartedAt: new Date(-8.64e15) }],
+    ["a time after the year 9999", { ...FAKE_PLACE, turnStartedAt: new Date(253_402_300_800_000) }],
   ])("T7: %s: a TypeError, no call and no trace", async (_name, place) => {
     const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);
     const kept = keptTraces();
@@ -266,6 +269,88 @@ describe("one call, one trace", () => {
     );
     expect(adapter.remaining()).toBe(1);
     expect(kept.traces).toEqual([]);
+  });
+
+  test("the first and last times a place may have are taken", async () => {
+    for (const turnStartedAt of [new Date(0), new Date(253_402_300_799_999)]) {
+      const { client, traces } = made([{ kind: "answer", value: GOOD }]);
+      await client.generate(REQUEST, { ...FAKE_PLACE, turnStartedAt });
+      expect(traces[0]?.turnStartedAt).toEqual(turnStartedAt);
+    }
+  });
+
+  test.each([
+    ["no time", () => new Date(Number.NaN)],
+    ["a time before 1970", () => new Date(-1)],
+    ["a time after the year 9999", () => new Date(253_402_300_800_000)],
+    ["something that is not a time", () => 1_795_000_000_000 as never],
+  ])("a clock that gives %s is found before the call: no call, no trace", async (_name, now) => {
+    const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);
+    const kept = keptTraces();
+    const client = bounded(adapter, { record: kept.record, now });
+    await expect(client.generate(REQUEST, FAKE_PLACE)).rejects.toBeInstanceOf(TypeError);
+    expect(adapter.remaining()).toBe(1);
+    expect(kept.traces).toEqual([]);
+  });
+
+  test("a clock that fails after the call does not lose it: the trace is stored with no latency, and the result is given", async () => {
+    let readings = 0;
+    const kept = keptTraces();
+    const client = bounded(new FakeLlmAdapter([{ kind: "answer", value: GOOD }]), {
+      record: kept.record,
+      now: () => {
+        readings += 1;
+        if (readings > 1) {
+          throw new Error("the clock is away");
+        }
+        return new Date(1_000);
+      },
+    });
+    expect((await client.generate(REQUEST, FAKE_PLACE)).kind).toBe("ok");
+    expect(kept.traces).toMatchObject([{ outcome: "ok", latencyMs: 0 }]);
+  });
+
+  test("a request whose prompts read differently each time: what is stored is what was checked, or there is no call", async () => {
+    const shifting = (later: unknown) => {
+      let reads = 0;
+      return {
+        ...REQUEST,
+        get prompts() {
+          reads += 1;
+          return (reads <= 2 ? [{ name: "reply", version: 1 }] : later) as LlmRequest["prompts"];
+        },
+      } as LlmRequest;
+    };
+    for (const later of [
+      [],
+      [{ name: "Do you have a slot?", version: 1 }],
+      Array(9).fill({ name: "a", version: 1 }),
+    ]) {
+      const adapter = new FakeLlmAdapter([{ kind: "answer", value: GOOD }]);
+      const kept = keptTraces();
+      const client = bounded(adapter, { record: kept.record });
+      const outcome = await client.generate(shifting(later), FAKE_PLACE).then(
+        () => "called",
+        () => "refused",
+      );
+      if (outcome === "called") {
+        expect(kept.traces[0]?.prompts).toEqual([{ name: "reply", version: 1 }]);
+      } else {
+        expect(adapter.remaining()).toBe(1);
+        expect(kept.traces).toEqual([]);
+      }
+    }
+  });
+
+  test("the prompts are copied: a change to the request during the call is not in the trace", async () => {
+    const { client, traces, timers } = made([{ kind: "hang" }]);
+    const prompts = [{ name: "reply", version: 1 }];
+    const pending = client.generate({ ...REQUEST, prompts, timeoutMs: 10 }, FAKE_PLACE);
+    prompts[0] = { name: "changed", version: 2 };
+    prompts.push({ name: "added", version: 3 });
+    timers.pass(10);
+    await pending;
+    expect(traces[0]?.prompts).toEqual([{ name: "reply", version: 1 }]);
   });
 
   test("the place is copied when the call starts: a change to it during the call changes nothing", async () => {
@@ -482,6 +567,36 @@ describe("what a call cost, on its trace (section 4)", () => {
       });
     },
   );
+
+  test("the prices are copied when the client is made: a change to the list afterwards changes no cost", async () => {
+    const prices: Record<string, { input: number; output: number }> = {
+      scripted: { input: 3_000_000, output: 15_000_000 },
+    };
+    const kept = keptTraces();
+    const client = bounded(
+      new FakeLlmAdapter([
+        { kind: "answer", value: GOOD, usage: USE },
+        { kind: "answer", value: GOOD, usage: USE },
+      ]),
+      { record: kept.record, prices },
+    );
+    await client.generate(REQUEST, FAKE_PLACE);
+    prices["scripted"] = { input: 1, output: 1 };
+    (prices as Record<string, unknown>)["other-model"] = { input: 1, output: 1 };
+    await client.generate(REQUEST, FAKE_PLACE);
+    expect(kept.traces.map((trace) => trace.costMicros)).toEqual([10_500, 10_500]);
+  });
+
+  test.each([
+    ["a fractional price", { m: { input: 0.5, output: 1 } }],
+    ["a price over the ceiling", { m: { input: 1_000_000_001, output: 1 } }],
+    ["a price that is a number", { m: 3 }],
+    ["a price that is null", { m: null }],
+  ])("a client is not made with %s", (_name, prices) => {
+    expect(() =>
+      bounded(new FakeLlmAdapter([]), { record: keptTraces().record, prices: prices as never }),
+    ).toThrow(TypeError);
+  });
 
   test("a long cloud identifier is a model's name", async () => {
     const model = "arn:aws:bedrock:us-east-1:000000000000:inference-profile/us.example.model-v1:0";

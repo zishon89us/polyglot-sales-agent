@@ -601,6 +601,16 @@ M0 Inception met its exit criteria on 2026-11-16; see
   tests yet,** so no trace is written by the running product; that is
   U7. No real price is set and no real model has been called. Row 47
   asks about the cost.
+  A third agent reviewed the code
+  (`reviews/2026-11-24-gate4-u6-traces.md`): 11 findings, none High,
+  four Medium, and 10 of 51 mutants alive (four equivalent or
+  unreachable). The Medium ones: a date the database cannot hold was
+  found out only after a paid call; the price list could be changed
+  after the client was made; the check on how lines are written could
+  be walked round; and a line's words were not all from closed lists.
+  Three are fixed. The fourth is fixed for reasons and job types and
+  not for a failure's code, and the note now says so. What is left is
+  #330.
 
 ## Next
 

@@ -69,11 +69,16 @@ describe("why a program does not start, for a log line that carries no sentence 
     expect(startReasons(failure)).toEqual([]);
     const reasons = ["stand-in-channel"];
     const refused = startFailure("no", "not-for-production", reasons);
-    reasons.push("changed-afterwards");
+    reasons.push("placeholder-secret");
     expect(startReasons(refused)).toEqual(["stand-in-channel"]);
     expect(startReasons(new Error("plain"))).toEqual([]);
     expect(startReasons(null)).toEqual([]);
-    expect(startReasons({ reasons: ["a", 7, null, "b"] })).toEqual(["a", "b"]);
+    // Only reasons of the list are given, whatever an error carries.
+    expect(
+      startReasons({
+        reasons: ["test-customer", 7, null, "shared-channel-credential", "stand-in-channel"],
+      }),
+    ).toEqual(["stand-in-channel", "shared-channel-credential"]);
     expect(startReasons({ reasons: "a" })).toEqual([]);
   });
 });

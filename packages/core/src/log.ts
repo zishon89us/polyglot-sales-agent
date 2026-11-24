@@ -28,7 +28,7 @@ export const LOG_EVENTS = [
 export type LogEvent = (typeof LOG_EVENTS)[number];
 
 /** The numbers a line can carry. Each is worked out by the code, never read from what arrived. */
-export const LOG_NUMBERS = ["status", "durationMs", "attempts"] as const;
+export const LOG_NUMBERS = ["status", "durationMs", "attempts", "port"] as const;
 export type LogNumber = (typeof LOG_NUMBERS)[number];
 
 export const LOG_NUMBER_MAX = 1_000_000_000;

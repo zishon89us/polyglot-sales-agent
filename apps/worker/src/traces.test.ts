@@ -210,6 +210,20 @@ describe("every record the client can make is one the table takes", () => {
     ]);
   });
 
+  test("the first and last times a trace may hold are stored", async () => {
+    for (const time of [new Date(0), new Date(253_402_300_799_999)]) {
+      const client = bounded(answers("scripted", { inputTokens: 1, outputTokens: 1 }), {
+        record: traceRecorder(app),
+        now: () => time,
+      });
+      expect((await client.generate(REQUEST, { ...place, turnStartedAt: time })).kind).toBe("ok");
+    }
+    expect((await stored()).map((row) => row.turn_started_at.toISOString())).toEqual([
+      "1970-01-01T00:00:00.000Z",
+      "9999-12-31T23:59:59.999Z",
+    ]);
+  });
+
   test("a session that does not exist: the call is made, the trace is refused, and the caller gets that and not the result", async () => {
     const client = bounded(answers("scripted", { inputTokens: 1, outputTokens: 1 }), {
       record: traceRecorder(app),

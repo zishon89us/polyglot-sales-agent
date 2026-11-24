@@ -110,6 +110,8 @@ describe("the price setting", () => {
     ["no output", '{"m":{"input":1}}', "not exactly"],
     ["an unknown key", '{"m":{"input":1,"output":1,"cached":1}}', "not exactly"],
     ["a misspelt key", '{"m":{"input":1,"outputs":1}}', "not exactly"],
+    ["a third key that sorts last", '{"m":{"input":1,"output":1,"zzz":1}}', "not exactly"],
+    ["a third key that sorts between", '{"m":{"input":1,"middle":1,"output":1}}', "not exactly"],
     ["a negative price", '{"m":{"input":-1,"output":1}}', "whole number"],
     ["a fractional price", '{"m":{"input":1.5,"output":1}}', "whole number"],
     ["a price as text", '{"m":{"input":"1","output":1}}', "whole number"],

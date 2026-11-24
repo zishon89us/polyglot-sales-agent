@@ -184,6 +184,38 @@ const LATENCY_MAX_MS = 2_147_483_647;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The last millisecond of the year 9999. */
+const TIME_MAX_MS = 253_402_300_799_999;
+
+/**
+ * Whether a time is one a trace can store: a date from 1970 to 9999. A
+ * date outside what the database holds would be found out only after the
+ * call was paid for.
+ */
+function storable(time: unknown): time is Date {
+  if (!(time instanceof Date)) {
+    return false;
+  }
+  const ms = time.getTime();
+  return !Number.isNaN(ms) && ms >= 0 && ms <= TIME_MAX_MS;
+}
+
+/** A copy of the price list that nothing outside can change, or an error if an entry is not a price. */
+function pricesOf(given: ModelPrices | undefined): ModelPrices {
+  const copy: Record<string, { input: number; output: number }> = Object.create(null);
+  for (const [name, price] of Object.entries(given ?? {})) {
+    if (
+      typeof price !== "object" ||
+      price === null ||
+      modelCostMicros({ inputTokens: 0, outputTokens: 0 }, price) === null
+    ) {
+      throw new TypeError("a model's price is two whole numbers within the limits");
+    }
+    copy[name] = Object.freeze({ input: price.input, output: price.output });
+  }
+  return Object.freeze(copy);
+}
+
 /** A copy of the place, or undefined if it is not one. */
 function placeOf(place: CallPlace): CallPlace | undefined {
   if (typeof place !== "object" || place === null) {
@@ -192,8 +224,7 @@ function placeOf(place: CallPlace): CallPlace | undefined {
   const { tenantId, sessionId, turnId, turnStartedAt } = place;
   if (
     ![tenantId, sessionId, turnId].every((id) => typeof id === "string" && UUID.test(id)) ||
-    !(turnStartedAt instanceof Date) ||
-    Number.isNaN(turnStartedAt.getTime())
+    !storable(turnStartedAt)
   ) {
     return undefined;
   }
@@ -361,7 +392,7 @@ export class LlmClient {
     this.#adapter = adapter;
     this.#timers = options.timers ?? REAL_TIMERS;
     this.#record = options.record;
-    this.#prices = options.prices ?? {};
+    this.#prices = pricesOf(options.prices);
     this.#now = options.now ?? (() => new Date());
     /** Stores a trace, within its own time limit. */
     const store = (record: TraceRecord): Promise<void> =>
@@ -389,7 +420,7 @@ export class LlmClient {
             claimKinds: [...request.claimKinds],
             tools: request.tools.map((tool) => tool.name),
           };
-          prompts = request.prompts.map(({ name, version }) => ({ name, version }));
+          prompts = [...request.prompts].map(({ name, version }) => ({ name, version }));
         }
       } catch (error) {
         return Promise.reject(error);
@@ -400,6 +431,8 @@ export class LlmClient {
       // Read twice, the request's own names may have changed between the
       // check and the copy; what is stored is what is checked here.
       if (
+        prompts.length < 1 ||
+        prompts.length > PROMPTS_PER_REQUEST_MAX ||
         !prompts.every(
           ({ name, version }) => PROMPT_NAME.test(name) && whole(version, PROMPT_VERSION_MAX),
         ) ||
@@ -414,9 +447,9 @@ export class LlmClient {
         );
       }
       const startedAt = this.#now();
-      if (!(startedAt instanceof Date) || Number.isNaN(startedAt.getTime())) {
+      if (!storable(startedAt)) {
         // Found before the call: a trace with no time could not be stored.
-        throw new TypeError("the client's clock gave no time");
+        throw new TypeError("the client's clock gave no time a trace can store");
       }
       let result: LlmResult | undefined;
       let thrown: { readonly error: unknown } | undefined;
@@ -431,7 +464,12 @@ export class LlmClient {
       } catch (error) {
         thrown = { error };
       }
-      const elapsed = this.#now().getTime() - startedAt.getTime();
+      let elapsed = 0;
+      try {
+        elapsed = this.#now().getTime() - startedAt.getTime();
+      } catch {
+        // A clock that fails now must not lose a call that was paid for: no latency is known.
+      }
       const record: TraceRecord = {
         ...where,
         startedAt,

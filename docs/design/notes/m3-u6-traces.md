@@ -68,8 +68,8 @@ keeps traces in a list.
 | T4 | The provider fails with a code from the list | One, `provider-error` with that code. No model, no counts, no cost | The result |
 | T5 | The adapter throws, or returns what is not an answer (a fault in this repository's code) | One, `fault`, no code. Then the error is thrown on, as now | The error |
 | T6 | The request is refused before the adapter is called: a bad time limit, a missing part, and from this unit **anything the table would refuse**: no prompt or more than 8, a prompt's name or version or an offered tool's name that does not fit its pattern | **None:** no call was made, and none is paid for | The error |
-| T7 | The place is not a place (a missing or malformed identifier or time) | None; no call is made | A `TypeError`, before the adapter is called |
-| T8 | The recorder fails (the database is away), or takes longer than its own limit of 5 seconds | None could be stored | **The recorder's error, and not the model's result.** The turn fails and is tried again as any job is. A reply made from a call that left no record is not sent. The repeated call costs again, and the first cost is lost: it could not be written anywhere |
+| T7 | The place is not a place (a missing or malformed identifier, or a time that is missing or outside 1970 to 9999, which the table could not hold), or the client's clock gives no such time | None; no call is made | A `TypeError`, before the adapter is called |
+| T8 | The recorder fails (the database is away), or takes longer than its own limit of 5 seconds | None is known to be stored. A recorder that was only slow is not stopped, so its row may still land after the caller was told it had not: a trace then exists for a call whose result was dropped. Both calls were paid for, so the sum stays right | **The recorder's error, and not the model's result.** The turn fails and is tried again as any job is. A reply made from a call that left no record is not sent. The repeated call costs again, and the first cost is lost: it could not be written anywhere |
 | T9 | The recorder fails after a fault (T5) | None | The adapter's error; the recorder's is dropped. The first fault is the one to see |
 | T10 | A turn makes several calls (a tool round, a retry) | One each, with the same turn | |
 | T11 | A call that timed out ends later (the adapter ignored the signal) | Still one, `timeout`. Nothing is added when it ends | |
@@ -211,17 +211,22 @@ request or conversation. The test checks that.
 text, an error's message or a phone number, because nothing in its
 shape holds one. A digit can appear only in a UUID, in the time, in a
 database's five-character error class, or as a number under one of
-three keys, each of which the code works out itself (a status, a
-duration, a count of attempts) and none of which is read from what
-arrived. A word can appear only if it is in a closed list, is a job's
-type, or is a failure's code, which is made from an error's own code or
-class and never from its message. A value that does not fit is replaced by `invalid` (or left
+a few keys, each of which the code works out itself (a status, a
+duration, a count of attempts, the port it listens on) and none of
+which is read from what arrived. A word in `event` is from a closed
+list. A word in `names` is a setting's name found in a failure's
+message, one of the listed reasons for refusing to start, or the type
+of a job this worker has a handler for. **A `code` is not from a closed
+list:** it is whatever short name an error carries as its code, or its
+class's name, never its message. Today every such error is thrown by
+this repository's code or a library; a library that put a customer's
+word in an error's code would get it into a line. A value that does not fit is replaced by `invalid` (or left
 out of `n`), never written. That is how US-C10, 3 is meant to be kept;
 the scan of a whole run (U18) checks that it was.
 
 | # | Line | From |
 | --- | --- | --- |
-| L1 | `listening`, `running`, `stopped` | Each service, once |
+| L1 | `listening` (the api, with its port), `running` (the worker), `stopped` | Each service, once |
 | L2 | `could-not-start`, with a code (`settings`, `not-for-production`, `database-unreachable`), and in `names` the settings the failure named and its short reasons | Each service. The sentence that M2 printed is no longer printed: an operator reads which settings and why from the names. That is less than a sentence said, and is the price of a line that cannot carry one |
 | L3 | `request`: the request's identifier, the status, the duration | The api, once for every request it answers, the webhook's among them |
 | L4 | `job`: the job's identifier and type, the tenant, the conversation if the job has one, the outcome as the code (`done`, `deferred`, `retry`, `dead`, `not-held`), the attempts, the duration | The worker, once for every job it runs. M2 reported only a retry and a dead job, without saying which |

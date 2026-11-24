@@ -60,16 +60,22 @@ try {
     log,
   });
   await server.listen({ host: config.host, port: config.port });
-  log({ level: "info", event: "listening" });
+  log({ level: "info", event: "listening", n: { port: config.port } });
   // Stop taking requests, let those in hand finish, then let go of the database.
-  process.once("SIGTERM", () => {
+  const stop = (): void => {
     server
       .close()
       .then(() => Promise.all([closeDatabase(app), closeDatabase(cross)]))
-      .catch(() => {
-        process.exitCode = 1;
-      });
-  });
+      .then(
+        () => log({ level: "info", event: "stopped" }),
+        (error: unknown) => {
+          log({ level: "error", event: "stopped", code: errorCode(error) });
+          process.exitCode = 1;
+        },
+      );
+  };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
 } catch (error) {
   // The settings the failure names and a code, never its message: an error
   // can carry a connection string.

@@ -58,14 +58,15 @@ try {
   process.once("SIGTERM", () => stop.abort());
   process.once("SIGINT", () => stop.abort());
   log({ level: "info", event: "running" });
+  const handlers = createHandlers({
+    app,
+    channels: { [whatsapp.name]: whatsapp },
+    accessToken: config.whatsappAccessToken,
+    report,
+  });
   await runWorker({
     cross,
-    handlers: createHandlers({
-      app,
-      channels: { [whatsapp.name]: whatsapp },
-      accessToken: config.whatsappAccessToken,
-      report,
-    }),
+    handlers,
     signal: stop.signal,
     report,
     ran: (job) =>
@@ -76,7 +77,8 @@ try {
         jobId: job.jobId,
         tenantId: job.tenantId,
         conversationId: job.conversationId,
-        names: [job.type],
+        // A type this worker has a handler for, or it is not written.
+        names: [Object.hasOwn(handlers, job.type) ? job.type : "unknown-job"],
         n: { durationMs: job.durationMs, attempts: job.attempts },
       }),
   });

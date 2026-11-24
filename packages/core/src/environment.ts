@@ -147,10 +147,13 @@ export function startFailure(
   return Object.assign(new Error(text), { code, reasons: [...reasons] });
 }
 
-/** The short reasons a failure to start carries, if it carries any. */
+/** The short reasons a failure to start carries, if it carries any, in the list's order. */
 export function startReasons(error: unknown): string[] {
   const reasons = (error as { reasons?: unknown } | null)?.reasons;
-  return Array.isArray(reasons) ? reasons.filter((reason) => typeof reason === "string") : [];
+  // Only the reasons of the list: whatever else an error carries is not written.
+  return Array.isArray(reasons)
+    ? PRODUCTION_REASONS.filter((reason) => reasons.includes(reason))
+    : [];
 }
 
 /** Throws one error listing every problem, if there is any. `who` is the process, such as `api`. */

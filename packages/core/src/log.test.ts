@@ -78,7 +78,7 @@ describe("a log line", () => {
       "turn-skipped",
       "send-failed",
     ]);
-    expect(LOG_NUMBERS).toEqual(["status", "durationMs", "attempts"]);
+    expect(LOG_NUMBERS).toEqual(["status", "durationMs", "attempts", "port"]);
   });
 
   const SENTENCE = "Do you have a slot on Thursday?";
@@ -134,6 +134,12 @@ describe("a log line", () => {
     expect(read({ code: "x15550142" })["code"]).toBe("invalid");
     expect(read({ code: "155501" })["code"]).toBe("invalid");
     expect(read({ code: "a".repeat(41) })["code"]).toBe("invalid");
+    // The channel's own number for a refused send: six digits at most, which no phone number is.
+    expect(read({ code: "meta-131047" })["code"]).toBe("meta-131047");
+    expect(read({ code: "meta-0" })["code"]).toBe("meta-0");
+    expect(read({ code: "meta-1555014" })["code"]).toBe("invalid");
+    expect(read({ code: "meta-155501420000000" })["code"]).toBe("invalid");
+    expect(read({ code: "meta-12a" })["code"]).toBe("invalid");
   });
 
   test("a name is a setting's or a job's type: no digit, no space, and twenty at most", () => {

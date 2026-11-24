@@ -591,8 +591,10 @@ can hold a sentence**: a value that does not fit its pattern is written
 as `invalid`. The api writes one line for each request it answers, with
 an identifier it makes itself; the worker writes one for each job it
 runs. A failure to start is a code, the settings it names and short
-reasons, not a sentence. A test finds any write to the console or a
-stream outside the two `main.ts` files. The trace of a model call is
+reasons, not a sentence. A test of the source's text finds the ordinary
+ways to write to the console or a stream outside the two `main.ts`
+files, in the services and in what they import; it is a check of names,
+not a proof. The trace of a model call is
 written by the model client itself: `generate` takes the call's place
 (tenant, session, turn) and hands the result on only after the trace is
 stored, so a reply is never made from a call that left no record. The
