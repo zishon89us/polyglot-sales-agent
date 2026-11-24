@@ -128,7 +128,7 @@ Not configurable in v1.0. Stated here so that each number has one home.
 | Reply length | At most 1,200 code points | #158; guardrail policy O7 |
 | Tool calls in one reply | At most 4 rounds, each of at most 4 calls, whose arguments are at most 2,000 code points as JSON and 5 levels deep, and whose identifier is at most 100 code points | #158 |
 | Claims in one answer | At most 30, each item and value at most 100 code points | #158 |
-| A batch's customer text | At most 8,000 code points given to one call; the newest messages kept whole. Provisional until the channel's limit on a message is read (M3 unit U5) | #158; guardrail policy I3 |
+| A batch's customer text | At most 8,000 code points given to one call; the newest messages kept whole. The channel's own limit on a customer's message was looked for when buttons and captions were built and not found on the pages read (decisions row 44, d), so this is the system's own number | #158; guardrail policy I3 |
 | Prompt file | At most 20,000 code points | #158 |
 | Provider health check | 5 seconds | ADR 0005 |
 | Ceilings on any model call | 60 seconds; 8,192 output tokens | #158 |

@@ -91,3 +91,12 @@ export type ModelFlag = (typeof MODEL_FLAGS)[number];
  */
 export const CORE_CLAIM_KINDS = ["price", "opening-hours", "service-detail", "policy"] as const;
 export type CoreClaimKind = (typeof CORE_CLAIM_KINDS)[number];
+
+/**
+ * The buttons the core itself puts on a message (state machines, steps 5
+ * and 11; ADR 0014, "Buttons of a pack"). `start` is the opt-in button:
+ * the two are one (decisions row 46). `stop` is defined here; whether any
+ * text carries it is decided with the fixed texts.
+ */
+export const CORE_BUTTONS = ["stop", "start", "person"] as const;
+export type CoreButton = (typeof CORE_BUTTONS)[number];

@@ -13,7 +13,11 @@ import {
   DATABASE_TIMEOUTS,
   type Database,
   type IncomingMessage,
+  loadMigrations,
   MIGRATE_ROLE,
+  messageAnswered,
+  migrateDown,
+  migrateUp,
   openDatabase,
   PROCESS_CONVERSATION_JOB,
   recordUnparsed,
@@ -22,7 +26,13 @@ import {
   tenantOfReceivingNumber,
   withTenant,
 } from "../src/index.ts";
-import { adopt, createTestDatabase, poolOf, type TestDatabase } from "./harness.ts";
+import {
+  adopt,
+  createTestDatabase,
+  MIGRATIONS_DIRECTORY,
+  poolOf,
+  type TestDatabase,
+} from "./harness.ts";
 
 let database: TestDatabase;
 let app: pg.Pool;
@@ -519,6 +529,285 @@ describe("storeInbound: who the customer is (data model, decision 16)", () => {
     expect(await pending).toMatchObject({ stored: 1 });
     expect(await rows("contacts")).toHaveLength(1);
   });
+});
+
+describe("storeInbound: a tap and a caption (M3 unit U5, design note sections 3 and 4)", () => {
+  const TAP = { kind: "button", body: null, buttonPayload: "core.stop" } as const;
+  /** A message sent in the conversation of this customer; returns its row's id. */
+  async function sent(
+    channelMessageId: string | null,
+    phone = "+15550142",
+    key: "a" | "b" = "a",
+  ): Promise<string> {
+    await store([message({ phone })], key);
+    const made = await withTenant(app, tenant[key], (tx) =>
+      tx.query<{ id: string }>(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, channel_message_id, body, status)
+         SELECT c.tenant_id, c.id, s.id, 'outbound', 'assistant-reply', 'text', $2, 'Choose', $3
+         FROM conversations c
+         JOIN contacts k ON k.id = c.contact_id
+         JOIN sessions s ON s.conversation_id = c.id AND s.ended_at IS NULL
+         WHERE k.phone = $1
+         RETURNING id`,
+        [phone, channelMessageId, channelMessageId === null ? "failed" : "sent"],
+      ),
+    );
+    return made.rows[0]?.id as string;
+  }
+  /** Stores a tap and returns its row's id. */
+  async function tap(overrides: Partial<IncomingMessage> = {}, key: "a" | "b" = "a") {
+    const tapped = message({ ...TAP, ...overrides });
+    await store([tapped], key);
+    const found = await withTenant(app, tenant[key], (tx) =>
+      tx.query<{ id: string }>(
+        "SELECT id FROM messages WHERE direction = 'inbound' AND channel_message_id = $1",
+        [tapped.channelMessageId],
+      ),
+    );
+    return found.rows[0]?.id as string;
+  }
+  const answeredBy = (id: string, key: "a" | "b" = "a") => messageAnswered(appDb, tenant[key], id);
+  const taps = async () =>
+    (
+      await withTenant(app, tenant.a, (tx) =>
+        tx.query(
+          "SELECT kind, body, button_payload, in_reply_to, caption_of FROM messages WHERE direction = 'inbound' AND kind <> 'text' OR caption_of IS NOT NULL ORDER BY created_at",
+        ),
+      )
+    ).rows;
+
+  test("M6: a tap is stored with what the button carried and what it answers, without a body, and queues a job", async () => {
+    await tap({ inReplyTo: "wamid.OUT1" });
+    expect(await taps()).toEqual([
+      {
+        kind: "button",
+        body: null,
+        button_payload: "core.stop",
+        in_reply_to: "wamid.OUT1",
+        caption_of: null,
+      },
+    ]);
+    expect(await jobs()).toHaveLength(1);
+  });
+
+  test("M2: a caption is stored as a text that says what it was under; M1: a typed text says nothing", async () => {
+    await store([
+      message({ body: "Can you do this?", captionOf: "image" }),
+      message({ body: "And this?", captionOf: "video" }),
+      message({ body: "typed" }),
+    ]);
+    const stored = await withTenant(app, tenant.a, (tx) =>
+      tx.query("SELECT kind, body, caption_of FROM messages ORDER BY body"),
+    );
+    expect(stored.rows).toEqual([
+      { kind: "text", body: "And this?", caption_of: "video" },
+      { kind: "text", body: "Can you do this?", caption_of: "image" },
+      { kind: "text", body: "typed", caption_of: null },
+    ]);
+  });
+
+  test("K1: a tap answers the message this conversation was sent", async () => {
+    const id = await sent("wamid.OUT1");
+    expect(await answeredBy(await tap({ inReplyTo: "wamid.OUT1" }))).toBe(id);
+  });
+
+  test("K2: not a message sent in another conversation of the same tenant", async () => {
+    await sent("wamid.OUT1", "+15550177");
+    expect(await answeredBy(await tap({ inReplyTo: "wamid.OUT1" }))).toBeNull();
+  });
+
+  test("K3: not another tenant's message, and another tenant cannot ask about this tap", async () => {
+    const theirs = await sent("wamid.OUT1", "+15550142", "b");
+    const mine = await tap({ inReplyTo: "wamid.OUT1" });
+    expect(await answeredBy(mine)).toBeNull();
+    expect(await answeredBy(mine, "b")).toBeNull();
+    const own = await tap({ inReplyTo: "wamid.OUT1" }, "b");
+    expect(await answeredBy(own, "b")).toBe(theirs);
+  });
+
+  test("K4 and K5: an identifier nothing has, and no identifier, answer nothing", async () => {
+    await sent("wamid.OUT1");
+    expect(await answeredBy(await tap({ inReplyTo: "wamid.NOBODY" }))).toBeNull();
+    expect(await answeredBy(await tap({ inReplyTo: null }))).toBeNull();
+    expect(await answeredBy(await tap())).toBeNull();
+  });
+
+  test("K6: not a message from the customer, even one with that identifier", async () => {
+    const typed = message({ channelMessageId: "wamid.FROMCUSTOMER" });
+    await store([typed]);
+    expect(await answeredBy(await tap({ inReplyTo: "wamid.FROMCUSTOMER" }))).toBeNull();
+  });
+
+  test("K7: a message whose identifier is recorded after the tap is stored is found from then on", async () => {
+    const id = await sent(null);
+    const tapped = await tap({ inReplyTo: "wamid.LATE" });
+    expect(await answeredBy(tapped)).toBeNull();
+    await administrator.query(
+      "UPDATE messages SET channel_message_id = 'wamid.LATE', status = 'sent' WHERE id = $1",
+      [id],
+    );
+    expect(await answeredBy(tapped)).toBe(id);
+  });
+
+  test("K8: a message that never got an identifier is never matched", async () => {
+    await sent(null);
+    expect(await answeredBy(await tap({ inReplyTo: "wamid.NEVER" }))).toBeNull();
+  });
+
+  test("K9: the same button tapped twice is two messages, each answering the same one", async () => {
+    const id = await sent("wamid.OUT1");
+    const first = await tap({ inReplyTo: "wamid.OUT1" });
+    const second = await tap({ inReplyTo: "wamid.OUT1" });
+    expect(first).not.toBe(second);
+    expect([await answeredBy(first), await answeredBy(second)]).toEqual([id, id]);
+  });
+
+  test("K10: one tap delivered twice is one row", async () => {
+    const tapped = message({ ...TAP, inReplyTo: "wamid.OUT1" });
+    await store([tapped]);
+    await store([tapped]);
+    expect(await taps()).toHaveLength(1);
+    expect(await jobs()).toHaveLength(1);
+  });
+
+  test("asked about a message that is not a tap, or about nothing that exists, the answer is none", async () => {
+    await sent("wamid.OUT1");
+    const [typed] = await rows("messages");
+    expect(await answeredBy(typed?.id as string)).toBeNull();
+    expect(await answeredBy("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+
+  test.each([
+    ["a tap with no payload", { kind: "button", body: null }],
+    [
+      "a payload on a message that is not a tap",
+      { kind: "image", body: null, buttonPayload: "core.stop" },
+    ],
+    ["a payload on a text", { buttonPayload: "core.stop" }],
+    ["a tap with a body", { ...TAP, body: "Stop" }],
+    ["a payload with a space", { ...TAP, buttonPayload: "core stop" }],
+    ["an empty payload", { ...TAP, buttonPayload: "" }],
+    ["a payload of 257 characters", { ...TAP, buttonPayload: "x".repeat(257) }],
+    ["an answer on a message that is not a tap", { inReplyTo: "wamid.OUT1" }],
+    ["an answered identifier with a space", { ...TAP, inReplyTo: "wamid OUT1" }],
+    ["an answered identifier of 129 characters", { ...TAP, inReplyTo: "w".repeat(129) }],
+    ["a caption of something else", { captionOf: "document" as never }],
+    [
+      "a caption on a message that is not a text",
+      { kind: "image", body: null, captionOf: "image" },
+    ],
+    ["a caption on a tap", { ...TAP, captionOf: "image" }],
+  ] as [string, Partial<IncomingMessage>][])(
+    "the table refuses %s, and stores nothing of the webhook",
+    async (_name, bad) => {
+      await expect(store([message(), message(bad)])).rejects.toThrow(/check constraint/);
+      expect(await rows("messages")).toEqual([]);
+      expect(await jobs()).toEqual([]);
+    },
+  );
+
+  test("the limits are met exactly: a payload of 256 and an answered identifier of 128", async () => {
+    await tap({ buttonPayload: "x".repeat(256), inReplyTo: "w".repeat(128) });
+    expect(await taps()).toHaveLength(1);
+  });
+
+  test("a sent message of kind button needs no payload, and may not have one", async () => {
+    await store([message()]);
+    const insert = (payload: string | null) =>
+      administrator.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, button_payload)
+         SELECT c.tenant_id, c.id, s.id, 'outbound', 'assistant-reply', 'button', 'Choose', 'pending', $1
+         FROM conversations c JOIN sessions s ON s.conversation_id = c.id`,
+        [payload],
+      );
+    await insert(null);
+    await expect(insert("core.stop")).rejects.toThrow(/messages_tap_has_(payload|no_body)/);
+    await expect(
+      administrator.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body, status, caption_of)
+         SELECT c.tenant_id, c.id, s.id, 'outbound', 'assistant-reply', 'text', 'A picture', 'pending', 'image'
+         FROM conversations c JOIN sessions s ON s.conversation_id = c.id`,
+      ),
+    ).rejects.toThrow(/messages_caption_is_inbound_text/);
+  });
+});
+
+describe("migration 0008, with rows", () => {
+  test("the way forward renames a customer's old `button` rows and leaves a sent one; the way back loses what a tap carried and keeps the rows", async () => {
+    const scratch = await createTestDatabase({ migrate: true });
+    const pool = new pg.Pool({ connectionString: scratch.url(APP_ROLE), max: 2 });
+    try {
+      const owner = await scratch.administrator();
+      const client = await scratch.client(MIGRATE_ROLE);
+      const all = loadMigrations(MIGRATIONS_DIRECTORY);
+      const later = all.length - all.findIndex((migration) => migration.name === "taps") - 1;
+      expect(later).toBeGreaterThanOrEqual(0);
+      for (let step = 0; step < later; step += 1) {
+        await migrateDown(client, all);
+      }
+      const made = await owner.query<{ id: string }>(
+        `INSERT INTO tenants (name, pack, time_zone, default_language)
+         VALUES ('Salon Noor', 'faq-only', 'UTC', 'en') RETURNING id`,
+      );
+      const id = made.rows[0]?.id as string;
+      await owner.query(
+        "INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id) VALUES ($1, 'whatsapp', $2)",
+        [id, NUMBER.a],
+      );
+      const scratchDb = adopt(APP_ROLE, pool);
+      await storeInbound(
+        scratchDb,
+        id,
+        NUMBER.a,
+        [
+          message({
+            channelMessageId: "wamid.TAP",
+            kind: "button",
+            body: null,
+            buttonPayload: "core.stop",
+            inReplyTo: "wamid.OUT1",
+          }),
+          message({ channelMessageId: "wamid.CAPTION", body: "This style?", captionOf: "image" }),
+        ],
+        [],
+      );
+      const kinds = async () =>
+        (
+          await owner.query(
+            "SELECT channel_message_id AS id, direction, kind, body FROM messages ORDER BY channel_message_id",
+          )
+        ).rows;
+
+      expect(await migrateDown(client, all)).toBe("taps");
+      expect(await kinds()).toEqual([
+        { id: "wamid.CAPTION", direction: "inbound", kind: "text", body: "This style?" },
+        { id: "wamid.TAP", direction: "inbound", kind: "button", body: null },
+      ]);
+      // As it could be before 0008: a customer's row and a sent one, both of kind `button`.
+      await owner.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, channel_message_id, body, status)
+         SELECT tenant_id, conversation_id, session_id, 'outbound', 'assistant-reply', 'button', 'wamid.OUT1', 'Choose', 'sent'
+         FROM messages WHERE channel_message_id = 'wamid.TAP'`,
+      );
+
+      await migrateUp(client, all);
+      expect(await kinds()).toEqual([
+        { id: "wamid.CAPTION", direction: "inbound", kind: "text", body: "This style?" },
+        { id: "wamid.OUT1", direction: "outbound", kind: "button", body: "Choose" },
+        { id: "wamid.TAP", direction: "inbound", kind: "quick-reply", body: null },
+      ]);
+      expect(
+        (
+          await owner.query(
+            "SELECT count(*)::int AS n FROM messages WHERE button_payload IS NOT NULL OR in_reply_to IS NOT NULL OR caption_of IS NOT NULL",
+          )
+        ).rows,
+      ).toEqual([{ n: 0 }]);
+    } finally {
+      await pool.end();
+      await scratch.drop();
+    }
+  }, 30_000);
 });
 
 describe("storeInbound: a status", () => {

@@ -1,7 +1,8 @@
 // Meta's webhook payload, turned into the system's own events. The shapes
-// are those of the fixtures under fixtures/2026-11-18, which were written
-// from Meta's documentation as read on that date. No live event has been
-// seen (threat model, A7).
+// are those of the fixtures under fixtures/2026-11-18 and, for a tap on a
+// button and a caption, fixtures/2026-11-24, which were written from Meta's
+// documentation as read on those dates. No live event has been seen
+// (threat model, A7).
 //
 // Strict where it matters and tolerant elsewhere. A field it does not know
 // is ignored. A part it does not handle (another webhook field, a status it
@@ -17,9 +18,14 @@ import type {
   ChannelUser,
   DeliveryStatus,
   EventBatch,
+  InboundContent,
   ParsedWebhook,
 } from "@polyglot-sales-agent/channel";
-import { DELIVERY_STATUSES } from "@polyglot-sales-agent/channel";
+import {
+  BUTTON_PAYLOAD,
+  CHANNEL_MESSAGE_ID,
+  DELIVERY_STATUSES,
+} from "@polyglot-sales-agent/channel";
 
 type Json = Readonly<Record<string, unknown>>;
 
@@ -111,6 +117,78 @@ function userId(value: unknown): string | null {
   return id;
 }
 
+/** A part of a message that should be an object, or undefined: never a reason to drop the message. */
+function part(value: unknown): Json | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Json)
+    : undefined;
+}
+
+/**
+ * The identifier of the message a tap answers, or null. What is not an
+ * identifier is taken as none: the tap is kept without it.
+ */
+function answered(item: Json): string | null {
+  const id = part(item["context"])?.["id"];
+  return typeof id === "string" && CHANNEL_MESSAGE_ID.test(id) ? id : null;
+}
+
+/** A tap, if what the button carried can be kept; otherwise undefined. */
+function tap(payload: unknown, item: Json): InboundContent | undefined {
+  return typeof payload === "string" && BUTTON_PAYLOAD.test(payload)
+    ? { type: "button", payload, inReplyTo: answered(item) }
+    : undefined;
+}
+
+/** The words typed under a picture or a video, or undefined if there are none to read. */
+function caption(media: unknown): string | undefined {
+  const value = part(media)?.["caption"];
+  if (typeof value !== "string" || value.length > 65_536) {
+    return undefined;
+  }
+  const body = value.replaceAll("\u0000", "");
+  return body === "" ? undefined : body;
+}
+
+/**
+ * What a message holds. Which reading applies is decided by its `type`
+ * alone: a text that also carries another part is a text. A tap or a
+ * caption that cannot be read makes the message an unread one, never a
+ * malformed one: the customer did send something.
+ */
+function content(type: string, item: Json): InboundContent {
+  if (type === "text") {
+    return { type: "text", body: messageText(object(item["text"])["body"]) };
+  }
+  if (type === "image" || type === "video") {
+    const body = caption(item[type]);
+    return body === undefined
+      ? { type: "unsupported", channelType: type }
+      : { type: "text", body, captionOf: type };
+  }
+  if (type === "interactive") {
+    // A tap on a reply button. A list's row or a form's answer is not read.
+    const interactive = part(item["interactive"]);
+    const read =
+      interactive?.["type"] === "button_reply"
+        ? tap(part(interactive["button_reply"])?.["id"], item)
+        : undefined;
+    return read ?? { type: "unsupported", channelType: "interactive" };
+  }
+  if (type === "button") {
+    // A tap on a quick-reply button of a template. `button` is this
+    // system's own name for a tap that was read, so one that was not is
+    // named otherwise.
+    return (
+      tap(part(item["button"])?.["payload"], item) ?? {
+        type: "unsupported",
+        channelType: "quick-reply",
+      }
+    );
+  }
+  return { type: "unsupported", channelType: /^[a-z_]{1,40}$/.test(type) ? type : "unknown" };
+}
+
 function message(raw: unknown): ChannelEvent {
   const item = object(raw);
   const from: ChannelUser = { phone: phone(item["from"]), userId: userId(item["from_user_id"]) };
@@ -123,10 +201,7 @@ function message(raw: unknown): ChannelEvent {
     channelMessageId: identifier(item["id"], 128),
     from,
     sentAt: time(item["timestamp"]),
-    content:
-      type === "text"
-        ? { type: "text", body: messageText(object(item["text"])["body"]) }
-        : { type: "unsupported", channelType: /^[a-z_]{1,40}$/.test(type) ? type : "unknown" },
+    content: content(type, item),
   };
 }
 

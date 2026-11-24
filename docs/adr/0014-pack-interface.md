@@ -325,3 +325,31 @@ Proposed by the agent with the code.
   `main.ts` files will when the turn exists (U7).
 - **`apps/ops` depends on the registry for its test only.** The program
   does not import it, and a test reads its sources to show that.
+
+## Amendment, 2026-11-24 (M3 unit U5)
+
+Proposed by the agent with the code. It answers what the table above
+asked of U5.
+
+- **Whether start and opt-in are one button:** one, `core.start`
+  (decisions row 46). The core defines three payloads, `core.stop`,
+  `core.start` and `core.person`. Which messages carry which button is
+  U8's.
+- **Whether the channel returns a payload as it was sent, and its limit
+  on length:** Meta's page on reply buttons, read on 2026-11-24, gives a
+  button an identifier of at most 256 characters and shows it returned in
+  the tap. No live tap has been seen. A payload is therefore 1 to 256
+  printable ASCII characters without spaces, the same in the interface,
+  the core and the table, and a channel may carry less: the in-memory
+  channel carries 100.
+- **The owner test:** `packages/core/src/buttons.test.ts` shows that
+  every payload the core builds begins `core.` and reads back as its
+  action, and that a payload of another owner is not one of the core's
+  buttons.
+- **Whose conversation a tap came from (#222, first part):** a tap is
+  stored in the conversation of the customer who sent it, with the
+  identifier of the message it names. Whether that message was sent in
+  the same conversation is found when asked, and is a record: for the
+  core's buttons it is not a condition, since each of them acts only on
+  the sender's own conversation. A pack whose button names something of
+  value must check that the thing belongs to the sender (M5).

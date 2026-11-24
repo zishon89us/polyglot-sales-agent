@@ -19,10 +19,22 @@ export interface IncomingMessage {
   readonly phone: string | null;
   /** The channel's own identifier for the customer, or null. One of the two is set. */
   readonly userId: string | null;
-  /** `text`, or the channel's name for a type this version does not read. */
+  /**
+   * `text`, `button` for a tap that was read, or the channel's name for a
+   * type this version does not read.
+   */
   readonly kind: string;
-  /** The text, for a text message; null otherwise. Untrusted. */
+  /**
+   * The text, for a text message; null otherwise. Untrusted. Only a text's
+   * body is the customer's words: a tap has none.
+   */
   readonly body: string | null;
+  /** For a tap: what the button carried. Untrusted. Set exactly when `kind` is `button`. */
+  readonly buttonPayload?: string | null;
+  /** For a tap: the channel's identifier of the message it answers, if it named one. */
+  readonly inReplyTo?: string | null;
+  /** For a text typed under a picture or a video: which. */
+  readonly captionOf?: "image" | "video" | null;
   /** When the channel says it was sent. */
   readonly sentAt: Date;
 }
@@ -241,8 +253,9 @@ export function storeInbound(
       const sessionId = await sessionFor(tx, tenantId, conversationId, at);
       await tx.query(
         `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, kind,
-                               channel_message_id, body, channel_sent_at, created_at)
-         VALUES ($1, $2, $3, 'inbound', $4, $5, $6, $7, $8::timestamptz)`,
+                               channel_message_id, body, channel_sent_at, created_at,
+                               button_payload, in_reply_to, caption_of)
+         VALUES ($1, $2, $3, 'inbound', $4, $5, $6, $7, $8::timestamptz, $9, $10, $11)`,
         [
           tenantId,
           conversationId,
@@ -252,6 +265,9 @@ export function storeInbound(
           message.body,
           message.sentAt,
           at,
+          message.buttonPayload ?? null,
+          message.inReplyTo ?? null,
+          message.captionOf ?? null,
         ],
       );
       // The reply window opens from the earlier of the channel's time for
@@ -353,4 +369,33 @@ export async function recordUnparsed(
     ],
   );
   return result.rows.length === 1;
+}
+
+/**
+ * The message a tap answers: the one sent in the tap's own conversation
+ * under the identifier the tap named. Looked for when asked, not when the
+ * tap was stored, so a message whose identifier was recorded later is
+ * found. Null means "not matched", never "forged": a message whose send
+ * ended with nobody knowing whether it arrived has no identifier, though
+ * the customer may hold it. For the core's own buttons this is a record
+ * and not a condition (design note, M3 unit U5, section 3).
+ */
+export function messageAnswered(
+  app: Database,
+  tenantId: string,
+  tapMessageId: string,
+): Promise<string | null> {
+  return withTenant(poolOf(app), tenantId, async (tx) => {
+    const found = await tx.query<{ id: string }>(
+      `SELECT sent.id
+       FROM messages tap
+       JOIN messages sent
+         ON sent.conversation_id = tap.conversation_id
+        AND sent.direction = 'outbound'
+        AND sent.channel_message_id = tap.in_reply_to
+       WHERE tap.id = $1 AND tap.direction = 'inbound' AND tap.kind = 'button'`,
+      [tapMessageId],
+    );
+    return found.rows[0]?.id ?? null;
+  });
 }

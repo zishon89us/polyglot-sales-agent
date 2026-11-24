@@ -5,9 +5,10 @@
 // program (`main.ts`) listens on this machine only unless told to serve a
 // container, and refuses to start in production.
 //
-// What it imitates was read from Meta's documentation on 2026-11-18; see
-// `packages/channel-whatsapp/fixtures/2026-11-18/README.md`. It imitates
-// only what the product uses.
+// What it imitates was read from Meta's documentation on 2026-11-18 and,
+// for reply buttons, taps and captions, on 2026-11-24; see the README of
+// each date under `packages/channel-whatsapp/fixtures`. It imitates only
+// what the product uses.
 
 import { randomBytes } from "node:crypto";
 import { SIGNATURE_HEADER, sign } from "@polyglot-sales-agent/channel-whatsapp";
@@ -45,6 +46,8 @@ export interface RecordedSend {
   readonly to: string | null;
   readonly recipient: string | null;
   readonly body: string;
+  /** The reply buttons it carried, as sent: none for a plain text. */
+  readonly buttons: readonly { readonly id: string; readonly title: string }[];
 }
 
 interface Failure {
@@ -56,6 +59,67 @@ const PHONE = /^\+?[1-9][0-9]{1,14}$/;
 
 function graphError(code: number, message: string) {
   return { error: { message, type: "OAuthException", code } };
+}
+
+/** What a made-up customer sends: a text, a tap on a reply button, or a picture with a caption. */
+export type InboundKind =
+  | { readonly text: string }
+  | {
+      readonly button: {
+        /** The button's identifier, as it was set when the message was sent. */
+        readonly id: string;
+        readonly title: string;
+        /** The identifier of the message that carried the button. */
+        readonly replyTo: string;
+      };
+    }
+  | { readonly caption: string };
+
+function inboundParts(kind: InboundKind): Record<string, unknown> {
+  if ("text" in kind) {
+    return { type: "text", text: { body: kind.text } };
+  }
+  if ("button" in kind) {
+    return {
+      context: { from: "15550100", id: kind.button.replyTo },
+      type: "interactive",
+      interactive: {
+        type: "button_reply",
+        button_reply: { id: kind.button.id, title: kind.button.title },
+      },
+    };
+  }
+  return {
+    type: "image",
+    image: {
+      caption: kind.caption,
+      mime_type: "image/jpeg",
+      sha256: "MOCKSHA256",
+      id: "100000000000009",
+    },
+  };
+}
+
+/** An incoming message as Meta would post it, for a made-up customer. */
+export function inboundPayload(
+  input: {
+    phoneNumberId: string;
+    /** Digits, without the plus. Null for a customer who uses a username. */
+    from: string | null;
+    userId: string;
+    id: string;
+    timestamp: number;
+  },
+  kind: InboundKind,
+): unknown {
+  const payload = inboundTextPayload({ ...input, text: "x" }) as {
+    entry: { changes: { value: { messages: Record<string, unknown>[] } }[] }[];
+  };
+  const message = payload.entry[0]?.changes[0]?.value.messages[0] as Record<string, unknown>;
+  delete message["type"];
+  delete message["text"];
+  Object.assign(message, inboundParts(kind));
+  return payload;
 }
 
 /** An incoming text message as Meta would post it, for a made-up customer. */
@@ -104,6 +168,62 @@ export function inboundTextPayload(input: {
   };
 }
 
+/**
+ * The reply buttons of a send, or undefined if Meta would refuse them: 1
+ * to 3, each with an identifier of at most 256 characters and a title of
+ * at most 20, the titles all different.
+ */
+function replyButtons(raw: unknown): { id: string; title: string }[] | undefined {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 3) {
+    return undefined;
+  }
+  const buttons: { id: string; title: string }[] = [];
+  for (const item of raw as { type?: unknown; reply?: { id?: unknown; title?: unknown } }[]) {
+    const id = item?.reply?.id;
+    const title = item?.reply?.title;
+    if (
+      item?.type !== "reply" ||
+      typeof id !== "string" ||
+      id === "" ||
+      id.length > 256 ||
+      typeof title !== "string" ||
+      title === "" ||
+      title.length > 20 ||
+      buttons.some((other) => other.title === title || other.id === id)
+    ) {
+      return undefined;
+    }
+    buttons.push({ id, title });
+  }
+  return buttons;
+}
+
+/** What the tester asked the customer to send, or undefined if it is not exactly one thing. */
+function inboundKind(input: Record<string, unknown>): InboundKind | undefined {
+  const { text, caption, button } = input;
+  const given = [text, caption, button].filter((value) => value !== undefined);
+  if (given.length !== 1) {
+    return undefined;
+  }
+  if (typeof text === "string" && text !== "") {
+    return { text };
+  }
+  if (typeof caption === "string" && caption !== "") {
+    return { caption };
+  }
+  const tap = (button ?? {}) as { id?: unknown; title?: unknown; replyTo?: unknown };
+  if (
+    typeof tap.id === "string" &&
+    tap.id !== "" &&
+    typeof tap.title === "string" &&
+    typeof tap.replyTo === "string" &&
+    tap.replyTo !== ""
+  ) {
+    return { button: { id: tap.id, title: tap.title, replyTo: tap.replyTo } };
+  }
+  return undefined;
+}
+
 export function createMockWhatsApp(options: MockOptions): FastifyInstance {
   // Letters and digits only: it goes into identifiers the product stores and matches.
   const run =
@@ -131,15 +251,34 @@ export function createMockWhatsApp(options: MockOptions): FastifyInstance {
         return reply.code(failure.status).send(graphError(failure.code, "Injected by the test"));
       }
       const body = (request.body ?? {}) as Record<string, unknown>;
-      const text = (body["text"] as { body?: unknown } | undefined)?.body;
       const to = body["to"];
       const recipient = body["recipient"];
+      // A text, or a text with reply buttons under the limits read on 2026-11-24.
+      let text: unknown;
+      let buttons: { id: string; title: string }[] | undefined = [];
+      if (body["type"] === "text") {
+        text = (body["text"] as { body?: unknown } | undefined)?.body;
+        if (typeof text === "string" && text.length > 4096) {
+          text = undefined;
+        }
+      } else if (body["type"] === "interactive") {
+        const interactive = (body["interactive"] ?? {}) as {
+          type?: unknown;
+          body?: { text?: unknown };
+          action?: { buttons?: unknown };
+        };
+        text = interactive.body?.text;
+        if (typeof text === "string" && text.length > 1024) {
+          text = undefined;
+        }
+        buttons =
+          interactive.type === "button" ? replyButtons(interactive.action?.buttons) : undefined;
+      }
       if (
         body["messaging_product"] !== "whatsapp" ||
-        body["type"] !== "text" ||
         typeof text !== "string" ||
         text === "" ||
-        text.length > 4096 ||
+        buttons === undefined ||
         (to === undefined && recipient === undefined) ||
         (to !== undefined && (typeof to !== "string" || !PHONE.test(to))) ||
         (recipient !== undefined && typeof recipient !== "string")
@@ -153,6 +292,7 @@ export function createMockWhatsApp(options: MockOptions): FastifyInstance {
         to: typeof to === "string" ? to : null,
         recipient: typeof recipient === "string" ? recipient : null,
         body: text,
+        buttons,
       });
       return reply.code(200).send({
         messaging_product: "whatsapp",
@@ -191,19 +331,21 @@ export function createMockWhatsApp(options: MockOptions): FastifyInstance {
   });
 
   // Plays a customer: builds the webhook Meta would send, signs it, posts it.
+  // One of `text`, `caption` (under a picture) or `button` (a tap) is given.
   app.post("/mock/inbound", async (request, reply) => {
     const input = (request.body ?? {}) as Record<string, unknown>;
     const from = input["from"] ?? null;
     const phoneNumberId = input["phoneNumberId"];
-    const text = input["text"];
+    const kind = inboundKind(input);
     if (
       typeof phoneNumberId !== "string" ||
       phoneNumberId === "" ||
-      typeof text !== "string" ||
-      text === "" ||
+      kind === undefined ||
       (from !== null && (typeof from !== "string" || !PHONE.test(from)))
     ) {
-      return reply.code(400).send({ error: "phoneNumberId, text and an optional from are needed" });
+      return reply.code(400).send({
+        error: "phoneNumberId, an optional from, and one of text, caption or button are needed",
+      });
     }
     if (options.webhookUrl === undefined) {
       return reply.code(409).send({ error: "no webhook address is configured" });
@@ -212,14 +354,16 @@ export function createMockWhatsApp(options: MockOptions): FastifyInstance {
     const id = `wamid.MOCKIN${run}${String(inbound).padStart(6, "0")}`;
     const rawBody = Buffer.from(
       JSON.stringify(
-        inboundTextPayload({
-          phoneNumberId,
-          from: from === null ? null : (from as string).replace(/^\+/, ""),
-          userId: "US.10000000000000000042",
-          text,
-          id,
-          timestamp: now(),
-        }),
+        inboundPayload(
+          {
+            phoneNumberId,
+            from: from === null ? null : (from as string).replace(/^\+/, ""),
+            userId: "US.10000000000000000042",
+            id,
+            timestamp: now(),
+          },
+          kind,
+        ),
       ),
     );
     try {

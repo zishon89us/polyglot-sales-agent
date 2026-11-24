@@ -1,9 +1,32 @@
-// Sending a text through the Cloud API's messages endpoint, as documented
-// on 2026-11-18: POST {base}/{version}/{phone number id}/messages with a
+// Sending through the Cloud API's messages endpoint, as documented on
+// 2026-11-18: POST {base}/{version}/{phone number id}/messages with a
 // bearer token; a success carries `messages[0].id`. A customer is addressed
 // by `to` (a phone number) or by `recipient` (a business-scoped user ID).
+// A text with reply buttons is an `interactive` message of type `button`,
+// as documented on 2026-11-24 (fixtures/2026-11-24/README.md).
 
-import type { ChannelUser, SendFrom, SendResult } from "@polyglot-sales-agent/channel";
+import {
+  CHANNEL_MESSAGE_ID,
+  type ChannelLimits,
+  type ChannelUser,
+  checkButtonMessage,
+  checkText,
+  refusedUnsent,
+  type SendButton,
+  type SendFrom,
+  type SendResult,
+} from "@polyglot-sales-agent/channel";
+
+/**
+ * What Meta's pages give, as read on 2026-11-24: a text of at most 4,096
+ * characters; at most 3 reply buttons, on a body of at most 1,024, each
+ * with a title of at most 20 and an identifier of at most 256. Counted
+ * here in UTF-16 units; how Meta counts was not found.
+ */
+export const WHATSAPP_LIMITS: ChannelLimits = {
+  textMax: 4_096,
+  buttons: { max: 3, bodyMax: 1_024, titleMax: 20, payloadMax: 256 },
+};
 
 /** How long to wait for an answer to a send, unless told otherwise. The agent's proposal. */
 export const DEFAULT_SEND_TIMEOUT_MS = 10_000;
@@ -61,11 +84,51 @@ async function answerOf(response: Response): Promise<unknown> {
   }
 }
 
-export async function sendText(
+export function sendText(
   options: SendOptions,
   from: SendFrom,
   to: ChannelUser,
   body: string,
+): Promise<SendResult> {
+  const refusal = checkText(WHATSAPP_LIMITS, body);
+  if (refusal !== undefined) {
+    return Promise.resolve(refusedUnsent(refusal));
+  }
+  return post(options, from, to, { type: "text", text: { body } });
+}
+
+export function sendButtons(
+  options: SendOptions,
+  from: SendFrom,
+  to: ChannelUser,
+  body: string,
+  buttons: readonly SendButton[],
+): Promise<SendResult> {
+  const refusal = checkButtonMessage(WHATSAPP_LIMITS, body, buttons);
+  if (refusal !== undefined) {
+    return Promise.resolve(refusedUnsent(refusal));
+  }
+  return post(options, from, to, {
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: body },
+      action: {
+        buttons: buttons.map((button) => ({
+          type: "reply",
+          reply: { id: button.payload, title: button.title },
+        })),
+      },
+    },
+  });
+}
+
+/** Posts one message, of whatever kind, and reads the answer. */
+async function post(
+  options: SendOptions,
+  from: SendFrom,
+  to: ChannelUser,
+  message: Readonly<Record<string, unknown>>,
 ): Promise<SendResult> {
   if (to.phone === null && to.userId === null) {
     return failure("no-recipient", false);
@@ -83,8 +146,7 @@ export async function sendText(
     recipient_type: "individual",
     // If both are given Meta uses the number; give one.
     ...(to.phone === null ? { recipient: to.userId } : { to: to.phone }),
-    type: "text",
-    text: { body },
+    ...message,
   };
   let response: Response;
   try {
@@ -118,7 +180,7 @@ export async function sendText(
   if (response.ok) {
     const id = (answer as { messages?: { id?: unknown }[] } | undefined)?.messages?.[0]?.id;
     // Accepted by status but with no identifier: sending again could send twice.
-    return typeof id === "string" && /^[\x21-\x7e]{1,128}$/.test(id)
+    return typeof id === "string" && CHANNEL_MESSAGE_ID.test(id)
       ? { accepted: true, channelMessageId: id }
       : failure("bad-response", false);
   }

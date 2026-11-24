@@ -3,14 +3,15 @@
 // message when asked. Nothing here names WhatsApp; all knowledge of one
 // channel's payloads lives in that channel's package.
 //
-// Built so far (M2 unit U6): verify a webhook, parse it, send a free-form
-// text. Still to come with the units that need them: sending a template,
-// submitting a template for approval, checking credentials.
+// Built so far: verify a webhook, parse it, send a free-form text (M2 unit
+// U6); a tap on a button and a caption as events, and a text with buttons
+// (M3 unit U5). Still to come with the units that need them: sending a
+// template, submitting a template for approval, checking credentials.
 
 /**
  * The customer at the other end. A channel may give a phone number, an
  * identifier of its own for the person, or both, and at least one. WhatsApp
- * can leave the number out (see `packages/channel-whatsapp/fixtures`).
+ * can leave the number out (see the WhatsApp channel's fixtures).
  */
 export interface ChannelUser {
   /** E.164 with the leading plus, or null when the channel did not give one. */
@@ -19,10 +20,148 @@ export interface ChannelUser {
   readonly userId: string | null;
 }
 
-/** What a customer sent. Only text is read; anything else is named, not interpreted. */
+/**
+ * What a customer sent. Text is read; a tap on a button is carried as what
+ * the button was set to; anything else is named, not interpreted.
+ */
 export type InboundContent =
-  | { readonly type: "text"; readonly body: string }
+  | {
+      readonly type: "text";
+      readonly body: string;
+      /** Set when the text was typed under a picture or a video, which is not read. */
+      readonly captionOf?: "image" | "video";
+    }
+  | {
+      readonly type: "button";
+      /**
+       * What the business set on the button. Sent by the customer's app, so
+       * untrusted like any text. The button's label is not passed on: it is
+       * not the customer's words.
+       */
+      readonly payload: string;
+      /** The channel's identifier of the message the tap answers, or null if it gave none. */
+      readonly inReplyTo: string | null;
+    }
   | { readonly type: "unsupported"; readonly channelType: string };
+
+/** A payload: 1 to 256 printable ASCII characters with no space. */
+export const BUTTON_PAYLOAD = /^[\x21-\x7e]{1,256}$/;
+/** A channel's identifier of a message: 1 to 128 printable characters with no space. */
+export const CHANNEL_MESSAGE_ID = /^[\x21-\x7e]{1,128}$/;
+
+/** A button on a message that is sent. */
+export interface SendButton {
+  /** Comes back when the button is tapped. */
+  readonly payload: string;
+  /** What the customer sees. */
+  readonly title: string;
+}
+
+/** What a channel can carry. Lengths are in UTF-16 units. */
+export interface ChannelLimits {
+  /** The longest text. */
+  readonly textMax: number;
+  /** Null for a channel that has no buttons. */
+  readonly buttons: {
+    /** How many buttons one message may carry. */
+    readonly max: number;
+    /** The longest text of a message with buttons: it can be shorter than `textMax`. */
+    readonly bodyMax: number;
+    readonly titleMax: number;
+    readonly payloadMax: number;
+  } | null;
+}
+
+/** A control character or a line break of any kind. */
+const CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+/**
+ * Characters that show nothing and can hide or reorder what is beside
+ * them: a zero-width space, a word joiner, a byte-order mark, and the
+ * embeddings, overrides and isolates of text direction. The joiners some
+ * scripts need inside a word, the marks of direction that mixed text
+ * uses, a soft hyphen and what an emoji is built with are not among them.
+ */
+const HIDDEN = /[\u200b\u2060\ufeff\u202a-\u202e\u2066-\u2069]/;
+/** Half of a pair with no other half: not text. Looked for in a title only. */
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+/** What shows nothing by itself: space, controls, format and ignorable characters, marks, the blank braille cell. */
+const SHOWS_NOTHING = /[\s\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{M}\u2800]/gu;
+/** Whether a text shows nothing at all. */
+const blank = (text: string): boolean => text.replace(SHOWS_NOTHING, "") === "";
+/** Whether a body may be sent: something to read, and no U+0000. */
+const sendable = (body: unknown, max: number): body is string =>
+  typeof body === "string" && body.length <= max && !blank(body) && !body.includes("\u0000");
+/**
+ * What two titles are compared by: one compatibility form, lower case
+ * (with the one letter whose capital is two letters written as two),
+ * nothing that is ignorable in display, and one space wherever there is
+ * space. Lower case only, so that a dotless i stays apart from an i.
+ */
+const titleKey = (title: string): string =>
+  title
+    .normalize("NFKC")
+    .toLowerCase()
+    .replaceAll("\u00df", "ss")
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+/**
+ * Whether a text with buttons would be refused by a channel with these
+ * limits, and why: undefined if it would be sent. Pure, so that every
+ * fixed text can be tested against every channel without sending.
+ */
+export function checkButtonMessage(
+  limits: ChannelLimits,
+  body: string,
+  buttons: readonly SendButton[],
+): "no-buttons" | "bad-buttons" | "bad-body" | undefined {
+  const allowed = limits.buttons;
+  if (allowed === null) {
+    return "no-buttons";
+  }
+  if (!Array.isArray(buttons) || buttons.length < 1 || buttons.length > allowed.max) {
+    return "bad-buttons";
+  }
+  const titles = new Set<string>();
+  const payloads = new Set<string>();
+  for (const button of buttons) {
+    const { title, payload } = button ?? {};
+    if (
+      typeof title !== "string" ||
+      title.length < 1 ||
+      title.length > allowed.titleMax ||
+      title !== title.trim() ||
+      blank(title) ||
+      CONTROL.test(title) ||
+      HIDDEN.test(title) ||
+      LONE_SURROGATE.test(title) ||
+      titles.has(titleKey(title)) ||
+      typeof payload !== "string" ||
+      payload.length > allowed.payloadMax ||
+      !BUTTON_PAYLOAD.test(payload) ||
+      payloads.has(payload)
+    ) {
+      return "bad-buttons";
+    }
+    titles.add(titleKey(title));
+    payloads.add(payload);
+  }
+  if (!sendable(body, allowed.bodyMax)) {
+    return "bad-body";
+  }
+  return undefined;
+}
+
+/** Whether a text would be refused by a channel with these limits. */
+export function checkText(limits: ChannelLimits, body: string): "bad-body" | undefined {
+  return sendable(body, limits.textMax) ? undefined : "bad-body";
+}
+
+/** The result of a message that was refused before any call was made. */
+export function refusedUnsent(code: string): SendResult {
+  return { accepted: false, retryable: false, mayHaveArrived: false, code };
+}
 
 export interface InboundMessage {
   readonly kind: "message";
@@ -113,8 +252,23 @@ export interface Channel {
   verifyWebhook(rawBody: Buffer, headers: Headers): boolean;
   /** Turns a verified body into events. Never throws: a body it cannot read is `ok: false`. */
   parseWebhook(rawBody: Buffer): ParsedWebhook;
-  /** Sends a free-form text. Never throws: every failure is a result. */
+  /** What it can carry. A caller asks, and does not assume another channel's numbers. */
+  readonly limits: ChannelLimits;
+  /**
+   * Sends a free-form text. Never throws: every failure is a result. An
+   * empty text or one over `limits.textMax` is refused before any call.
+   */
   sendText(from: SendFrom, to: ChannelUser, body: string): Promise<SendResult>;
+  /**
+   * Sends a text with buttons. Never throws. What `checkButtonMessage`
+   * refuses is refused before any call, with its code.
+   */
+  sendButtons(
+    from: SendFrom,
+    to: ChannelUser,
+    body: string,
+    buttons: readonly SendButton[],
+  ): Promise<SendResult>;
 }
 
 /** The value of a header by lower-case name, if it was sent exactly once. */

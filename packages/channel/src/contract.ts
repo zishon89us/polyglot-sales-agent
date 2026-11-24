@@ -8,6 +8,7 @@ import {
   type ChannelEvent,
   DELIVERY_STATUSES,
   type Headers,
+  type SendButton,
   type SendFrom,
 } from "./index.ts";
 
@@ -20,6 +21,10 @@ export interface ContractSubject {
   readonly channel: Channel;
   /** A webhook, signed as the channel would, carrying one text message and one status. */
   signed(): SignedWebhook;
+  /** A signed webhook carrying one tap on a button with this payload, answering this message. */
+  signedTap(payload: string, inReplyTo: string): SignedWebhook;
+  /** A signed webhook carrying one picture with these words typed under it. */
+  signedCaption(body: string): SignedWebhook;
   /** The name of the header that carries the signature. */
   readonly signatureHeader: string;
   /** Where a send would be accepted, for the send tests. */
@@ -109,6 +114,209 @@ export function channelContract(name: string, subject: () => Promise<ContractSub
         }
       },
     );
+
+    test("says what it can carry", async () => {
+      const { limits } = (await subject()).channel;
+      const counts = [limits.textMax];
+      if (limits.buttons !== null) {
+        const { max, bodyMax, titleMax, payloadMax } = limits.buttons;
+        counts.push(max, bodyMax, titleMax, payloadMax);
+        expect(bodyMax).toBeLessThanOrEqual(limits.textMax);
+        expect(payloadMax).toBeLessThanOrEqual(256);
+      }
+      for (const count of counts) {
+        expect(Number.isInteger(count) && count > 0).toBe(true);
+      }
+    });
+
+    test("a tap on a button is read as what the button carried and the message it answers, not as text", async () => {
+      const { channel, signedTap } = await subject();
+      const { rawBody, headers } = signedTap("core.stop", "sent-message-1");
+      expect(channel.verifyWebhook(rawBody, headers)).toBe(true);
+      const parsed = channel.parseWebhook(rawBody);
+      const events = parsed.ok ? parsed.batches.flatMap((batch) => batch.events) : [];
+      expect(events).toHaveLength(1);
+      events.forEach(check);
+      expect(events[0]).toMatchObject({
+        kind: "message",
+        content: { type: "button", payload: "core.stop", inReplyTo: "sent-message-1" },
+      });
+      expect(Object.keys((events[0] as { content: object }).content).sort()).toEqual([
+        "inReplyTo",
+        "payload",
+        "type",
+      ]);
+    });
+
+    test("words typed under a picture are read as a text that says it was a caption", async () => {
+      const { channel, signedCaption } = await subject();
+      const { rawBody, headers } = signedCaption("Can you do this style?");
+      expect(channel.verifyWebhook(rawBody, headers)).toBe(true);
+      const parsed = channel.parseWebhook(rawBody);
+      const events = parsed.ok ? parsed.batches.flatMap((batch) => batch.events) : [];
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        kind: "message",
+        content: { type: "text", body: "Can you do this style?", captionOf: "image" },
+      });
+    });
+
+    test("a text that is empty or longer than the channel carries is refused before any call", async () => {
+      const { channel, from } = await subject();
+      const to = { phone: "+15550142", userId: null };
+      for (const body of [
+        "",
+        "  \n",
+        "\u200b",
+        "a\u0000b",
+        "x".repeat(channel.limits.textMax + 1),
+      ]) {
+        expect(await channel.sendText(from, to, body)).toEqual({
+          accepted: false,
+          retryable: false,
+          mayHaveArrived: false,
+          code: "bad-body",
+        });
+      }
+      expect(await channel.sendText(from, to, "x".repeat(channel.limits.textMax))).toMatchObject({
+        accepted: true,
+      });
+    });
+
+    test("a message with buttons is sent within the channel's limits and refused outside them", async () => {
+      const { channel, from } = await subject();
+      const to = { phone: "+15550142", userId: null };
+      const refused = (code: string) => ({
+        accepted: false,
+        retryable: false,
+        mayHaveArrived: false,
+        code,
+      });
+      const one: SendButton[] = [{ payload: "core.stop", title: "Stop" }];
+      const allowed = channel.limits.buttons;
+      if (allowed === null) {
+        expect(await channel.sendButtons(from, to, "hello", one)).toEqual(refused("no-buttons"));
+        return;
+      }
+      const full: SendButton[] = Array.from({ length: allowed.max }, (_, index) => ({
+        payload: `core.b${index}${"x".repeat(allowed.payloadMax - 7)}`,
+        title: `${index}${"t".repeat(allowed.titleMax - 1)}`,
+      }));
+      expect(full[0]?.payload).toHaveLength(allowed.payloadMax);
+      expect(await channel.sendButtons(from, to, "b".repeat(allowed.bodyMax), full)).toEqual({
+        accepted: true,
+        channelMessageId: expect.stringMatching(/\S/),
+      });
+      const bad: readonly (readonly SendButton[])[] = [
+        [],
+        [...full, { payload: "core.more", title: "More" }],
+        [{ payload: "core.stop", title: "t".repeat(allowed.titleMax + 1) }],
+        [{ payload: "core.stop", title: "" }],
+        [{ payload: "core.stop", title: " Stop" }],
+        [{ payload: "core.stop", title: "a\nb" }],
+        [{ payload: "core.stop", title: "a\u2028b" }],
+        [{ payload: "core.stop", title: "a\u202eb" }],
+        [{ payload: "core.stop", title: "\u200b" }],
+        [{ payload: "core.stop", title: "\u200c" }],
+        [{ payload: "core.stop", title: "\u3164" }],
+        [{ payload: "core.stop", title: "\u2800" }],
+        [{ payload: "core.stop", title: "\ufe0f" }],
+        [{ payload: "core.stop", title: "\u034f" }],
+        [{ payload: "core.stop", title: "\u0301" }],
+        [{ payload: "core.stop", title: "St\u200bop" }],
+        [{ payload: "core.stop", title: "a\u2060b" }],
+        [{ payload: "core.stop", title: "a\u2067b" }],
+        [{ payload: "core.stop", title: "a\ud800" }],
+        [{ payload: "core.stop\n", title: "Stop" }],
+        [{ payload: `core.${"x".repeat(allowed.payloadMax)}`, title: "Stop" }],
+        [{ payload: "core stop", title: "Stop" }],
+        [{ payload: "", title: "Stop" }],
+        ...(allowed.max > 1
+          ? [
+              [
+                { payload: "core.stop", title: "Same" },
+                { payload: "core.start", title: "Same" },
+              ],
+              [
+                { payload: "core.stop", title: "Stop" },
+                { payload: "core.stop", title: "Start" },
+              ],
+              ...(
+                [
+                  ["Stop", "stop"],
+                  ["\u00e9", "e\u0301"],
+                  ["Stop", "\uff33\uff54\uff4f\uff50"],
+                  ["STRASSE", "stra\u00dfe"],
+                  ["a b", "a  b"],
+                  ["ab", "a\u200db"],
+                  ["Stop", "St\u034fop"],
+                  ["Stop", "Stop\u3164"],
+                  ["\u2764", "\u2764\ufe0f"],
+                  ["ab", "a\u00adb"],
+                ] as const
+              ).map(([first, second]) => [
+                { payload: "core.stop", title: first },
+                { payload: "core.start", title: second },
+              ]),
+            ]
+          : []),
+      ];
+      for (const buttons of bad) {
+        expect(
+          await channel.sendButtons(from, to, "hello", buttons),
+          JSON.stringify(buttons),
+        ).toEqual(refused("bad-buttons"));
+      }
+      for (const body of ["", " \n\t", "\u200b", "a\u0000b", "b".repeat(allowed.bodyMax + 1)]) {
+        expect(await channel.sendButtons(from, to, body, one), JSON.stringify(body)).toEqual(
+          refused("bad-body"),
+        );
+      }
+      // Honest titles: a dotless i beside an i, a mark of direction, a soft
+      // hyphen, a flag built of tag characters, an emoji joined of several.
+      const honest: readonly (readonly SendButton[])[] = [
+        [
+          { payload: "core.stop", title: "kir" },
+          ...(allowed.max > 1 ? [{ payload: "core.start", title: "k\u0131r" }] : []),
+        ],
+        [{ payload: "core.stop", title: "\u200f\u0625\u064a\u0642\u0627\u0641 Stop" }],
+        [{ payload: "core.stop", title: "Ter\u00admin" }],
+        [
+          {
+            payload: "core.stop",
+            title:
+              "\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc65\udb40\udc6e\udb40\udc67\udb40\udc7f",
+          },
+        ],
+        [{ payload: "core.stop", title: "\ud83d\udc69\u200d\ud83d\udcbb" }],
+      ];
+      for (const buttons of honest) {
+        expect(
+          await channel.sendButtons(from, to, "hello", buttons),
+          JSON.stringify(buttons),
+        ).toMatchObject({
+          accepted: true,
+        });
+      }
+      // A body may hold line breaks and marks of direction; it is refused only when it shows nothing.
+      expect(await channel.sendButtons(from, to, "one\ntwo \u200f", one)).toMatchObject({
+        accepted: true,
+      });
+      for (const body of ["\u0001", "\u007f", "\u3164", "\u2800\ufe0f"]) {
+        expect(await channel.sendButtons(from, to, body, one), JSON.stringify(body)).toEqual(
+          refused("bad-body"),
+        );
+        expect(await channel.sendText(from, to, body), JSON.stringify(body)).toEqual(
+          refused("bad-body"),
+        );
+      }
+      // A joiner inside a word is kept: some scripts need it.
+      expect(
+        await channel.sendButtons(from, to, "hello", [
+          { payload: "core.stop", title: "\u0645\u06cc\u200c\u062e" },
+        ]),
+      ).toMatchObject({ accepted: true });
+    });
 
     test("a send is answered with an identifier, or with a failure that says whether to retry", async () => {
       const { channel, from } = await subject();
