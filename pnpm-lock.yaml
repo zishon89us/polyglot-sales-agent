@@ -101,6 +101,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@polyglot-sales-agent/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@polyglot-sales-agent/channel':
         specifier: workspace:*
         version: link:../../packages/channel

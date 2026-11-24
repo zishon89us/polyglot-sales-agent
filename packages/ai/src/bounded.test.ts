@@ -11,7 +11,14 @@ import {
 } from "@polyglot-sales-agent/core";
 import { describe, expect, test } from "vitest";
 import { AdapterFault, bounded, type Timers } from "./bounded.ts";
-import { FAKE_MODEL, FakeLlmAdapter, FakeScriptOver, type FakeStep } from "./fake.ts";
+import {
+  FAKE_MODEL,
+  FAKE_PLACE,
+  FakeLlmAdapter,
+  FakeScriptOver,
+  type FakeStep,
+  keptTraces,
+} from "./fake.ts";
 import {
   type AdapterAnswer,
   INVALID_OUTPUT_CODES,
@@ -74,7 +81,11 @@ function scripted(
 ) {
   const timers = new HandTimers();
   const adapter = new FakeLlmAdapter(script, health);
-  return { timers, adapter, client: bounded(adapter, timers) };
+  return {
+    timers,
+    adapter,
+    client: bounded(adapter, { record: keptTraces().record, timers: timers }),
+  };
 }
 
 describe("a call that answers in time", () => {
@@ -82,14 +93,15 @@ describe("a call that answers in time", () => {
     const { client, timers, adapter } = scripted([
       { kind: "answer", value: GOOD, usage: { inputTokens: 120, outputTokens: 9 } },
     ]);
-    expect(await client.generate(REQUEST)).toEqual({
+    expect(await client.generate(REQUEST, FAKE_PLACE)).toEqual({
       kind: "ok",
       output: GOOD,
       usage: { inputTokens: 120, outputTokens: 9 },
       model: FAKE_MODEL,
     });
     expect(timers.waiting()).toBe(0);
-    expect(timers.cleared).toBe(1);
+    // Two timers, both cleared: the call's, and the one on storing its trace.
+    expect(timers.cleared).toBe(2);
     expect(adapter.remaining()).toBe(0);
   });
 
@@ -107,7 +119,7 @@ describe("a call that answers in time", () => {
     ]);
     const results = [];
     for (let index = 0; index < 6; index += 1) {
-      results.push(await client.generate(REQUEST));
+      results.push(await client.generate(REQUEST, FAKE_PLACE));
     }
     expect(
       results.map((result) => (result.kind === "invalid-output" ? result.code : result.kind)),
@@ -133,8 +145,8 @@ describe("a call that answers in time", () => {
       { kind: "answer", value: answer },
       { kind: "answer", value: answer },
     ]);
-    expect((await client.generate(REQUEST)).kind).toBe("ok");
-    expect(await client.generate({ ...REQUEST, tools: [] })).toMatchObject({
+    expect((await client.generate(REQUEST, FAKE_PLACE)).kind).toBe("ok");
+    expect(await client.generate({ ...REQUEST, tools: [] }, FAKE_PLACE)).toMatchObject({
       kind: "invalid-output",
       code: "tool-call",
     });
@@ -145,13 +157,13 @@ describe("a call that answers in time", () => {
       { kind: "truncated", value: GOOD, usage: { inputTokens: 1, outputTokens: 4096 } },
       { kind: "truncated", value: '{"reply": "We open at' },
     ]);
-    expect(await client.generate(REQUEST)).toEqual({
+    expect(await client.generate(REQUEST, FAKE_PLACE)).toEqual({
       kind: "invalid-output",
       code: "truncated",
       usage: { inputTokens: 1, outputTokens: 4096 },
       model: FAKE_MODEL,
     });
-    expect(await client.generate(REQUEST)).toMatchObject({
+    expect(await client.generate(REQUEST, FAKE_PLACE)).toMatchObject({
       kind: "invalid-output",
       code: "truncated",
     });
@@ -162,7 +174,7 @@ describe("a call that answers in time", () => {
       PROVIDER_ERROR_CODES.map((code) => ({ kind: "provider-error", code })),
     );
     for (const code of PROVIDER_ERROR_CODES) {
-      expect(await client.generate(REQUEST)).toEqual({ kind: "provider-error", code });
+      expect(await client.generate(REQUEST, FAKE_PLACE)).toEqual({ kind: "provider-error", code });
     }
     expect(PROVIDER_ERROR_CODES).toEqual([
       "unavailable",
@@ -180,7 +192,7 @@ describe("a call that does not answer in time", () => {
   test("C3: at the timeout and not before, the result is a timeout and the adapter is told to stop", async () => {
     const { client, timers, adapter } = scripted([{ kind: "hang" }]);
     let result: unknown = "pending";
-    void client.generate({ ...REQUEST, timeoutMs: 20_000 }).then((value) => {
+    void client.generate({ ...REQUEST, timeoutMs: 20_000 }, FAKE_PLACE).then((value) => {
       result = value;
     });
     await settled();
@@ -203,7 +215,10 @@ describe("a call that does not answer in time", () => {
       },
       health: async () => ({ ok: true }),
     };
-    const pending = bounded(adapter, timers).generate(REQUEST);
+    const pending = bounded(adapter, { record: keptTraces().record, timers: timers }).generate(
+      REQUEST,
+      FAKE_PLACE,
+    );
     await settled();
     expect(seen?.aborted).toBe(false);
     timers.pass(MODEL_CALL_TIMEOUT_MS);
@@ -218,7 +233,7 @@ describe("a call that does not answer in time", () => {
     try {
       for (const then of ["answer", "reject"] as const) {
         const { client, timers, adapter } = scripted([{ kind: "hang", then, value: GOOD }]);
-        const pending = client.generate(REQUEST);
+        const pending = client.generate(REQUEST, FAKE_PLACE);
         await settled();
         expect(adapter.endedLate).toEqual([]);
         timers.pass(MODEL_CALL_TIMEOUT_MS);
@@ -238,7 +253,7 @@ describe("a call that does not answer in time", () => {
 
   test("the time allowed is the request's own", async () => {
     const { client, timers } = scripted([{ kind: "hang" }]);
-    const pending = client.generate({ ...REQUEST, timeoutMs: 50 });
+    const pending = client.generate({ ...REQUEST, timeoutMs: 50 }, FAKE_PLACE);
     await settled();
     timers.pass(50);
     expect(await pending).toEqual({ kind: "timeout" });
@@ -249,7 +264,7 @@ describe("a fault that is not the provider's", () => {
   test("C5: what the adapter throws is thrown to the caller, the same error, and is not counted as the provider's failing", async () => {
     const fault = new TypeError("cannot read properties of undefined");
     const { client, timers } = scripted([{ kind: "throw", error: fault }]);
-    await expect(client.generate(REQUEST)).rejects.toBe(fault);
+    await expect(client.generate(REQUEST, FAKE_PLACE)).rejects.toBe(fault);
     expect(timers.waiting()).toBe(0);
     // One that throws before it returns a promise at all.
     const adapter: LlmAdapter = {
@@ -260,19 +275,19 @@ describe("a fault that is not the provider's", () => {
         throw fault;
       },
     };
-    const direct = bounded(adapter, timers);
-    await expect(direct.generate(REQUEST)).rejects.toBe(fault);
+    const direct = bounded(adapter, { record: keptTraces().record, timers: timers });
+    await expect(direct.generate(REQUEST, FAKE_PLACE)).rejects.toBe(fault);
     await expect(direct.health()).rejects.toBe(fault);
     expect(timers.waiting()).toBe(0);
   });
 
   test("F1: a call the script has no step for is thrown through to the test, by name", async () => {
     const { client, adapter } = scripted([{ kind: "answer", value: GOOD }]);
-    await client.generate(REQUEST);
+    await client.generate(REQUEST, FAKE_PLACE);
     expect(adapter.overran).toBe(0);
     adapter.assertDone();
-    await expect(client.generate(REQUEST)).rejects.toBeInstanceOf(FakeScriptOver);
-    await expect(client.generate(REQUEST)).rejects.toThrow("call 3");
+    await expect(client.generate(REQUEST, FAKE_PLACE)).rejects.toBeInstanceOf(FakeScriptOver);
+    await expect(client.generate(REQUEST, FAKE_PLACE)).rejects.toThrow("call 3");
     // Were those errors swallowed by the code under test, the count still says so.
     expect(adapter.remaining()).toBe(0);
     expect(adapter.overran).toBe(2);
@@ -316,9 +331,12 @@ describe("a fault that is not the provider's", () => {
       // A code is one of the list, never the provider's own words.
       { kind: "provider-error", code: "the provider said: your customer wrote hello" },
     ]) {
-      await expect(bounded(returns(answer), timers).generate(REQUEST)).rejects.toBeInstanceOf(
-        AdapterFault,
-      );
+      await expect(
+        bounded(returns(answer), { record: keptTraces().record, timers: timers }).generate(
+          REQUEST,
+          FAKE_PLACE,
+        ),
+      ).rejects.toBeInstanceOf(AdapterFault);
     }
     // A model's name is a name: one line, short, with nothing that cannot be stored.
     for (const model of ["m\u0000", "m\nthe customer said hello", "m".repeat(201), 7]) {
@@ -329,20 +347,30 @@ describe("a fault that is not the provider's", () => {
         usage: { inputTokens: 1, outputTokens: 1 },
         model,
       };
-      await expect(bounded(returns(named), timers).generate(REQUEST)).rejects.toBeInstanceOf(
-        AdapterFault,
-      );
+      await expect(
+        bounded(returns(named), { record: keptTraces().record, timers: timers }).generate(
+          REQUEST,
+          FAKE_PLACE,
+        ),
+      ).rejects.toBeInstanceOf(AdapterFault);
     }
     // An adapter that answers at once, with no promise, has still answered.
     const direct = {
       generate: () => ({ kind: "provider-error", code: "unavailable" }),
       health: () => ({ ok: true }),
     } as unknown as LlmAdapter;
-    expect(await bounded(direct, timers).generate(REQUEST)).toEqual({
+    expect(
+      await bounded(direct, { record: keptTraces().record, timers: timers }).generate(
+        REQUEST,
+        FAKE_PLACE,
+      ),
+    ).toEqual({
       kind: "provider-error",
       code: "unavailable",
     });
-    expect(await bounded(direct, timers).health()).toEqual({ ok: true });
+    expect(await bounded(direct, { record: keptTraces().record, timers: timers }).health()).toEqual(
+      { ok: true },
+    );
     // A health that is neither ok nor one of the two failures is a fault too.
     for (const health of [
       null,
@@ -357,7 +385,7 @@ describe("a fault that is not the provider's", () => {
         health: async () => health,
       } as unknown as LlmAdapter;
       await expect(
-        bounded(adapter, timers).health(),
+        bounded(adapter, { record: keptTraces().record, timers: timers }).health(),
         JSON.stringify(health),
       ).rejects.toBeInstanceOf(AdapterFault);
     }
@@ -368,7 +396,12 @@ describe("a fault that is not the provider's", () => {
       usage: { inputTokens: 1, outputTokens: 1 },
       model: "m",
     };
-    expect(await bounded(returns(unsaid), timers).generate(REQUEST)).toMatchObject({
+    expect(
+      await bounded(returns(unsaid), { record: keptTraces().record, timers: timers }).generate(
+        REQUEST,
+        FAKE_PLACE,
+      ),
+    ).toMatchObject({
       kind: "invalid-output",
       code: "truncated",
     });
@@ -389,7 +422,7 @@ describe("a fault that is not the provider's", () => {
       null,
     ]) {
       await expect(
-        client.generate({ ...REQUEST, timeoutMs: timeoutMs as number }),
+        client.generate({ ...REQUEST, timeoutMs: timeoutMs as number }, FAKE_PLACE),
         String(timeoutMs),
       ).rejects.toBeInstanceOf(RangeError);
     }
@@ -403,7 +436,7 @@ describe("a fault that is not the provider's", () => {
       undefined,
     ]) {
       await expect(
-        client.generate({ ...REQUEST, maxOutputTokens: maxOutputTokens as number }),
+        client.generate({ ...REQUEST, maxOutputTokens: maxOutputTokens as number }, FAKE_PLACE),
         String(maxOutputTokens),
       ).rejects.toBeInstanceOf(RangeError);
     }
@@ -426,7 +459,7 @@ describe("a fault that is not the provider's", () => {
       { ...REQUEST, prompts: undefined },
       { ...REQUEST, system: undefined },
     ]) {
-      const pending = client.generate(request as unknown as LlmRequest);
+      const pending = client.generate(request as unknown as LlmRequest, FAKE_PLACE);
       await expect(pending, JSON.stringify(request)).rejects.toBeInstanceOf(TypeError);
     }
     // A bound read once: what was checked is what is used.
@@ -438,7 +471,7 @@ describe("a fault that is not the provider's", () => {
         return reads === 1 ? 50 : 1e9;
       },
     };
-    await expect(client.generate(shifting)).rejects.toBeInstanceOf(RangeError);
+    await expect(client.generate(shifting, FAKE_PLACE)).rejects.toBeInstanceOf(RangeError);
     expect(adapter.calls).toEqual([]);
     expect(timers.waiting()).toBe(0);
   });
@@ -456,7 +489,10 @@ describe("a fault that is not the provider's", () => {
     const tools = [...REQUEST.tools];
     const claimKinds = [...REQUEST.claimKinds];
     const request = { ...REQUEST, tools, claimKinds };
-    const pending = bounded(adapter, timers).generate(request);
+    const pending = bounded(adapter, { record: keptTraces().record, timers: timers }).generate(
+      request,
+      FAKE_PLACE,
+    );
     await settled();
     // While the call waits, the caller empties both lists and drops one.
     tools.length = 0;
@@ -478,7 +514,10 @@ describe("a fault that is not the provider's", () => {
 
     // The same for the claim kinds, with an answer that makes a claim.
     const kinds = ["price"];
-    const second = bounded(adapter, timers).generate({ ...REQUEST, claimKinds: kinds });
+    const second = bounded(adapter, { record: keptTraces().record, timers: timers }).generate(
+      { ...REQUEST, claimKinds: kinds },
+      FAKE_PLACE,
+    );
     await settled();
     kinds.length = 0;
     answer({
@@ -502,7 +541,7 @@ describe("a fault that is not the provider's", () => {
       ...REQUEST,
       tools: [{ name: "find", description: "", argumentsSchema: { check: () => true } }],
     };
-    await expect(client.generate(odd)).rejects.toThrow("is not plain data");
+    await expect(client.generate(odd, FAKE_PLACE)).rejects.toThrow("is not plain data");
     expect(adapter.calls).toEqual([]);
   });
 
@@ -520,10 +559,16 @@ describe("a fault that is not the provider's", () => {
       { kind: "answer", value: GOOD },
     ]);
     expect(
-      (await client.generate({ ...REQUEST, timeoutMs: MODEL_CALL_TIMEOUT_CEILING_MS })).kind,
+      (await client.generate({ ...REQUEST, timeoutMs: MODEL_CALL_TIMEOUT_CEILING_MS }, FAKE_PLACE))
+        .kind,
     ).toBe("ok");
     expect(
-      (await client.generate({ ...REQUEST, maxOutputTokens: MODEL_OUTPUT_TOKENS_CEILING })).kind,
+      (
+        await client.generate(
+          { ...REQUEST, maxOutputTokens: MODEL_OUTPUT_TOKENS_CEILING },
+          FAKE_PLACE,
+        )
+      ).kind,
     ).toBe("ok");
     expect(MODEL_OUTPUT_TOKENS_MAX).toBeLessThanOrEqual(MODEL_OUTPUT_TOKENS_CEILING);
     expect(MODEL_CALL_TIMEOUT_MS).toBeLessThanOrEqual(MODEL_CALL_TIMEOUT_CEILING_MS);
@@ -586,15 +631,15 @@ describe("the scripted adapter", () => {
       { kind: "provider-error", code: "unavailable" },
     ]);
     expect(adapter.remaining()).toBe(3);
-    await client.generate(REQUEST);
+    await client.generate(REQUEST, FAKE_PLACE);
     const second = { ...REQUEST, messages: [{ role: "customer" as const, text: "second" }] };
-    await client.generate(second);
+    await client.generate(second, FAKE_PLACE);
     expect(adapter.remaining()).toBe(1);
     expect(adapter.calls).toEqual([REQUEST, second]);
     expect(() => adapter.assertDone()).toThrow("1 steps");
     // What was asked is kept as it was: a caller that changes its request afterwards changes no record.
     const messages = [{ role: "customer" as const, text: "third" }];
-    await client.generate({ ...REQUEST, messages });
+    await client.generate({ ...REQUEST, messages }, FAKE_PLACE);
     messages.push({ role: "customer", text: "added after the call" });
     expect(adapter.calls[2]?.messages).toEqual([{ role: "customer", text: "third" }]);
     adapter.assertDone();
@@ -611,7 +656,7 @@ describe("the scripted adapter", () => {
       const { client } = scripted(script);
       const results = [];
       for (let index = 0; index < script.length; index += 1) {
-        results.push(await client.generate(REQUEST));
+        results.push(await client.generate(REQUEST, FAKE_PLACE));
       }
       return results;
     };
@@ -621,7 +666,9 @@ describe("the scripted adapter", () => {
   });
 
   test("with real timers and nothing injected, a call still answers", async () => {
-    const client = bounded(new FakeLlmAdapter([{ kind: "answer", value: GOOD }]));
-    expect((await client.generate(REQUEST)).kind).toBe("ok");
+    const client = bounded(new FakeLlmAdapter([{ kind: "answer", value: GOOD }]), {
+      record: keptTraces().record,
+    });
+    expect((await client.generate(REQUEST, FAKE_PLACE)).kind).toBe("ok");
   });
 });

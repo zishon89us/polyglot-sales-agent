@@ -5,12 +5,15 @@
 
 import type {
   AdapterAnswer,
+  CallPlace,
   Health,
   LlmAdapter,
   LlmRequest,
   ProviderErrorCode,
   ProviderFailure,
   TokenUse,
+  TraceRecord,
+  TraceRecorder,
 } from "./types.ts";
 
 /** What one call returns. */
@@ -162,3 +165,22 @@ export class FakeLlmAdapter implements LlmAdapter {
     }
   }
 }
+
+/** A recorder for tests: it keeps each trace in a list. */
+export function keptTraces(): { readonly record: TraceRecorder; readonly traces: TraceRecord[] } {
+  const traces: TraceRecord[] = [];
+  return {
+    traces,
+    record: async (trace) => {
+      traces.push(trace);
+    },
+  };
+}
+
+/** A place for tests: made-up identifiers, the same every time. */
+export const FAKE_PLACE: CallPlace = Object.freeze({
+  tenantId: "00000000-0000-4000-8000-00000000000a",
+  sessionId: "00000000-0000-4000-8000-00000000000b",
+  turnId: "00000000-0000-4000-8000-00000000000c",
+  turnStartedAt: new Date(0),
+});

@@ -3,6 +3,8 @@
 // to arrive, which proxies are trusted to name the caller, and what an
 // error or an unknown path is answered with.
 
+import { randomUUID } from "node:crypto";
+import type { Log } from "@polyglot-sales-agent/core";
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -26,6 +28,8 @@ export interface ServerOptions {
   readonly trustedProxies: false | readonly string[];
   /** How long a request may take to arrive in full, body included. The agent's proposal: 10 seconds. */
   readonly requestTimeoutMs?: number;
+  /** Told once for every request that was answered (design note M3 U6, L3). */
+  readonly log?: Log;
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -84,6 +88,27 @@ export function createApiServer(options: ServerOptions): FastifyInstance {
   });
   app.addHook("preValidation", async (request) => arrived(request));
   app.addHook("onResponse", async (request) => arrived(request));
+  if (options.log !== undefined) {
+    const log = options.log;
+    // The identifier is made here. Nothing of the request is in the line:
+    // not its path, not a header, not an address.
+    const began = new WeakMap<object, { id: string; at: number }>();
+    app.addHook("onRequest", async (request) => {
+      began.set(request, { id: randomUUID(), at: Date.now() });
+    });
+    app.addHook("onResponse", async (request, reply) => {
+      const start = began.get(request);
+      log({
+        level: reply.statusCode >= 500 ? "error" : "info",
+        event: "request",
+        requestId: start?.id ?? null,
+        n: {
+          status: reply.statusCode,
+          durationMs: start === undefined ? 0 : Math.max(0, Date.now() - start.at),
+        },
+      });
+    });
+  }
   app.addHook("onRequestAbort", async (request) => arrived(request));
 
   // Neither repeats anything of the request, not even its path.

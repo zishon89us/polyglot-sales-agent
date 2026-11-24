@@ -157,10 +157,10 @@ set out on its page.
 | U3 | The business profile, the tenant's settings, and what the model is given | ADR 0006; order of checks, 8 (the test only) | U0 | Services, policies, opening hours and settings are stored per tenant, loaded by an operator's command, and assembled into one context with nothing of the contact in it (NFR-V7); its size is measured and a budget set |
 | U4 | `LlmClient`, the fake client, the prompt loader, and the pack interface's packages | ADR 0005; ADR 0014; US-C4, 2 (the schema); #158 | U1 | A scripted fake returns a reply, a failure or malformed output as a test states; a prompt is loaded by name and version; every call is bounded; no provider's library is imported outside its adapter; the interface and registry packages exist, `faq-only` is registered as row 37 is answered, and the boundary test is changed as ADR 0014 lists |
 | U5 | Buttons and captions in the channel | US-C12, 2; NFR-M2 | U1 | A tap arrives as a typed event tied to its conversation; a text with buttons can be sent; a caption is read as text; both stand-ins do the same; a test keeps channel-specific imports out of the core |
-| U6 | Traces, cost and the log line | US-C10, 1 and 2; NFR-O2 | U2, U4 | Every model call leaves one trace, linked to its session, with no message text, number or name in it; a test of the log line's shape passes for the api and the worker |
+| U6 | Traces, cost and the log line | US-C10, 1 (without guardrail results: U9) and 2; NFR-O2 | U2, U4 | Every model call leaves one trace, linked to its session, with no message text, number or name in it; a test of the log line's shape passes for the api and the worker |
 | U7 | The turn: the model in place of the echo, and the customer's language | US-C3, 4; US-C8, 4 with a test tool; US-C11, 5; order of checks, 15 | U2, U3, U4, U6 | With the fake client, a batch is answered from the profile; the session records its language; an unsupported language is attempted and marked; the lease is renewed before each attempt |
 | U8 | Fixed texts and disclosure | US-C5, 1 to 3 | U5, U7 | The first message of a session carries the disclosure, added by code; every fixed text M3 sends exists in every supported language, or the gap is listed |
-| U9 | Output checks | US-C4, 3, 5 to 9, 15, and 10 but for bookings; US-C15, 10; guardrail policy, section 4 | U7, U8 | Each core claim kind passes only against the stored value it names; a value with no claim fails; a failed check sends the fallback and counts; a fake that returns hostile output is stopped |
+| U9 | Output checks | US-C4, 3, 5 to 9, 15, and 10 but for bookings; US-C15, 10; US-C10, 1 (the guardrail results on a trace); guardrail policy, section 4 | U7, U8 | Each core claim kind passes only against the stored value it names; a value with no claim fails; a failed check sends the fallback and counts; a fake that returns hostile output is stopped |
 | U10 | What code decides before the model | US-C7, 1, 2 and 4 to 7; US-C12, 1 to 3, and 4 with U11; order of checks, 4a, 5, 8 and 13 | U3, U9, and U11 if it is built | An opt-out keyword or button is applied without the model in every state; an emergency phrase sends its text; a batch with no text gets the unsupported-type reply |
 | U11 | The handover record (if question 1 is answered yes) | US-C8, 5; US-C11, 4; order of checks, 10 and 11 | U8, U9 | A session handed over by a trigger that exists then (the person button, the model's flags, two fallbacks in a row) is not answered by the assistant again while it lasts, and the customer is told once; the triggers of U10, U12 and U15 are shown in those units |
 | U12 | Limits: one sender, one tenant | US-C17; NFR-C2; #157 | U8, and U11 if it is built | The twenty-first message in five minutes gets one notice and fifteen minutes of silence, with no model call; the turn cap and the token budget stop a session |
@@ -341,9 +341,15 @@ What Meta's pages say is read and dated in the pull request, not recalled.
 
 ### U6: Traces and cost
 
-`ai_traces` and `tool_calls`; the wrapper that writes a trace for every
-call, failed ones included, with the spans NFR-P2 is measured from; cost
-from token counts and a price table that is a setting. The shape of a
+`ai_traces`; the wrapper that writes a trace for every call, failed ones
+included; cost from token counts and a price table that is a setting.
+**Changed when the unit was designed (2026-11-24):** `tool_calls` moves
+to U7, with the tool loop that writes it, because whether its arguments
+can be kept free of a customer's words is a question about that loop;
+the guardrail results on a trace are U9's, with the checks; and of the
+spans NFR-P2 is measured from, this unit records when each turn began
+and how long each call took, which is not yet the whole measure (#186
+stays open). The shape of a
 log line for the api and the worker, with a test of it (NFR-O2; added by
 U0). US-C10 (#19); #186.
 
@@ -352,7 +358,9 @@ U0). US-C10 (#19); #186.
 The worker's turn calls the model through U4 with what U3 assembles and
 stores the reply as U2 allows. The first prompt, holding what the
 guardrail policy's section 9 requires. The tool loop, exercised by a tool
-that exists only in test files. The session's language and the
+that exists only in test files, and the `tool_calls` table it writes
+(moved here from U6), with an answer to whether a tool's arguments can
+hold a customer's words. The session's language and the
 unsupported-language mark. Customer text and owner-entered text are
 delimited as data. US-C3 (#12); US-C8 (#17). Criteria that are the
 model's behaviour are shown by the evals, not here.

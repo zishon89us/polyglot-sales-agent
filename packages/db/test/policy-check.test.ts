@@ -22,13 +22,31 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(() => database.drop());
 
+/**
+ * The problems found after a change, which is then undone.
+ *
+ * A change to a role touches a row every test database shares, and other
+ * test files are making their databases, which grants to the same roles,
+ * at the same time. PostgreSQL then refuses one of the two with "tuple
+ * concurrently updated": nothing was changed, and the statement is run
+ * again. Any other error is thrown at once. (First seen in CI on
+ * 2026-11-24; the cause is the shared roles, not the check under test.)
+ */
 async function problemsAfter(change: string, client: pg.Client = migrate): Promise<string[]> {
-  await client.query("BEGIN");
-  try {
-    await client.query(change);
-    return await findIsolationProblems(client);
-  } finally {
-    await client.query("ROLLBACK");
+  for (let attempt = 1; ; attempt += 1) {
+    await client.query("BEGIN");
+    try {
+      await client.query(change);
+      return await findIsolationProblems(client);
+    } catch (error) {
+      const raced = (error as Error).message === "tuple concurrently updated";
+      if (!raced || attempt >= 5) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    } finally {
+      await client.query("ROLLBACK");
+    }
   }
 }
 

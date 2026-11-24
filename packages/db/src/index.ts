@@ -76,4 +76,5 @@ export {
   UNSCOPED_TABLES,
 } from "./roles.ts";
 export { type Tx, withTenant } from "./tenant.ts";
+export { costOfSession, type SessionCost, storeTrace, type TraceToStore } from "./traces.ts";
 export { beat, workOnce } from "./worker.ts";

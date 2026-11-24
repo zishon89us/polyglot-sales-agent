@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import { bounded, LlmClient } from "./bounded.ts";
-import { FakeLlmAdapter } from "./fake.ts";
+import { FAKE_PLACE, FakeLlmAdapter, keptTraces } from "./fake.ts";
 import type { LlmAdapter, LlmRequest, LlmResult } from "./types.ts";
 
 /** Stands for the turn's code: it takes a client and nothing else. */
@@ -15,7 +15,7 @@ function turn(client: LlmClient): LlmClient {
 
 describe("a client is made by bounded and by nothing else", () => {
   const adapter: LlmAdapter = new FakeLlmAdapter([]);
-  const client = bounded(adapter);
+  const client = bounded(adapter, { record: keptTraces().record });
 
   test("what bounded returns is a client", () => {
     expect(turn(client)).toBeInstanceOf(LlmClient);
@@ -32,8 +32,17 @@ describe("a client is made by bounded and by nothing else", () => {
     // @ts-expect-error Nor is a copy of a client with one replaced: a copy has no methods of its own.
     turn({ ...client, generate });
     // @ts-expect-error And a client cannot be constructed: the constructor is private.
-    const made = new LlmClient(adapter, { set: () => 0, clear: () => {} });
+    const made = new LlmClient(adapter, { record: keptTraces().record });
     expect(made).toBeDefined();
+
+    // A client is not built without a recorder of traces, and a call is not made without its place.
+    // @ts-expect-error
+    expect(() => bounded(adapter)).toThrow(TypeError);
+    // @ts-expect-error
+    expect(() => bounded(adapter, {})).toThrow(TypeError);
+    // @ts-expect-error
+    const noPlace: Parameters<typeof client.generate> = [{} as LlmRequest];
+    expect(noPlace).toHaveLength(1);
 
     // Nor is an object with every public member of one: the private part is what makes a client.
     const members: Pick<LlmClient, keyof LlmClient> = client;
@@ -62,24 +71,30 @@ describe("a client is made by bounded and by nothing else", () => {
     // The class's own prototype is frozen too, and holds neither call.
     expect(Object.isFrozen(LlmClient.prototype)).toBe(true);
     expect(() => Object.assign(LlmClient.prototype, { generate })).toThrow(TypeError);
-    expect(bounded(adapter).generate).not.toBe(generate);
+    expect(bounded(adapter, { record: keptTraces().record }).generate).not.toBe(generate);
   });
 
   test("a call taken off its client still works, and still refuses by a rejection", async () => {
     const detached = bounded(
       new FakeLlmAdapter([{ kind: "provider-error", code: "unavailable" }]),
+      { record: keptTraces().record },
     ).generate;
     const request: LlmRequest = {
       system: "",
-      prompts: [],
+      prompts: [{ name: "reply", version: 1 }],
       messages: [],
       tools: [],
       claimKinds: [],
       maxOutputTokens: 1,
       timeoutMs: 1_000,
     };
-    expect(await detached(request)).toEqual({ kind: "provider-error", code: "unavailable" });
-    await expect(detached({ ...request, timeoutMs: 0 })).rejects.toBeInstanceOf(RangeError);
+    expect(await detached(request, FAKE_PLACE)).toEqual({
+      kind: "provider-error",
+      code: "unavailable",
+    });
+    await expect(detached({ ...request, timeoutMs: 0 }, FAKE_PLACE)).rejects.toBeInstanceOf(
+      RangeError,
+    );
   });
 
   test("a request without a bound is refused by the compiler", () => {

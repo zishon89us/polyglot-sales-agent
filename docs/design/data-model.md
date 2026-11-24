@@ -367,6 +367,8 @@ tenant, key and language.
 
 ### `tool_calls` — tenant-owned
 
+Not built yet: M3 unit U7 builds it, with the tool loop that writes it.
+
 `session_id`, `turn_id`, `tool`, `arguments`, `result`, `result_at`,
 `repeat_of` (nullable). A record of each call; **it has no unique key and
 does not make calls idempotent** (Gate 2 verification, V1). Idempotency is
@@ -379,10 +381,28 @@ and slot identifiers and times, not customer text.
 
 ### `ai_traces` — tenant-owned
 
-`session_id`, `prompt_name`, `prompt_version`, `model`, `input_tokens`,
-`output_tokens`, `cost_micros`, `latency_ms`, `tool_names`,
-`guardrail_results`, `outcome`. **No message text, no phone number, no
-name** (US-C10).
+Built in M3 unit U6 (migration 0009; design note
+`notes/m3-u6-traces.md`). One row for every call to the model, written
+by the model client itself before the caller has the result. The
+application may insert and read; it may not change or delete.
+
+| Column | Notes |
+|---|---|
+| `session_id` | The session the call was made for; this tenant's |
+| `turn_id`, `turn_started_at` | One identifier for all the calls of a turn, made each time the turn's job runs (there is no table of turns), and when the turn began |
+| `started_at`, `latency_ms` | When the adapter was called, and how long until it answered, failed or ran out of time |
+| `prompt_names`, `prompt_versions` | The prompts the request was assembled from, in order: 1 to 8. (The design had one name and one version; a request can have a pack's fragment too) |
+| `model` | As the adapter gave it; `other` for a name that does not fit the pattern. Null when the call gave no answer |
+| `input_tokens`, `output_tokens` | Null when `model` is |
+| `cost_micros`, `price_input`, `price_output` | An estimate in millionths of a US dollar, rounded up, and the two prices it was worked out from. **Null is "unknown", which is not zero:** a call out of time, a failure, a model with no price set. Not the provider's bill |
+| `tool_names` | The tools an answer asked for, by name, in order; 4 at most |
+| `outcome`, `outcome_code` | `ok`, `invalid-output`, `timeout`, `provider-error`, `fault`; and the code of the second and fourth |
+
+`guardrail_results` is not a column yet: M3 unit U9 adds it with the code
+that fills it. **No message text, no phone number, no name** (US-C10):
+no column holds free text, and each text column has a pattern the table
+checks. One function sums a session's cost, and gives beside the sum how
+many of the session's calls have no cost.
 
 ### `audit_log` — tenant-owned
 
@@ -473,7 +493,7 @@ hours.
 | `bookings.contact_id` | Customer | Set to null with the contact's anonymisation, for past bookings | Future bookings are cancelled and their slots freed; then set to null |
 | `consent_records` | Customer | Deleted with the contact's anonymisation | Included in the export; then deleted |
 | `handovers.contact_id` | Customer | Kept; the contact row it points to is anonymised | Open handovers end as `closed-unanswered` or `answered`; kept |
-| `sessions`, `ai_traces`, `tool_calls` | Customer, indirectly | Kept: they hold no text, number or name | Kept |
+| `sessions`, `ai_traces`, `tool_calls` | Customer, indirectly | Kept: they hold no text, number or name. For `tool_calls` this is **unproved**: its arguments are written by the model, which can copy a customer's words into them. The table is built in M3 unit U7, which must settle it (design note `notes/m3-u6-traces.md`, section 1) | Kept |
 | `audit_log` | Staff and system | Kept | Kept; it never held the number |
 | `users.email` | Staff | Kept while the user exists | Not covered by US-D5. Set to null 12 months after `removed_at` |
 | `tenants.support_contact`, `notification_email` | Business | Kept | Not personal data of a customer |

@@ -158,3 +158,33 @@ Proposed by the agent with the code.
   library it does not know, a name put together from parts, or a plain
   HTTP call, passes. Each typed failure is driven through the scripted
   adapter. The trace and prompt-assembly tests are U6's and U7's.
+
+## Amendment, 2026-11-24 (M3 unit U6)
+
+Proposed by the agent with the code; design note
+`docs/design/notes/m3-u6-traces.md`.
+
+- **The client writes the trace itself.** `bounded` is given a recorder
+  and cannot make a client without one. `generate` takes a second
+  argument, the call's place (tenant, session, turn, when the turn
+  began), and returns only after the trace is stored.
+- **A call that left no record gives no result.** If the recorder fails,
+  or takes more than 5 seconds, `generate` rejects with
+  `trace-not-stored` and the turn is tried again as any job is. The
+  call is then paid for twice and the first cost is lost. To keep that
+  to a database that is away, everything the table checks about a
+  request is checked before the adapter is called, by the same patterns,
+  and a test stores a trace of every outcome in a real table.
+- **A fault of the adapter is traced too,** as `fault`, and then thrown
+  on as before.
+- **A request names 1 to 8 prompts and its tools by a fixed pattern.**
+  A request that does not is refused before the call. Before this unit
+  an empty list of prompts was let through.
+- **`generate` is not called inside an open tenant transaction.** The
+  trace is stored on a connection of its own, and the session it names
+  must be committed.
+- **Health checks are not traced.** They belong to no session.
+- **Confirmation, as built:** `packages/ai/src/trace.test.ts` (one trace
+  for each outcome, none for a refused request, and no marked text in any
+  field); `apps/worker/src/traces.test.ts` (every record the client can
+  make is stored by the real table).

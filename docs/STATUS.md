@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 to U4 done; U5 under way)
+## Current milestone: M3 AI core (U1 to U5 done; U6 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -577,6 +577,46 @@ M0 Inception met its exit criteria on 2026-11-16; see
   beside an i). Fixed: what is refused is now a short list, and what
   counts as blank is wider. **These last fixes are checked by the
   author only.**
+
+- 2026-11-24 — #327 merged: U5 is done. **M3 U6** (#305, pull request
+  #329): traces, cost and the log line. The design note
+  (`design/notes/m3-u6-traces.md`) was read by a second agent before any
+  code (`reviews/2026-11-24-m3-u6-design-review.md`): 12 findings, four
+  High (a cost that could overflow; a request the table would refuse was
+  paid for and then tried six times with no record; a model's name
+  outside a pattern lost a paid call's counts; a turn's start taken from
+  a job field that does not exist). The note was rewritten and **has not
+  been reviewed again**. Built: the model client writes one trace for
+  every call, by itself, and hands on no result whose trace could not be
+  stored; `ai_traces` (migration 0009), with a pattern on every text
+  column; a cost that is null when unknown and never zero, from prices
+  in `PSA_MODEL_PRICES`; one function that sums a session's cost and
+  says how many calls the sum leaves out; one shape for every log line
+  of the api and the worker, with no key that can hold a sentence. The
+  table's own tests found two checks too weak before any review: a
+  missing code passed a bare `IN`, and a name holding the separator
+  passed as two names. Changed from the plan: `tool_calls` moves to U7
+  and the guardrail results on a trace to U9. A failure to start is now
+  a code and names, not a sentence. **Nothing calls the model outside
+  tests yet,** so no trace is written by the running product; that is
+  U7. No real price is set and no real model has been called. Row 47
+  asks about the cost.
+  A third agent reviewed the code
+  (`reviews/2026-11-24-gate4-u6-traces.md`): 11 findings, none High,
+  four Medium, and 10 of 51 mutants alive (four equivalent or
+  unreachable). The Medium ones: a date the database cannot hold was
+  found out only after a paid call; the price list could be changed
+  after the client was made; the check on how lines are written could
+  be walked round; and a line's words were not all from closed lists.
+  Two are fixed. The check on lines is wider and now claims only what it
+  is, a check of names. The fourth is fixed for reasons and job types
+  and not for a failure's code, and the note now says so. Another agent
+  checked the fixes
+  (`reviews/2026-11-24-gate4-u6-traces-verification.md`): six Low
+  findings, all ways past a fix with an object that reads differently
+  each time it is read, or a second signal to the api. Fixed: a time and
+  a price are read once and copied. **These last fixes are checked by
+  the author only.** What is left is #330.
 
 ## Next
 
