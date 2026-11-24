@@ -1,7 +1,10 @@
 # Design note: traces, cost and the log line (M3 unit U6)
 
-Status: proposed by the agent, 2026-11-24, before any code. Issue #305.
-Stories: US-C10, criteria 1 and 2; NFR-O2. Also #186 (the spans NFR-P2
+Status: proposed by the agent, 2026-11-24, before any code; rewritten the
+same day after its review
+(`docs/reviews/2026-11-24-m3-u6-design-review.md`, four High findings),
+and not reviewed again. Issue #305. Stories: US-C10, criterion 1 without
+guardrail results, and criterion 2; NFR-O2. Also #186 (the spans NFR-P2
 is measured from), in part.
 
 This unit is about a record of people's conversations that must hold
@@ -31,12 +34,16 @@ Not built here, and why:
   and an unproved privacy claim. A trace still records which tools a
   call asked for, by name (US-C10, 1: "tool calls").
 - **Guardrail results.** US-C10, 1 lists them. The checks are U9's and
-  run after the call. The column exists from this unit and is null,
-  which means "not checked"; U9 fills it and says how.
+  run after the call, on a turn that may have made several calls. U9
+  adds the column with the code that fills it, and decides which trace
+  of a turn holds a result. Until then criterion 1 is not complete; the
+  plan's row for U9 cites it.
 - **The link from a turn to the reply it sent** (#186): U7 stores the
   reply and adds it. This unit records, on each trace, the turn it
-  belongs to and when that turn's batching window closed, which is the
-  start of NFR-P2's measure.
+  belongs to and when that turn began. That is not the end of the
+  batching window, where NFR-P2 starts: the wait between the two (the
+  poll interval and any queue) is recorded nowhere yet, and #186 stays
+  open for it.
 - **Health checks** are not traced: they belong to no session, and send
   the model nothing of a customer's.
 - **Real prices.** The setting is empty until the maintainer chooses a
@@ -47,8 +54,9 @@ Not built here, and why:
 ## 2. One call, one trace
 
 The client's `generate` takes a second argument, the **call's place**:
-the tenant, the session, the turn, and when the turn's batching window
-closed. A client is built with a **recorder**, a function that stores
+the tenant, the session, the turn, and when the turn began. The turn's
+identifier is made each time the job's handler runs, so a turn that is
+tried again is a new turn. A client is built with a **recorder**, a function that stores
 one trace; it cannot be built without one. Tests use a recorder that
 keeps traces in a list.
 
@@ -59,12 +67,25 @@ keeps traces in a list.
 | T3 | The call runs out of time | One, `timeout`. No model, no counts, **no cost: it is unknown, not nothing.** The provider may still have done the work and may bill it | The result |
 | T4 | The provider fails with a code from the list | One, `provider-error` with that code. No model, no counts, no cost | The result |
 | T5 | The adapter throws, or returns what is not an answer (a fault in this repository's code) | One, `fault`, no code. Then the error is thrown on, as now | The error |
-| T6 | The request is refused before the adapter is called (a bad time limit, a missing part) | **None:** no call was made | The error, as now |
+| T6 | The request is refused before the adapter is called: a bad time limit, a missing part, and from this unit **anything the table would refuse**: no prompt or more than 8, a prompt's name or version or an offered tool's name that does not fit its pattern | **None:** no call was made, and none is paid for | The error |
 | T7 | The place is not a place (a missing or malformed identifier or time) | None; no call is made | A `TypeError`, before the adapter is called |
-| T8 | The recorder fails (the database is away) | None could be stored | **The recorder's error, and not the model's result.** The turn fails and is tried again as any job is. A reply made from a call that left no record is not sent. The repeated call costs again, and the first cost is lost: it could not be written anywhere |
+| T8 | The recorder fails (the database is away), or takes longer than its own limit of 5 seconds | None could be stored | **The recorder's error, and not the model's result.** The turn fails and is tried again as any job is. A reply made from a call that left no record is not sent. The repeated call costs again, and the first cost is lost: it could not be written anywhere |
 | T9 | The recorder fails after a fault (T5) | None | The adapter's error; the recorder's is dropped. The first fault is the one to see |
 | T10 | A turn makes several calls (a tool round, a retry) | One each, with the same turn | |
 | T11 | A call that timed out ends later (the adapter ignored the signal) | Still one, `timeout`. Nothing is added when it ends | |
+| T12 | The process dies during the call, or after the answer and before the trace is stored | **None.** "Every call leaves a trace" holds for a process that lives. The provider's own record is the only one | Nothing; the job's lease runs out and it is tried again |
+| T13 | The job's own time runs out during the call | The call is not stopped by that: it ends by its own limit and its trace is stored then, after the job has failed | The handler has gone; the result is dropped |
+
+Because T8 fails the turn after a call that was paid for, **a record the
+client makes must never be one the table refuses.** Two things keep
+that: T6 checks before the call everything about the request that the
+table checks, with the same patterns, held once in the core; and a test
+stores a trace of every outcome in a real table. With both, T8 means
+the database could not be reached or was too slow.
+
+`generate` must not be called inside an open tenant transaction, and
+the session it names must be committed: the recorder uses a connection
+of its own. U7 keeps to this.
 
 A trace is stored in its own transaction, as soon as the call ends, and
 not with the reply: if the turn fails afterwards, what the call cost is
@@ -82,17 +103,16 @@ that tests replace.
 | `id`, `tenant_id`, `created_at` | As every tenant-owned table | Row security by tenant |
 | `session_id` | The session the call was made for | Not null; the session is this tenant's (a key on both columns) |
 | `turn_id` | One identifier for all the calls of a turn. Made by the worker; no table of turns exists | Not null |
-| `window_closed_at` | When the turn's batching window closed: the time its job was due (NFR-P2 starts here) | Not null |
+| `turn_started_at` | When the turn began, as the caller gave it (U7: from `beginTurn`) | Not null |
 | `started_at`, `latency_ms` | When the adapter was called, and how long until it answered or the limit ran out | Not null; latency 0 or more |
 | `prompt_names`, `prompt_versions` | The prompts the request was assembled from, in order (U4: the core's, then the pack's fragment). The data model had one name and one version; a request can have two | Same length, 1 to 8; each name fits the pattern of a prompt's name; each version 1 or more |
-| `model` | The model's name as the adapter returned it | Null exactly for `timeout`, `provider-error` and `fault`. 1 to 200 of letters, digits and `. _ : / -` |
-| `input_tokens`, `output_tokens` | The two counts | Null exactly when `model` is; 0 or more |
-| `cost_micros` | The cost in millionths of a US dollar (section 4) | Null when the counts are, or when no price is set for the model; 0 or more |
+| `model` | The model's name as the adapter returned it, or `other` for a name that does not fit the pattern (the result the caller gets is unchanged, and nothing is thrown) | Null exactly for `timeout`, `provider-error` and `fault`. 1 to 200 of letters, digits and `. _ : / -` |
+| `input_tokens`, `output_tokens` | The two counts | Null exactly when `model` is; 0 or more; 64-bit |
+| `cost_micros` | The cost in millionths of a US dollar (section 4) | Null when the counts are, when no price is set for the model, when the model is `other`, or when a count is over 10^9; 0 or more |
 | `price_input`, `price_output` | The two prices the cost was worked out from | Null exactly when `cost_micros` is |
-| `tool_names` | The names of the tools an `ok` answer asked for, in order, repeats kept | Empty unless `ok`; at most 16 (the limit on calls in one answer); each fits the pattern of a tool's name |
+| `tool_names` | The names of the tools an `ok` answer asked for, in order, repeats kept | Empty unless `ok`; at most 4 (`TOOL_CALLS_PER_ROUND_MAX`); each fits the pattern of a tool's name, which this unit writes down: a small letter, then up to 63 small letters, digits, `_` or `-` |
 | `outcome` | `ok`, `invalid-output`, `timeout`, `provider-error`, `fault` | One of the five |
 | `outcome_code` | The code of an `invalid-output` or a `provider-error` | One of that outcome's list; null for the other three |
-| `guardrail_results` | Null: not checked. Filled by U9 | A list of short names when not null |
 
 The application's role may insert and read. It may not delete, and in
 this unit it may not update.
@@ -118,8 +138,6 @@ What this does not cover, and is accepted:
   account number. It is not a customer's;
 - a tool's name and a prompt's name are written by developers.
 
-The name of a model that does not fit the pattern is a fault of the
-adapter (T5), as an empty one is today.
 
 ## 4. Cost
 
@@ -129,22 +147,30 @@ for a million input tokens**, and the same for output. A price list of
 
 `cost = ceiling((input tokens × input price + output tokens × output
 price) / 1,000,000)`, in millionths of a dollar, worked out in whole
-numbers with no floating point.
+numbers of any size (`BigInt`), with no floating point. A price is at
+most 10^9 (a thousand dollars a million tokens) and a count over 10^9
+is not costed, so the largest cost is 2 × 10^12: it fits the 64-bit
+column and a JavaScript whole number. The column is read back as text
+and turned into a number.
 
 | # | Case | Cost |
 | --- | --- | --- |
 | C1 | 1,000 in, 500 out, prices 3,000,000 and 15,000,000 | 3,000 + 7,500 = 10,500 |
 | C2 | 1 in, 0 out, price 3,000,000 | 3 |
-| C3 | 1 in, 0 out, price 1 (a millionth of a dollar a million tokens) | 1: rounded **up**, so that a sum of costs is never under what the same prices would bill |
+| C3 | 1 in, 0 out, price 1 (a millionth of a dollar a million tokens) | 1: rounded **up**, so that one costed call is never under what the same two prices would give for it. A sum over a session can still be under the bill: it leaves out the calls with no cost |
 | C4 | 0 in, 0 out | 0 |
 | C5 | Both prices 0 (a model that is free) | 0, which is a cost; not null |
 | C6 | The model's name is not in the settings | **Null: unknown.** Never 0. The counts are kept, so a cost can be worked out later |
 | C7 | The name differs only in case, or has a version suffix the setting lacks | Null: names are matched exactly. A near match would put a wrong price on a call |
 | C8 | `invalid-output` | Costed as `ok` is |
 | C9 | `timeout`, `provider-error`, `fault` | Null |
-| C10 | Counts at the largest whole number a count may be, prices at the largest allowed (10^12) | Worked out exactly; the column is a 64-bit number and the result fits |
-| C11 | The setting is not JSON, is not an object of names to two prices, has a price that is negative, fractional, over 10^12, or not a number, a name that is not a model's name, an unknown key, or more than 100 names | **The worker does not start,** and says which setting. A wrong price is worse than no price |
-| C12 | The setting is absent or empty | No prices: every cost is null. This is the state until U17 |
+| C10 | Both counts 10^9, both prices 10^9 | 2 × 10^12, exactly |
+| C10a | A count of 10^9 + 1 (no model makes one; an adapter's fault or a unit slip) | Null. The counts are stored as they came |
+| C11 | The setting is not JSON, is not an object of names to two prices, has a price that is negative, fractional, over 10^9, or not a number, a name that is not a model's name, an unknown key, or more than 100 names | **The worker does not start,** and says which setting. A wrong price is worse than no price |
+| C12 | The setting is absent, empty, or `{}` | No prices: every cost is null. This is the state until U17 |
+| C13 | A name is written twice in the JSON | The last is used, as JSON reads it. Known, and not caught |
+| C14 | A price is set after calls were made with none | Their cost stays null: a trace is never changed. The counts are there for a report to work from |
+| C15 | The cost of a session is asked for | One function gives the sum of the costs that are known **and how many of the session's calls have none.** No other code sums costs, so the number is never shown without what it leaves out |
 
 **What this number is and is not.** It is an estimate from two counts
 and two prices. It is not the bill: a provider may count cached input,
@@ -154,7 +180,8 @@ tenant's own currency is not involved. The two prices are stored on the
 trace, so a cost can be checked later and a price change does not
 rewrite history.
 
-The setting is `PSA_MODEL_PRICES`, read by the worker. Decisions row 47
+The setting is `PSA_MODEL_PRICES`, read by the worker only; the api
+does not call the model. Decisions row 47
 asks the maintainer to confirm the form and that the number is an
 estimate.
 
@@ -168,12 +195,12 @@ same keys, always present, null where there is none:
 | `time` | When, in UTC, to the millisecond |
 | `level` | `info`, `warn` or `error` |
 | `service` | `api` or `worker` |
-| `event` | What happened: a short name from the service's own list |
-| `code` | A short code for a failure, or null |
-| `requestId` | The api's identifier for the request being served, or null |
-| `tenantId`, `conversationId`, `jobId` | The identifiers the line is about, or null |
-| `names` | A list of identifiers the line names (a setting, a job's type), or empty |
-| `n` | Named whole numbers: a status, a duration, counts |
+| `event` | What happened: one of a closed list, below |
+| `code` | What `errorCode` gives for a failure (letters, `_` and `-`, or the five characters of a database's error class), or a job's outcome; or null |
+| `requestId` | A UUID the api makes for the request being served; never read from a header. Null elsewhere |
+| `tenantId`, `conversationId`, `jobId` | UUIDs, or null |
+| `names` | The settings a failure to start named (`PSA_` and capital letters), or a job's type (small letters and hyphens, no digit); or empty |
+| `n` | Whole numbers from 0 to 10^9 under keys from a closed list: `status`, `durationMs`, `attempts` |
 
 NFR-O2 says "request and conversation IDs on every line". A line about
 starting up has neither; a webhook can hold many conversations. So the
@@ -182,9 +209,14 @@ request or conversation. The test checks that.
 
 **There is no key for a sentence.** A line cannot carry a message's
 text, an error's message or a phone number, because nothing in its
-shape holds one: every text is checked against a pattern for a short
-name or an identifier, and a value that does not fit is replaced by
-`invalid`, never written. That is how US-C10, 3 is meant to be kept;
+shape holds one. A digit can appear only in a UUID, in the time, in a
+database's five-character error class, or as a number under one of
+three keys, each of which the code works out itself (a status, a
+duration, a count of attempts) and none of which is read from what
+arrived. A word can appear only if it is in a closed list, is a job's
+type, or is a failure's code, which is made from an error's own code or
+class and never from its message. A value that does not fit is replaced by `invalid` (or left
+out of `n`), never written. That is how US-C10, 3 is meant to be kept;
 the scan of a whole run (U18) checks that it was.
 
 | # | Line | From |

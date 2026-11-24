@@ -473,7 +473,7 @@ hours.
 | `bookings.contact_id` | Customer | Set to null with the contact's anonymisation, for past bookings | Future bookings are cancelled and their slots freed; then set to null |
 | `consent_records` | Customer | Deleted with the contact's anonymisation | Included in the export; then deleted |
 | `handovers.contact_id` | Customer | Kept; the contact row it points to is anonymised | Open handovers end as `closed-unanswered` or `answered`; kept |
-| `sessions`, `ai_traces`, `tool_calls` | Customer, indirectly | Kept: they hold no text, number or name | Kept |
+| `sessions`, `ai_traces`, `tool_calls` | Customer, indirectly | Kept: they hold no text, number or name. For `tool_calls` this is **unproved**: its arguments are written by the model, which can copy a customer's words into them. The table is built in M3 unit U7, which must settle it (design note `notes/m3-u6-traces.md`, section 1) | Kept |
 | `audit_log` | Staff and system | Kept | Kept; it never held the number |
 | `users.email` | Staff | Kept while the user exists | Not covered by US-D5. Set to null 12 months after `removed_at` |
 | `tenants.support_contact`, `notification_email` | Business | Kept | Not personal data of a customer |
