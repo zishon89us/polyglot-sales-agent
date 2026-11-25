@@ -525,7 +525,8 @@ describe("what the model is given (section 2)", () => {
     const text = JSON.stringify(given);
     expect(text).not.toContain("owner@example.com");
     expect(text).not.toContain("17:00");
-    expect(text).not.toMatch(/updated|20[0-9][0-9]-/);
+    // A date, not four digits and a hyphen: an identifier made at random can hold "2034-".
+    expect(text).not.toMatch(/updated|20[0-9][0-9]-[01][0-9]-[0-3][0-9]/);
   });
 
   test("policies and services are given in the order of their names, whatever order they were stored in", async () => {
