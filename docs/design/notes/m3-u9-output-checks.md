@@ -83,11 +83,12 @@ or "Glow.studio" is not read as a value on every mention.
 
 **A number** is a run of ASCII digits, in which `,` or `.` may stand
 between two digits, and a space or an apostrophe may stand between two
-digits only when exactly three digits follow it and no fourth. It does
-not begin directly after a digit, a letter, or one of `. , : / -`
-that itself follows a digit; it does not end directly before a letter
-or digit. So `1 50` is two numbers, `2 150` is one (2150), and the `12`
-of `A12` is no number.
+digits only when exactly three digits follow it and no fourth. So
+`1 50` is two numbers and `2 150` is one (2150). Letters beside it do
+not matter: the `12` of `A12` is a number.
+
+The business's name is taken out only where it stands alone: an address
+that begins with the name is read as an address.
 
 ## 4. O3: values, claims and numbers
 
@@ -98,10 +99,10 @@ replaced by the unmatched character and is not read again.
 
 | Kind | Detected when the plain text has | Not detected |
 | --- | --- | --- |
-| Date | `Y-M-D` with a four-digit year; `D/M`, `D/M/Y`, `D-M-Y`, `D.M.Y` (D 1 to 31, M 1 to 12, Y two or four digits); a number 1 to 31, with or without an ordinal ending (`st`, `nd`, `rd`, `th`), next to a month's name or short name in a supported language, in either order, with "of" or a comma allowed between and an optional four-digit year after. A number directly followed by a currency marker is never the year | `24/7` exactly, when no year follows (#207) |
+| Date | `Y-M-D` with a four-digit year; `D/M`, `D/M/Y`, `D-M-Y`, `D.M.Y` (D 1 to 31, M 1 to 12, Y two or four digits; with `-` or `.` the year is needed, since `9-5` is hours and `5.10` a time); a number 1 to 31, with or without an ordinal ending (`st`, `nd`, `rd`, `th`), next to a month's name or short name in a supported language, in either order, with "of" or a comma allowed between and an optional four-digit year after. A number directly followed by a currency marker is never the year | `24/7` exactly, when no year follows (#207) |
 | Amount | A number and a currency marker, before or after it, with at most one space between, or with one word between the number and a currency's *name*: a currency symbol; one of a list of currency codes, in capitals; a name, a short form or a plural from the marker data (`riyals`, `SR`, `Rs`, `Rs.`, `Dhs`, the Arabic short form of the riyal); or `/-` after the number, which means the tenant's own currency | |
 | Percentage | A number and `%`, or the word for "percent" in a supported language, with at most one space between | |
-| Clock time | `H:MM` or `H.MM` with H 0 to 23 and MM 00 to 59, or `24:00`, with or without a marker for morning or afternoon after at most one space; or an hour 1 to 12 with such a marker | An hour with no minutes and no marker |
+| Clock time | `H:MM` or `H.MM` with H 0 to 23 and MM 00 to 59, or `24:00`, with or without a marker for morning or afternoon after at most one space; or an hour 1 to 12 with such a marker; or, in Urdu, Hindi and Bengali, an hour 1 to 12 with the word for "o'clock" after it, the half of the day taken from a word for the part of the day before it, and **either half** when there is none | An hour with no minutes and no marker |
 
 A marker made of letters must end where a word ends: the Arabic letter
 that marks the afternoon is not found at the start of a longer word.
@@ -171,7 +172,7 @@ taken out of the reply, **each number that is left must equal a number
 the business's own data holds**: a number in a service's name or
 description, in a policy's title or body, or in the business's name; a
 price, in whole units and in full; an hour or a minute of the opening
-hours, the hour also on the twelve-hour clock; a weekday's number.
+hours, the hour also on the twelve-hour clock.
 Compared as numbers: `09` equals `9`.
 
 Not counted as a number left over: a number at the start of a line

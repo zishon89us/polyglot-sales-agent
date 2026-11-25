@@ -32,10 +32,10 @@ I found no High finding: no customer input I tried crashes the parser, poisons a
 **G1. Medium. `packages/channel/src/index.ts` lines 75–77 and 97–108 (`CONTROL`, `titleKey`, `checkButtonMessage`); note S3.**
 The note says a title that is "blank" or has "a control character or a line break" is refused, and that titles are unique once normalised. The code checks only `\p{Cc}`, `trim()` and NFC plus `toLowerCase()`. The probe shows these are all accepted:
 - a title of only U+200B (blank to the eye);
-- `a b` (a line break);
-- `a‮b` (a bidi override);
+- `a\u2028b` (a line break);
+- `a\u202eb` (a bidi override);
 - a lone surrogate `\ud800`;
-- the pairs `Stop` / `St​op`, `Stop` / `Ｓｔｏｐ`, `STRASSE` / `straße`, and `a b` / `a  b`.
+- the pairs `Stop` / `St\u200bop`, `Stop` / `Ｓｔｏｐ`, `STRASSE` / `straße`, and `a b` / `a  b`.
 
 Fix: refuse `\p{Cc}`, `\p{Cf}`, `\p{Zl}`, `\p{Zp}` and lone surrogates, and compare titles with NFKC and collapsed whitespace; or narrow S3 to what the code does.
 

@@ -99,7 +99,7 @@ The note says control characters and direction overrides are "refused everywhere
 
 Executed:
 - `"support_contact": "a\u001b[2J@b.c"` is accepted, stored, and returned by `loadBusinessProfile` as `supportContact`, so it would go to the model.
-- `"a‮gro.elpmaxe@b.c"` (right-to-left override) is accepted.
+- `"a\u202egro.elpmaxe@b.c"` (right-to-left override) is accepted.
 - `"a\u0000@b.c"` passes the loader, then PostgreSQL refuses it with `22021`. Since `main.ts` maps every non-usage error to status 1, that is exit 1 after the operator's first row is written; L6 promises exit 2 before the database is reached.
 - `notification_email` behaves the same; `"<script>@x.y"` is also accepted.
 

@@ -328,7 +328,7 @@ describe("filling a text's places", () => {
     expect(fill("a".repeat(FILLED_VALUE_MAX))).toBeDefined();
     expect(fill("a".repeat(FILLED_VALUE_MAX + 1))).toBeUndefined();
     expect(fill("line\nbreak")).toBeUndefined();
-    expect(fill("line break")).toBeUndefined();
+    expect(fill("line\u2028break")).toBeUndefined();
     expect(fill("bell\u0007")).toBeUndefined();
     expect(fill("{{opening}}")).toBeUndefined();
     expect(fill(" padded")).toBeUndefined();

@@ -6,6 +6,7 @@ export * from "./log.ts";
 export * from "./model.ts";
 export * from "./names.ts";
 export * from "./profile.ts";
+export * from "./reply-checks.ts";
 export * from "./send-policy.ts";
 export * from "./texts.ts";
 export * from "./trace.ts";

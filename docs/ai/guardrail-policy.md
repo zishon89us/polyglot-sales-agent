@@ -103,6 +103,15 @@ decides the outcome.
 | O7 | The reply is not empty and not longer than 1,200 code points (#158; glossary) | Fallback |
 | O8 | Code adds the disclosure if this is the session's first outbound message, then applies the message-class checks and sends | As state machines §7 |
 
+**Built in M3 unit U9, first part:** O3, O5, O6 and O7 as one function
+(`packages/core/src/reply-checks.ts`; rules and cases in
+`design/notes/m3-u9-output-checks.md`). Nothing calls it yet: the turn
+does with the unit's second part. Three things differ from this section
+as written, each in the note: a claim that does not pass fails the reply
+even when its value is not in the text; **every number in a reply must be
+one the business's own data holds**, which this section leaves unchecked;
+and all four checks run, O7 and O6 first, so that each can be counted.
+
 Every check in this table is code, and each is tested by unit tests with a
 fake model that returns hostile output (ADR 0007). O7's number is set (M3
 unit U4); the check itself is built with the others (U9).
