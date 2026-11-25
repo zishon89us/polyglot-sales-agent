@@ -383,6 +383,83 @@ describe("the disclosure (US-C5, 1)", () => {
     expect(await sessions()).toEqual([{ told: true }]);
   });
 
+  test("V2: a failure and then a delivery, both before the send is recorded, end as they would have after it: failed, and not told", async () => {
+    const early: Channel = {
+      ...mock,
+      async sendText(from, to, body) {
+        const result = await mock.sendText(from, to, body);
+        if (result.accepted) {
+          await fails(result.channelMessageId);
+          await storeInbound(
+            app,
+            tenant,
+            NUMBER,
+            [],
+            [{ channelMessageId: result.channelMessageId, status: "delivered", errorCode: null }],
+          );
+        }
+        return result;
+      },
+    };
+    await exchange("first", [], early);
+    expect((await outbound()).map((row) => row.status)).toEqual(["failed"]);
+    expect(await sessions()).toEqual([{ told: false }]);
+  });
+
+  test("V1: a webhook with a failure for one message and a receipt for another, while the other's send is being recorded, ends with both applied", async () => {
+    // This runs the path; it does not force the interleaving that deadlocked, and it passed
+    // before the order of locks was fixed. That order is what the fix rests on (#334).
+    await exchange("first");
+    const first = (await outbound())[0]?.channel_message_id as string;
+    for (let round = 0; round < 5; round += 1) {
+      let webhook: Promise<unknown> = Promise.resolve();
+      const racing: Channel = {
+        ...mock,
+        async sendText(from, to, body) {
+          const result = await mock.sendText(from, to, body);
+          if (result.accepted) {
+            // Not awaited: it runs while the worker records the send.
+            webhook = storeInbound(
+              app,
+              tenant,
+              NUMBER,
+              [],
+              [
+                { channelMessageId: first, status: "failed", errorCode: "131026" },
+                { channelMessageId: result.channelMessageId, status: "delivered", errorCode: null },
+              ],
+            );
+          }
+          return result;
+        },
+      };
+      await exchange(`next ${round}`, [], racing);
+      await webhook;
+    }
+    const rows = await outbound();
+    expect(rows.map((row) => row.status)).toEqual(["failed", ...Array(5).fill("delivered")]);
+    expect((await administrator.query("SELECT 1 FROM early_receipts")).rowCount).toBe(0);
+    expect(reported).toEqual([]);
+  });
+
+  test("the disclosure's language is the message's own before the session's or the contact's last", async () => {
+    const synthetic = (language: string) => ({
+      language,
+      buttons: TEXTS.pick(["en"], "en").buttons,
+      texts: { ...ENGLISH, disclosure: `[${language}] told` },
+    });
+    const many = fixedTextSet([synthetic("en"), synthetic("ur"), synthetic("hi")]) as FixedTextSet;
+    mock.failNextSend("131016", true);
+    await arrives("question");
+    await work([answer("reply", [], "ur")], mock, 0, many);
+    // The message waits; meanwhile the session and the contact moved on to Hindi.
+    await administrator.query("UPDATE sessions SET language = 'hi'");
+    await administrator.query("UPDATE contacts SET last_language = 'hi'");
+    await endWaits();
+    await work([], mock, 120_000, many);
+    expect(bodies()).toEqual(["[ur] told\n\nreply"]);
+  });
+
   test("R1: a delivery reported before the send is recorded is applied too, and the session is marked", async () => {
     const early: Channel = {
       ...mock,
@@ -696,6 +773,30 @@ describe("buttons on a sent message (section 6, D9)", () => {
     expect(reported).toContain("send-failed unsupported-kind");
   });
 
+  test("V3: nor with a body that is only blank", async () => {
+    await exchange("first");
+    await administrator.query("UPDATE sessions SET disclosed_at = NULL");
+    for (const blank of [" ", "\n", "\u200b"]) {
+      await administrator.query(
+        `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind,
+                               status, body)
+         SELECT tenant_id, conversation_id, session_id, 'outbound', 'system-reply', 'text',
+                'pending', $1
+         FROM messages WHERE direction = 'outbound' AND body = 'first'`,
+        [blank],
+      );
+    }
+    await administrator.query(
+      `INSERT INTO jobs (tenant_id, type, payload, run_at)
+       SELECT tenant_id, 'send-messages', jsonb_build_object('conversationId', conversation_id),
+              now()
+       FROM messages WHERE direction = 'outbound' AND body = 'first'`,
+    );
+    await work([]);
+    expect(mock.sent).toHaveLength(1);
+    expect(await sessions()).toEqual([{ told: false }]);
+  });
+
   test("D9: when the send without them fails, the record still says which buttons the message has: nothing was shown", async () => {
     await waiting(BUTTONS);
     const plain: Channel = { ...mock, limits: { ...mock.limits, buttons: null } };
@@ -716,9 +817,9 @@ describe("buttons on a sent message (section 6, D9)", () => {
         [inbound ? "inbound" : "outbound"],
       );
     await exchange("first");
-    await expect(insert("buttons", "'[]'::jsonb")).rejects.toThrow(/check/);
-    await expect(insert("buttons", "'{}'::jsonb")).rejects.toThrow(/check/);
-    await expect(insert("buttons", "'[1,2,3]'::jsonb")).rejects.toThrow(/check/);
+    await expect(insert("buttons", "'[]'::jsonb")).rejects.toThrow(/buttons_are_buttons/);
+    await expect(insert("buttons", "'{}'::jsonb")).rejects.toThrow(/buttons_are_buttons/);
+    await expect(insert("buttons", "'[1,2,3]'::jsonb")).rejects.toThrow(/buttons_are_buttons/);
     for (const bad of [
       "[1]",
       "[{}]",
@@ -731,6 +832,20 @@ describe("buttons on a sent message (section 6, D9)", () => {
         /messages_buttons_are_buttons/,
       );
     }
+    for (const bad of [
+      '[[{"payload":"a","title":"b"}]]',
+      '[{"payload":["x"],"title":"t"}]',
+      '[{"payload":"a","title":["t"]}]',
+      '[{"payload":"","title":""}]',
+      '[{"payload":"a","title":" "}]',
+      '[{"payload":"a","title":"b","more":1}]',
+      "[null]",
+    ]) {
+      await expect(insert("buttons", `'${bad}'::jsonb`), bad).rejects.toThrow(
+        /messages_buttons_are_buttons/,
+      );
+    }
+    await expect(insert("lead", "E'\\r\\n'")).rejects.toThrow(/not_blank/);
     await expect(insert("lead", "E' \\n '")).rejects.toThrow(/not_blank/);
     await expect(insert("disclosure", "'   '")).rejects.toThrow(/not_blank/);
     await expect(insert("lead", "''")).rejects.toThrow(/check/);

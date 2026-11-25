@@ -870,6 +870,11 @@ export function recordSend(
     if (conversationId === undefined || !(await lockConversation(tx, conversationId))) {
       return "superseded";
     }
+    // One order of locks everywhere: the conversation, the channel's
+    // identifier, the message, the session. A receipt takes the last three.
+    if (result.kind === "accepted") {
+      await tx.query(RECEIPT_LOCK, [result.channelMessageId]);
+    }
     const found = await tx.query<{ class: MessageClass; unknown_outcomes: number }>(
       `SELECT class, unknown_outcomes FROM messages
        WHERE id = $1 AND status = 'sending' AND send_attempts = $2 FOR UPDATE`,
@@ -885,9 +890,6 @@ export function recordSend(
       { attempts: message.attempt, unknownBefore: row.unknown_outcomes },
       outcome,
     );
-    if (result.kind === "accepted") {
-      await tx.query(RECEIPT_LOCK, [result.channelMessageId]);
-    }
     await apply(tx, { id: message.id, attempts: message.attempt }, decision, {
       unknown: result.kind === "unknown",
       now,
@@ -896,16 +898,20 @@ export function recordSend(
     if (decision.next === "sent") {
       await noteAccepted(tx, message.id, await stamp(tx, now));
       if (result.kind === "accepted") {
-        // Receipts that arrived before this record: applied now, a failure last.
+        // Receipts that arrived before this record: applied now, in the
+        // order they arrived, as they would have been had the record been
+        // first. Of two kept in one moment a failure goes first: a failure
+        // can no longer be applied once the message counts as delivered.
         const early = await tx.query<{ status: string; error_code: string | null }>(
-          `DELETE FROM early_receipts WHERE channel_message_id = $1
-           RETURNING status, error_code`,
+          `WITH kept AS (
+             DELETE FROM early_receipts WHERE channel_message_id = $1
+             RETURNING status, error_code, created_at)
+           SELECT status, error_code FROM kept
+           ORDER BY created_at, (status = 'failed') DESC, status`,
           [result.channelMessageId],
         );
-        for (const status of ["sent", "delivered", "read", "failed"]) {
-          for (const receipt of early.rows.filter((row) => row.status === status)) {
-            await tx.query(FORWARD, [result.channelMessageId, status, receipt.error_code]);
-          }
+        for (const receipt of early.rows) {
+          await tx.query(FORWARD, [result.channelMessageId, receipt.status, receipt.error_code]);
         }
       }
       // The session's customer has been told once the channel has accepted

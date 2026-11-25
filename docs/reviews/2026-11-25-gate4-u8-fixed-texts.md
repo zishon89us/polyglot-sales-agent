@@ -118,7 +118,7 @@ That last row, in an untold session, was sent as the disclosure alone and marked
 
 The High finding is accepted and fixed. **These fixes are checked by a
 second agent in `2026-11-25-gate4-u8-fixed-texts-verification.md`**; what
-is left is in the follow-up issue named there.
+is left is #334.
 
 | Finding | Answer |
 |---|---|

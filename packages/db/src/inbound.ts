@@ -305,12 +305,16 @@ export function storeInbound(
       });
     }
     let statusesApplied = 0;
+    // Every identifier's lock first, in one order, before any row a status
+    // changes: two webhooks, or a webhook and the record of a send, then
+    // never wait for each other in a ring.
+    for (const id of [...new Set(statuses.map((status) => status.channelMessageId))].sort()) {
+      await tx.query(RECEIPT_LOCK, [id]);
+    }
     for (const status of statuses) {
       // A status never moves a session's time or ends a run of dropped
       // replies: a receipt is not a message, and the acceptance itself is
       // recorded by the worker that made the call (`recordSend`).
-      // One at a time with the record of the send it is about (`recordSend`).
-      await tx.query(RECEIPT_LOCK, [status.channelMessageId]);
       const moved = await tx.query(FORWARD, [
         status.channelMessageId,
         status.status,

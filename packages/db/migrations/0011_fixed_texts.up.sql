@@ -20,22 +20,38 @@ ALTER TABLE messages
   -- The buttons the customer was shown: a list of 1 or 2, each a payload
   -- and a title. Null when there were none, and set to null when a message
   -- written with buttons was sent without them.
-  ADD COLUMN buttons jsonb
-    CHECK (jsonb_typeof(buttons) = 'array' AND jsonb_array_length(buttons) BETWEEN 1 AND 2),
+  ADD COLUMN buttons jsonb,
   ADD CONSTRAINT messages_fixed_parts_are_sent
     CHECK (direction = 'outbound'
            OR (disclosure IS NULL AND lead IS NULL AND buttons IS NULL));
 
 -- What a stored message of ours must be, beyond the above: a fixed part
--- is not blank, and each button is a payload and a title.
+-- has something to read, and each button is exactly a payload and a
+-- title, both short texts that are not empty.
+CREATE FUNCTION message_buttons_ok(buttons jsonb) RETURNS boolean
+  LANGUAGE sql IMMUTABLE
+  RETURN CASE WHEN jsonb_typeof(buttons) <> 'array' THEN false ELSE
+    jsonb_array_length(buttons) BETWEEN 1 AND 2
+    AND NOT EXISTS (
+      SELECT 1 FROM jsonb_array_elements(buttons) AS button
+      WHERE CASE WHEN jsonb_typeof(button) <> 'object' THEN true ELSE
+        (SELECT count(*) FROM jsonb_object_keys(button)) <> 2
+        OR jsonb_typeof(button -> 'payload') IS DISTINCT FROM 'string'
+        OR jsonb_typeof(button -> 'title') IS DISTINCT FROM 'string'
+        OR char_length(button ->> 'payload') NOT BETWEEN 1 AND 256
+        OR char_length(button ->> 'title') NOT BETWEEN 1 AND 20
+        OR (button ->> 'title') !~ '\S'
+      END)
+  END;
+REVOKE ALL ON FUNCTION message_buttons_ok(jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION message_buttons_ok(jsonb) TO psa_app, psa_cross;
+
 ALTER TABLE messages
   ADD CONSTRAINT messages_fixed_parts_are_not_blank
-    CHECK ((disclosure IS NULL OR btrim(disclosure, E' \n\t') <> '')
-           AND (lead IS NULL OR btrim(lead, E' \n\t') <> '')),
+    CHECK ((disclosure IS NULL OR disclosure ~ '\S')
+           AND (lead IS NULL OR lead ~ '\S')),
   ADD CONSTRAINT messages_buttons_are_buttons
-    CHECK (buttons IS NULL OR NOT jsonb_path_exists(
-      buttons,
-      '$[*] ? (@.type() != "object" || !(exists(@.payload ? (@.type() == "string"))) || !(exists(@.title ? (@.type() == "string"))))'));
+    CHECK (buttons IS NULL OR message_buttons_ok(buttons));
 
 -- A receipt that arrived before the send it is about was recorded. The
 -- channel can report a message failed in the moment between accepting it

@@ -693,6 +693,14 @@ M0 Inception met its exit criteria on 2026-11-16; see
   that a customer is "never not at all" told was not true, and is taken
   out, with the case where they are not said plainly (D2c); and three
   tests that could not tell a right rule from a wrong one, now added.
+  Another agent checked the fixes
+  (`reviews/2026-11-25-gate4-u8-fixed-texts-verification.md`): the lost
+  failure is fixed, and the fix had brought a deadlock, which it
+  measured, between a webhook reporting on two messages and the record
+  of a send. Fixed by one order of locks everywhere; **the test added
+  for it does not force that interleaving**, so the fix rests on the
+  order and not on a test. Five Low findings, fixed. **These last fixes
+  are checked by the author only.** What is left is #334.
 
 ## Next
 

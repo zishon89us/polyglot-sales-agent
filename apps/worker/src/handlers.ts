@@ -77,6 +77,9 @@ function ids(job: Job): { tenantId: string; conversationId: string } {
   return { tenantId: job.tenantId, conversationId };
 }
 
+/** Something a reader would see: not a space, a line break or a zero-width character. */
+const SEEN = /[^\s\u200b\u2060\ufeff]/;
+
 /** The call's result, and whether a message stored with buttons went without them. */
 async function call(
   options: HandlerOptions,
@@ -96,7 +99,7 @@ async function call(
   const text = composeMessage([message.disclosure, message.lead, message.body]);
   // Only a free-form text can be sent so far; a template is a later unit's.
   // The disclosure alone is no message: there must be a lead or a body to carry it.
-  if (message.kind !== "text" || composeMessage([message.lead, message.body]) === "") {
+  if (message.kind !== "text" || !SEEN.test(composeMessage([message.lead, message.body]))) {
     return refused("unsupported-kind");
   }
   const from = { receivingNumberId: message.receivingNumberId, accessToken: options.accessToken };

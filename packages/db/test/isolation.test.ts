@@ -576,6 +576,14 @@ describe("privileges", () => {
         everyone: false,
       },
       {
+        name: "message_buttons_ok",
+        definer: false,
+        settings: null,
+        app: true,
+        cross: true,
+        everyone: false,
+      },
+      {
         name: "operator_arguments_ok",
         definer: false,
         settings: null,

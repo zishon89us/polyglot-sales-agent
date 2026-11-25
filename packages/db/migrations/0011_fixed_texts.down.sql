@@ -11,5 +11,6 @@ ALTER TABLE messages
   DROP COLUMN buttons,
   DROP COLUMN lead,
   DROP COLUMN disclosure;
+DROP FUNCTION message_buttons_ok(jsonb);
 ALTER TABLE contacts DROP COLUMN last_language;
 ALTER TABLE sessions DROP COLUMN disclosed_at;
