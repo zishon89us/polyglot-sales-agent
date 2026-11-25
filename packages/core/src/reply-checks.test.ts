@@ -146,8 +146,14 @@ describe("O3: the cases of section 4.5", () => {
     expect(verdict("Cancel before 5 pm.", [["policy", P, "5 pm"]])).toBe("passes");
   });
   test("V19: a date the customer wrote, in another form", () => {
-    expect(verdict("On 12/3 then.", [], { batch: ["12 March?"] })).toBe("passes");
-    expect(verdict("On 12/3 then.", [], { batch: ["13 March?"] })).toBe("O3 date-unclaimed");
+    expect(verdict("On 12 March then.", [], { batch: ["12/3?"] })).toBe("passes");
+    expect(verdict("On 12/3/2027 then.", [], { batch: ["12 March?"] })).toBe("passes");
+    expect(verdict("On 12 March then.", [], { batch: ["13 March?"] })).toBe("O3 date-unclaimed");
+    // Two numbers and a slash are also a fraction: never by the exception.
+    expect(verdict("On 12/3 then.", [], { batch: ["12/3?"] })).toBe("O3 date-unclaimed");
+    expect(verdict("Yes, 1/2 price!", [], { batch: ["do students get 1/2 price?"] })).toBe(
+      "O3 date-unclaimed",
+    );
   });
   test("V20: a date with no claim, with an ordinal", () => {
     expect(verdict("See you on March 12th.")).toBe("O3 date-unclaimed");
@@ -309,8 +315,9 @@ describe("O3: the rules alone", () => {
     expect(verdict("USD 150 SAR", [price("150")])).toBe("O3 amount-unclaimed");
     expect(verdict("A$150", [price("150")])).toBe("O3 amount-unclaimed");
     expect(verdict("150 ₿", [price("150")])).toBe("O3 amount-unclaimed");
-    // A code is read in capitals only.
-    expect(verdict("150 sar")).toBe("passes");
+    // The tenant's own code is read in any case; another's in capitals only.
+    expect(verdict("45 sar")).toBe("O3 amount-unclaimed");
+    expect(verdict("45 Sar")).toBe("O3 amount-unclaimed");
   });
 
   test("a tenant with no currency has no amount that passes", () => {
@@ -323,21 +330,28 @@ describe("O3: the rules alone", () => {
     const claim: Claim = ["opening-hours", "1", "16:00"];
     for (const form of [
       "16:00",
-      "16.00",
       "4 pm",
       "4pm",
       "4:00 PM",
+      "4.00 pm",
       "4 p.m.",
+      "4 p. m.",
       "٤ م",
       "4 ng hapon",
     ]) {
       expect(verdict(`From ${form} on.`, [claim]), form).toBe("passes");
     }
     expect(verdict("From 4 am on.", [claim])).toBe("O3 time-unclaimed");
-    // An hour with a word for "o'clock" and no part of the day is either half.
-    expect(verdict("4 बजे", [claim])).toBe("passes");
+    // An hour with a word for "o'clock" needs a word for the part of the day, before or after.
+    expect(verdict("4 बजे", [claim])).toBe("O3 value-unreadable");
     expect(verdict("शाम 4 बजे", [claim])).toBe("passes");
+    expect(verdict("4 बजे शाम", [claim])).toBe("passes");
     expect(verdict("सुबह 4 बजे", [claim])).toBe("O3 time-unclaimed");
+    expect(verdict("4 बजे सुबह", [claim])).toBe("O3 time-unclaimed");
+    // With a dot and no marker it is a number, since "9.50" is also a price.
+    expect(verdict("Yes, 9.50", [], { batch: ["is the trim 9.50?"] })).toBe("O3 number-unknown");
+    expect(verdict("From 16.00 on.", [claim])).toBe("passes");
+    expect(verdict("From 16.30 on.", [claim])).toBe("O3 number-unknown");
     // The Arabic marker is not found at the start of a longer word.
     expect(verdict("4 مرات")).toBe("passes");
   });
@@ -345,7 +359,6 @@ describe("O3: the rules alone", () => {
   test("a date in its forms, day before month", () => {
     const asked = { batch: ["on 2027-03-12?"] };
     for (const form of [
-      "12/3",
       "12/03/2027",
       "12-3-27",
       "12.3.2027",
@@ -354,13 +367,19 @@ describe("O3: the rules alone", () => {
       "12 मार्च",
       "12 مارس",
       "Mar 12th, 2027",
+      "March the 12th",
+      "March, 12",
+      "March  12",
+      "12-March",
+      "12 de March",
+      "the 12th of March",
     ]) {
       expect(verdict(`On ${form}.`, [], asked), form).toBe("passes");
     }
-    expect(verdict("On 3/12.", [], asked)).toBe("O3 date-unclaimed");
+    expect(verdict("On 3/12/2027.", [], asked)).toBe("O3 date-unclaimed");
     // A date with no year is the next such date on or after today.
-    expect(verdict("On 26/11.", [], { batch: ["2026-11-26"] })).toBe("passes");
-    expect(verdict("On 25/11.", [], { batch: ["2027-11-25"] })).toBe("passes");
+    expect(verdict("On 26 November.", [], { batch: ["2026-11-26"] })).toBe("passes");
+    expect(verdict("On 25 November.", [], { batch: ["2027-11-25"] })).toBe("passes");
   });
 
   test("a claim whose value holds nothing its kind can read fails", () => {
@@ -427,7 +446,7 @@ describe("O3: the rules alone", () => {
       }
     }
     for (const word of OCLOCK_WORDS) {
-      expect(verdict(`7 ${word}`), word).toBe("O3 time-unclaimed");
+      expect(verdict(`7 ${word}`), word).toBe("O3 value-unreadable");
     }
     for (const names of MONTHS) {
       for (const name of names) {
@@ -547,7 +566,9 @@ describe("O5: the cases of section 6", () => {
   test("L7: digits split by words are not a long number, and are numbers nobody stored", () => {
     const result = checkReply(input("055, then 1234, then 567"));
     expect(result.checks.O5).toEqual({ passed: true });
-    expect(result.checks.O3).toEqual({ passed: false, code: "number-unknown" });
+    expect(result.checks.O3).toEqual({ passed: false, code: "value-unreadable" });
+    // Also when every piece is a number the business stored.
+    expect(verdict("call 0 then 50 then 150 then 45 then 10")).toBe("O3 value-unreadable");
   });
   test("L8: a long number", () => {
     expect(verdict("Your order is 1234567.")).toBe("O5 number");
@@ -692,5 +713,242 @@ describe("the answer", () => {
     const before = JSON.stringify(given);
     expect(checkReply(given)).toEqual(checkReply(given));
     expect(JSON.stringify(given)).toBe(before);
+  });
+});
+
+describe("what the code's review found (docs/reviews/2026-11-26-gate4-u9-reply-checks.md)", () => {
+  const P150: Claim = price("150 SAR");
+  const fails = (reply: string, claims: readonly Claim[] = [], batch: string[] = []) =>
+    expect(verdict(reply, claims, { batch }), reply).not.toBe("passes");
+
+  test("R1: a business's name of any punctuation does not throw", () => {
+    for (const name of [
+      "Al-Noor Salon",
+      "Noor - Beauty",
+      `Al${at(0x2013)}Noor`,
+      "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+      "a",
+      "5",
+      "",
+    ]) {
+      const profile: BusinessProfile = { ...SALON, name };
+      expect(() => checkReply(input("hello", [], { profile }))).not.toThrow();
+      expect(verdict(`Welcome to ${name}, hello`, [], { profile }), name).toMatch(/^passes|^O/);
+    }
+    expect(
+      verdict("Welcome to Al-Noor Salon!", [], { profile: { ...SALON, name: "Al-Noor Salon" } }),
+    ).toBe("passes");
+    const dashed: BusinessProfile = { ...SALON, currency: { code: "X-Y", decimals: 2 } };
+    expect(() => checkReply(input("150 X-Y", [], { profile: dashed }))).not.toThrow();
+  });
+
+  test("R2: a value inside an address does not hide the address", () => {
+    for (const reply of [
+      "https://150SAR.evil.com/pay",
+      "Pay at 150SAR.evil.example",
+      "evil.150SAR.com",
+    ]) {
+      expect(verdict(reply, [P150]), reply).toBe("O5 link");
+    }
+    expect(verdict("9am.evil.com/pay", [["opening-hours", "1", "9 am"]])).toBe("O5 link");
+    expect(verdict("pay.5pm.co", [], { batch: ["5pm?"] })).toBe("O5 link");
+  });
+
+  test("R3: addresses after dots and before dashes, with a coded ending, or with the dot disguised", () => {
+    for (const reply of [
+      "pay here...evil.com/pay",
+      `pay here${at(0x2026)}evil.com/pay`,
+      "Pay here: .evil.com",
+      "..evil.com",
+      "visit evil.com- now",
+      `evil.com${at(0x2014)}great`,
+      "evil.xn--p1ai",
+      "evil . com",
+      "evil .com",
+      "evil. com",
+      "evil[.]com",
+      "evil(.)com",
+      "evil dot cc",
+      "evil  dot  com",
+      `evil${at(0x3002)}com`,
+    ]) {
+      expect(verdict(reply), reply).toBe("O5 link");
+    }
+    // A sentence's end is not an address.
+    expect(verdict("See you. Come early.")).toBe("passes");
+    expect(verdict("Visit the store. Online booking is closed.")).toBe("passes");
+  });
+
+  test("R4: a name at a provider with no dot, as payment addresses are written", () => {
+    for (const reply of ["pay to salonpay@okaxis", "UPI: evil@ybl", "send to evil@paytm please"]) {
+      expect(verdict(reply), reply).toBe("O5 handle");
+    }
+  });
+
+  test("R5: only a list numbered 1, 2, 3 in order is a list", () => {
+    fails("200. Would you like to book?");
+    fails("Prices:\n200) riyals for the haircut");
+    fails("1. Haircut\n250. Colour");
+    fails("Call:\n055. then\n555. then\n010. then\n0. done");
+    fails("Prices:\r200. riyals");
+    fails(`Prices:${at(0x2028)}200. riyals`);
+    expect(verdict("1. Haircut\n2. Colour\n3. Styling\n\nAnything else?\n1. Yes\n2. No")).toBe(
+      "passes",
+    );
+    // One line alone is not a list: its number is a number.
+    expect(verdict("2. Colour")).toBe("O3 number-unknown");
+    expect(verdict("1. Haircut\n3. Styling")).toBe("O3 number-unknown");
+  });
+
+  test("R6: a number made another number by a letter or a word after it", () => {
+    for (const reply of ["150k SAR", "150K", "150 thousand SAR", "150 million", "150 lakh"]) {
+      fails(reply);
+    }
+    for (const reply of [
+      "150 thousand riyals",
+      "150k riyals",
+      "150 hundred riyals",
+      "150 ألف ريال",
+    ]) {
+      fails(reply, [P150]);
+    }
+    fails("Hello.", [price("150 thousand riyals")]);
+    fails("Hello.", [price("150k")]);
+    fails("Open at 16h.");
+  });
+
+  test("R7: grouping that is no grouping cannot be read", () => {
+    for (const reply of ["only 0.150 SAR", "0,150 SAR", "1.50,00 SAR", "1,50,000 SAR"]) {
+      expect(verdict(reply, [P150]), reply).toBe("O3 value-unreadable");
+    }
+    expect(verdict("it costs 0.150")).toBe("O3 value-unreadable");
+    expect(verdict("0.010% off", [["service-detail", S, "10%"]])).toBe("O3 value-unreadable");
+    fails("Hello.", [price("0.150")]);
+    expect(scaledNumber("0.150", 2)).toBeNull();
+    expect(scaledNumber("1.50,00", 2)).toBeNull();
+    expect(scaledNumber("12,34,567", 2)).toBeNull();
+    expect(scaledNumber("1,234,567.5", 2)).toBe(123_456_750);
+    expect(scaledNumber("0.15", 2)).toBe(15);
+    expect(scaledNumber("007", 0)).toBe(7);
+  });
+
+  test("R8: a price shaped like a time or a date does not pass by the exception or a time claim", () => {
+    fails("Yes, 9.50", [], ["is the trim 9.50?"]);
+    fails("Yes, 20.00.", [], ["is it 20.00?"]);
+    fails("Yes, 2.50 sar", [], ["2.50?"]);
+    fails("Yes, 1/2 price for students!", [], ["do students get 1/2 price?"]);
+    fails("costs 9.50", [["opening-hours", "1", "9:00"]]);
+  });
+
+  test("R9: a currency marker in a form the scanner joins, or left on the line", () => {
+    for (const reply of [
+      "The haircut costs 45 sar",
+      "The haircut costs 9 Sar",
+      "45  SAR",
+      "*45* SAR",
+      "45\nSAR",
+      "45-SAR",
+      "SAR: 45",
+      "45 (SAR)",
+      "45 for the trim, in SAR",
+      "The price in riyals is 45",
+    ]) {
+      fails(reply);
+    }
+  });
+
+  test("R10: a number beside a month, a percent word or a time word in a form the scanner does not read", () => {
+    for (const reply of [
+      "closed on March the 9th",
+      "closed on March, 9",
+      "closed March  9",
+      "closed 9-March",
+      "closed on 9 de marso",
+      "closed in March, on the 9",
+      "open until 9 o'clock",
+      "open till 9 p. m.",
+      "45 per-cent off",
+      "45 off, percent",
+    ]) {
+      fails(reply);
+    }
+  });
+
+  test("R11: the instructions repeated with something unseen, a mark or a hyphen inside the words", () => {
+    const instructions =
+      "You are the assistant of a business. Never state a price that the data does not give. Write every amount in digits and return one claim for each.";
+    for (const inside of [at(0x200b), at(0xad), at(0x301), "'", "-"]) {
+      const disguised = instructions
+        .split(" ")
+        .map((word, index) => (index % 6 === 0 ? `${word[0]}${inside}${word.slice(1)}` : word))
+        .join(" ");
+      expect(verdict(disguised, [], { instructions })).toBe("O6 instructions");
+    }
+  });
+
+  test("R12: a claim's value holds values and nothing else that is checked", () => {
+    fails("Hello.", [["opening-hours", "1", "9:00 evil.com 77"]]);
+    fails("Hello.", [["opening-hours", "1", "9:00 and 77"]]);
+    fails("Hello.", [price("150 SAR evil.com")]);
+    fails("Hello.", [["policy", P, "17:00 and 3"]]);
+  });
+
+  test("R13: an address is compared with its scheme, unless that is the web's", () => {
+    expect(verdict("evil.com://salon.example/book")).toBe("O5 link");
+    expect(verdict("javascript://salon.example/book")).toBe("O5 link");
+    expect(verdict("http://salon.example/book")).toBe("passes");
+    expect(verdict("HTTPS://salon.example/book")).toBe("passes");
+  });
+
+  test("R14: a reply of nothing a reader sees is empty", () => {
+    for (const reply of [at(1) + at(2), at(0x2800), at(0x301), at(0xa0), `${at(0x200b)} \n`]) {
+      expect(verdict(reply)).toBe("O7 empty");
+    }
+    expect(verdict(at(0x1f44d))).toBe("passes");
+  });
+
+  test("R16: stored texts are read once for a call, however many claims ask", () => {
+    const body = `Cancel before 17:00. ${"Please be on time. ".repeat(400)}`;
+    const profile: BusinessProfile = { ...SALON, policies: [{ id: P, title: "T", body }] };
+    const claims: Claim[] = Array.from({ length: 30 }, () => ["policy", P, "17:00"]);
+    const started = performance.now();
+    expect(verdict("Cancel before 17:00.", claims, { profile })).toBe("passes");
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  test("the review's surviving mutants: each rule now has a case that needs it", () => {
+    // The minutes of the opening hours are numbers the business holds.
+    const half: BusinessProfile = {
+      ...SALON,
+      openingHours: [{ weekday: 1, periods: [{ opens: "09:30", closes: "13:00" }] }],
+    };
+    expect(verdict("The number 30.", [], { profile: half })).toBe("passes");
+    expect(verdict("The number 30.")).toBe("O3 number-unknown");
+    // A bank account needs its check digits right; without them it is a long number.
+    expect(checkReply(input("Pay to GB82 WEST 1234 5698 7654 33")).checks.O5).toEqual({
+      passed: false,
+      code: "number",
+    });
+    // Every dash reads as a hyphen.
+    expect(
+      verdict(`On 12${at(0x2013)}3${at(0x2013)}2027.`, [], { batch: ["12 March 2027?"] }),
+    ).toBe("passes");
+    // A mark after a digit is removed.
+    expect(verdict(`It costs 1${at(0x308)}50 SAR.`, [price("150 SAR")])).toBe("passes");
+    // A weekday is named exactly as the model was given it.
+    for (const item of ["01", " 1", "1.0", "1 "]) {
+      expect(verdict("At 9:00.", [["opening-hours", item, "9:00"]]), item).toBe("O3 claim-failed");
+    }
+    // A number before a currency marker is the amount, not the year.
+    expect(verdict("On 5 May 2028 SAR.", [], { batch: ["5 May?"] })).toBe("O3 amount-unclaimed");
+    // A contact equals a stored one of its own kind.
+    const handle: BusinessProfile = { ...SALON, supportContact: "@salon.example" };
+    expect(verdict("Visit salon.example", [], { profile: handle })).toBe("O5 link");
+    // The tatweel is removed before a word is matched.
+    expect(verdict(`200 ري${at(0x640)}ال`)).toBe("O3 amount-unclaimed");
+    // A code ends where a word ends: "USDT" is no dollar, and 150 is then a number the
+    // business stored, which passes whatever word follows it (the note, section 9).
+    expect(verdict("150 USDT")).toBe("passes");
+    expect(verdict("150 USD")).toBe("O3 amount-unclaimed");
   });
 });

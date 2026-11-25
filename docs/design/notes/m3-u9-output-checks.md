@@ -3,7 +3,9 @@
 Status: proposed by the agent, 2026-11-26, before any code; rewritten
 the same day after its review
 (`docs/reviews/2026-11-26-m3-u9-design-review.md`, five High findings),
-and not reviewed again. Issue #308. Stories: US-C4, criteria 3, 5 to 9 and 15; US-C15,
+and not reviewed again. Changed once more after the code's review
+(`docs/reviews/2026-11-26-gate4-u9-reply-checks.md`, eight High
+findings): section 4.6 lists what. Issue #308. Stories: US-C4, criteria 3, 5 to 9 and 15; US-C15,
 10. Guardrail policy, section 4, checks O3, O5, O6 and O7. Findings #207,
 #208 and #213 are answered in section 8.
 
@@ -77,7 +79,10 @@ A copy of the text is made plain, in this order:
 The marker words of section 4.1 go through the same steps before they
 are compared.
 
-Every exact occurrence of the business's name is then replaced by a
+Every way a line ends becomes one line break, and the full stops of
+other scripts become a dot, before step 1.
+
+Every occurrence of the business's name, without regard to case, is then replaced by a
 character that no pattern matches, so that a name such as "5 pm Cafe"
 or "Glow.studio" is not read as a value on every mention.
 
@@ -102,7 +107,7 @@ replaced by the unmatched character and is not read again.
 | Date | `Y-M-D` with a four-digit year; `D/M`, `D/M/Y`, `D-M-Y`, `D.M.Y` (D 1 to 31, M 1 to 12, Y two or four digits; with `-` or `.` the year is needed, since `9-5` is hours and `5.10` a time); a number 1 to 31, with or without an ordinal ending (`st`, `nd`, `rd`, `th`), next to a month's name or short name in a supported language, in either order, with "of" or a comma allowed between and an optional four-digit year after. A number directly followed by a currency marker is never the year | `24/7` exactly, when no year follows (#207) |
 | Amount | A number and a currency marker, before or after it, with at most one space between, or with one word between the number and a currency's *name*: a currency symbol; one of a list of currency codes, in capitals; a name, a short form or a plural from the marker data (`riyals`, `SR`, `Rs`, `Rs.`, `Dhs`, the Arabic short form of the riyal); or `/-` after the number, which means the tenant's own currency | |
 | Percentage | A number and `%`, or the word for "percent" in a supported language, with at most one space between | |
-| Clock time | `H:MM` or `H.MM` with H 0 to 23 and MM 00 to 59, or `24:00`, with or without a marker for morning or afternoon after at most one space; or an hour 1 to 12 with such a marker; or, in Urdu, Hindi and Bengali, an hour 1 to 12 with the word for "o'clock" after it, the half of the day taken from a word for the part of the day before it, and **either half** when there is none | An hour with no minutes and no marker |
+| Clock time | `H:MM` with H 0 to 23 and MM 00 to 59, or `24:00`, with or without a marker for morning or afternoon after at most one space; `H.MM` **only with such a marker**, since `9.50` is also a price (without one it is a number, for 4.4); an hour 1 to 12 with a marker; or, in Urdu, Hindi and Bengali, an hour 1 to 12 with the word for "o'clock" after it and a word for the part of the day before or after. With no such word the half is not known and the time **cannot be read** | An hour with no minutes and no marker |
 
 A marker made of letters must end where a word ends: the Arabic letter
 that marks the afternoon is not found at the start of a longer word.
@@ -157,7 +162,9 @@ equal value of the same kind.
 **The exception.** A detected clock time or date that no claim holds
 still passes if an equal value is detected, by the same rules, in the
 texts of the customer's latest batch. An amount or a percentage never
-passes this way.
+passes this way, and neither does a date written as two numbers and a
+slash with no year, which is also how a fraction is written ("1/2
+price").
 
 ### 4.4 Every number is accounted for
 
@@ -175,8 +182,20 @@ price, in whole units and in full; an hour or a minute of the opening
 hours, the hour also on the twelve-hour clock.
 Compared as numbers: `09` equals `9`.
 
-Not counted as a number left over: a number at the start of a line
-followed by `.` or `)` and a space (a list); `24/7`.
+Not counted as a number left over: the numbering of a list, which is
+lines that begin 1, 2, 3 and on, in order, two or more of them, each
+number followed by `.` or `)` and a space; and `24/7`.
+
+A number left over **cannot be read**, and the reply fails, when a
+letter is glued to it (`150k`, `16h`), when a word after it makes it
+another number ("150 thousand"; a list in the marker data), or when
+its grouping is no grouping (`0.150`, `1.50,00`).
+
+A line that holds a number left over is held back when the line also
+still holds a marker that no number was joined to: a currency sign,
+code or name, `%` or a word for percent, a month's name (but not
+"may"), or a word for "o'clock". And seven or more digits left over
+on one line, in whatever pieces, fail as a long number said in parts.
 
 A number from the customer's messages does **not** pass by this rule:
 "yes, 100" after "is it 100?" is held back.
@@ -216,8 +235,9 @@ closed. Today is 2026-11-26.
 | V15 | "opens at 16:00" | opening-hours, 2, "16:00" | | fails, `claim-failed` |
 | V16 | "at 5 pm" | none | "can I come at 5pm?" | passes by the exception |
 | V17 | "at 5 pm" | none | "can I come at 5?" | fails: the customer's "5" is not a detected time |
+| V17a | "Yes, 9.50" | none | "is the trim 9.50?" | fails, `number-unknown`: with a dot and no marker it is a number |
 | V18 | "17:00" | policy, P, "17:00" | | passes |
-| V19 | "on 12/3" | none | "12 March?" | passes by the exception (both are 2027-03-12) |
+| V19 | "on 12 March" | none | "12/3?" | passes by the exception (both are 2027-03-12). "on 12/3" does not: two numbers and a slash never pass this way |
 | V20 | "on March 12th" | none | | fails, `date-unclaimed` |
 | V21 | "open 24/7" | none | | passes |
 | V22 | "45 minutes" | none | | passes: 45 is a number in S's description |
@@ -235,9 +255,29 @@ closed. Today is 2026-11-26.
 | V34 | "open 3 to 9 pm" | opening-hours, 1, "9 pm" | | fails, `number-unknown` on 3 |
 | V35 | "open 9-5" | none | | fails on 5: 17:00 is not a Monday time, and 5 is not stored. "open 9-1" passes: both are hours of the stored periods, on the twelve-hour clock |
 | V36 | "until 24:00" | opening-hours, 1, "24:00" | | fails, `claim-failed` |
-| V37 | "1. Haircut" at the start of a line | | | passes: a list |
+| V37 | lines beginning "1. ", "2. ", "3) " | | | passes: a list. "200. Would you like to book?" and "1. Haircut" followed by "250. Colour" fail |
 | V38 | "we have 3 stylists" | none | | fails, `number-unknown` |
 | V39 | "5 May 50 SAR" | policy, P, "50 SAR" | | fails, `date-unclaimed`: 50 is the amount, not the year, and the date has no claim |
+
+### 4.6 What the code's review changed
+
+- Addresses, handles and bank accounts are looked for **before**
+  values, on the whole text; long numbers after values. A value inside
+  an address no longer hides the address.
+- A number and its marker may have up to three characters of space,
+  emphasis or brackets between them (`*45* SAR`, `45 (SAR)`, `SAR:
+  45`). The tenant's own currency code is read in any case.
+- Groups of a number are 1 to 3 digits with no leading zero, then
+  exactly three each. Anything else cannot be read.
+- In an amount, a letter glued to the number or a multiplier word
+  between the number and the currency's name cannot be read.
+- A claim's value holds its values and nothing else that is checked:
+  no address, no number left over (but for a price claim's one bare
+  number).
+- Between a day and a month's name: up to two of space, comma and
+  hyphen, and "of", "the", "de" or "ng".
+- The codes of O3 are found in this order: a claim that does not pass;
+  then each value in the reply; then what is left over.
 
 ## 5. Where a pack registers a claim kind
 
@@ -263,17 +303,17 @@ replaced by the unmatched character:
 
 | What | Detected when the text has | Ends |
 | --- | --- | --- |
-| Web address | A scheme and `://`; or `www.`; or two or more labels of letters (of any script), digits and hyphens joined by dots, the last of 2 to 24 letters | At white space; closing punctuation at the end is not part of it |
-| The same in words | A label, "dot" (alone, or in round or square brackets), and one of a short list of endings (`com`, `net`, `org`, `io`, `co`, `me`, `info`, `app`, `shop`, `store`, `online`, `site`, `link`, `xyz`, `sa`, `ae`, `pk`, `in`, `bd`, `ph`) | |
+| Web address | A scheme and `://`; or `www.`; or two or more labels of letters (of any script), digits and hyphens joined by dots, the last of 2 to 24 letters or a coded ending (`xn--`). It may follow a dot and be followed by a dash | At white space; closing punctuation at the end is not part of it |
+| The same, disguised | A label, then "dot" or a dot in brackets, then one of a list of endings (in the marker data; without `in`, `me` and `co`, which are words); or a label, a plain dot with a space on either side, and one of a shorter list that leaves out endings a sentence begins with ("store. Online") | |
 | Email address | A local part, `@`, and a domain as above | |
-| Handle | `@` and 2 or more letters, digits, dots or underscores, not part of an email address | |
+| Handle | `@` and 2 or more letters, digits, dots, hyphens or underscores, with or without a name before the `@`: also how a payment address is written (`name@provider`) | |
 | Long number | 7 or more digits with no letter between the first and the last | |
 | Bank account | At the start of a word, in capitals: two letters, two digits and 11 to 30 more letters and digits, single spaces allowed, whose check digits are right (ISO 13616, mod 97) | |
 
 Each one found must equal a value the business stored: one found by
 these same rules in the support contact, the business's name, a
 service's name or description, or a policy's title or body. Compared
-as: a web address without its scheme and a leading `www.`, its host in
+as: a web address without `http://` or `https://` (another scheme is part of it) and a leading `www.`, its host in
 lower case and its path as written, without a final `/`; an email and
 a handle in lower case; a number as its digits alone; a bank account
 without spaces. Otherwise O5 fails.
@@ -286,7 +326,7 @@ without spaces. Otherwise O5 fails.
 | L4 | "pay to @salon_pay" | | fails, `handle` |
 | L5 | "call +966 55 555 0100" | support contact "+966555550100" | passes |
 | L6 | the national form "055 555 0100" in Arabic-Indic digits | support contact "+966555550100" | fails, `number`: other digits (section 9) |
-| L7 | "055, then 1234, then 567" | | **O5 does not detect it**: letters stand between. It fails all the same, by 4.4: 055, 1234 and 567 are numbers the business's data does not hold |
+| L7 | "055, then 1234, then 567" | | **O5 does not detect it**: letters stand between. It fails all the same, by 4.4: seven digits or more left over on one line |
 | L8 | "order 1234567" | | fails, `number` |
 | L9 | "17:30 on 12/03/2027" (both passed O3) | | passes |
 | L10 | "see you.Then" | | fails, `link`: a missing space after a full stop |
@@ -301,7 +341,8 @@ without spaces. Otherwise O5 fails.
   claim's item or value, with every character that is not a letter or
   a digit removed from both first, without regard to case.
 - **Instructions.** The instruction text and the reply are each cut
-  into words (runs of letters and digits, lower case). Fails if any 12
+  into words (runs of letters and digits, lower case, after what is
+  unseen, marks, apostrophes and hyphens are taken out). Fails if any 12
   words in a row of the reply are 12 words in a row of the
   instructions. The business's data and the session are not
   instruction text: a reply may quote a policy at length.
@@ -310,8 +351,8 @@ A reworded copy of the instructions is not caught.
 
 ### O7: length
 
-Fails if the reply, made plain, has no character other than white
-space, or if the reply as written is longer than 1,200 code points.
+Fails if the reply, made plain, has no character a reader sees (white
+space, controls, marks alone and the blank pattern are not), or if the reply as written is longer than 1,200 code points.
 
 ## 7. The codes
 
@@ -347,7 +388,13 @@ Not checked:
 - A value written in words; a weekday name; "tomorrow".
 - That a claimed value is said *about* the item claimed.
 - A number with no marker that equals some number in the business's
-  data (V23): "150" passes whatever it is said about.
+  data (V23): "150" passes whatever it is said about, and so does
+  "150 SAR or 45" when 45 is such a number, or "150" before a word no
+  list knows.
+- An address whose dot is disguised in a way section 6 does not list,
+  or with an ending that is not in the lists.
+- A percentage or a fraction written as "45 pc" or with a fraction
+  sign.
 - Opening and closing times are interchangeable, and so are the
   periods of a split day.
 - "Qatari riyal" passes as the tenant's riyal: the word before a

@@ -70,7 +70,7 @@ export const CURRENCY_NAMES: readonly (readonly [readonly string[], readonly str
   [["dirham", "dirhams", "dhs", "dhs.", "dh"], DIRHAM],
   [["dinar", "dinars"], DINAR],
   [["rupee", "rupees", "rs", "rs."], RUPEE],
-  [["dollar", "dollars"], DOLLAR],
+  [["dollar", "dollars", "bucks"], DOLLAR],
   [["pound", "pounds"], POUND],
   [["euro", "euros"], ["EUR"]],
   [["taka", "tk", "tk."], ["BDT"]],
@@ -99,6 +99,7 @@ export const CURRENCY_NAMES: readonly (readonly [readonly string[], readonly str
 export const PERCENT_WORDS: readonly string[] = [
   "percent",
   "per cent",
+  "per-cent",
   "pct",
   "بالمئة",
   "بالمائة",
@@ -116,8 +117,8 @@ export const PERCENT_WORDS: readonly string[] = [
 
 /** A marker written after a time: the half of the day it says. */
 export const DAY_HALVES: readonly (readonly [readonly string[], "am" | "pm"])[] = [
-  [["am", "a.m.", "a.m"], "am"],
-  [["pm", "p.m.", "p.m"], "pm"],
+  [["am", "a.m.", "a.m", "a. m.", "a. m"], "am"],
+  [["pm", "p.m.", "p.m", "p. m.", "p. m"], "pm"],
   [["ص", "صباحا", "صباحاً"], "am"],
   [["م", "مساء", "مساءً", "ظهرا", "ظهراً", "عصرا", "عصراً", "ليلا", "ليلاً"], "pm"],
   [["ng umaga", "n.u."], "am"],
@@ -211,14 +212,16 @@ export const MONTHS: readonly (readonly string[])[] = [
   ],
 ];
 
-/** The endings a web address written in words is recognised by. */
+/**
+ * The endings a web address is recognised by when its dot is written as a
+ * word, in brackets, or with spaces around it. Without "in", "me" and
+ * "co", which are also ordinary words.
+ */
 export const SPOKEN_ENDINGS: readonly string[] = [
   "com",
   "net",
   "org",
   "io",
-  "co",
-  "me",
   "info",
   "app",
   "shop",
@@ -227,10 +230,88 @@ export const SPOKEN_ENDINGS: readonly string[] = [
   "site",
   "link",
   "xyz",
+  "cc",
+  "tv",
+  "ly",
+  "gg",
+  "biz",
+  "top",
+  "live",
+  "pro",
+  "vip",
+  "club",
   "sa",
   "ae",
   "pk",
-  "in",
   "bd",
   "ph",
 ];
+/** Of those, the ones read after a plain dot with a space beside it: not words a sentence begins with. */
+export const SPACED_ENDINGS: readonly string[] = [
+  "com",
+  "net",
+  "org",
+  "io",
+  "xyz",
+  "cc",
+  "tv",
+  "ly",
+  "gg",
+  "biz",
+  "sa",
+  "ae",
+  "pk",
+  "bd",
+  "ph",
+];
+
+/**
+ * A word after a number that makes it another number ("150 thousand"). A
+ * number followed by one cannot be read.
+ */
+export const MULTIPLIERS: readonly string[] = [
+  "k",
+  "m",
+  "bn",
+  "hundred",
+  "thousand",
+  "million",
+  "billion",
+  "lakh",
+  "lakhs",
+  "lac",
+  "crore",
+  "crores",
+  "dozen",
+  "مئة",
+  "مائة",
+  "ألف",
+  "الف",
+  "آلاف",
+  "مليون",
+  "ملايين",
+  "سو",
+  "ہزار",
+  "لاکھ",
+  "کروڑ",
+  "सौ",
+  "हजार",
+  "हज़ार",
+  "लाख",
+  "करोड़",
+  "শ",
+  "শত",
+  "হাজার",
+  "লাখ",
+  "লক্ষ",
+  "কোটি",
+  "daan",
+  "libo",
+  "milyon",
+];
+
+/**
+ * Words that say a number beside them is a time, in a form the scanner
+ * does not read. A line with one and a number left over is held back.
+ */
+export const TIME_WORDS: readonly string[] = ["o'clock", "oclock", "o clock", "hrs"];
