@@ -122,7 +122,7 @@ Invitations and password resets: `token_hash` (unique), `kind`, `user_id`,
 | `channel_user_id` ⚑ | The channel's own identifier for the person: for WhatsApp, the business-scoped user ID. Unique per tenant, whatever number stands beside it. 1 to 128 characters with no space |
 | `phone_hash`, `phone_hash_key_version` | Keyed one-way hash of the number, made as described under `suppressed_numbers`. Kept after deletion only if opted out |
 | `profile_name` ⚑ | As sent by the channel. Never given to the model (NFR-V7) |
-| `last_language` | A language code. Not treated as personal on its own |
+| `last_language` | A language code. Not treated as personal on its own. Built in M3 unit U8 (migration 0011): the language of the last reply stored for the contact, set only when that language is a supported one, so that one unsupported turn does not replace a supported language known before. It is the model's word. A fixed text is sent in it when the turn and the session give nothing newer (`notes/m3-u8-fixed-texts.md`, section 3) |
 | `opted_out_at` | Null when not opted out |
 | `last_inbound_at` | The reply window is open while this is under 24 hours ago. The earlier of the channel's time for the newest message and the time it was stored; never moved back |
 | `rate_paused_until` | |
@@ -245,7 +245,7 @@ null when no worker holds it).
 | --- | --- |
 | `conversation_id`, `started_at`, `last_message_at`, `ended_at` | A partial unique index allows one session with `ended_at` null per conversation. `last_message_at` is the stored time of the newest customer message, or the time the worker recorded that the channel accepted the newest message of ours; a delivery or read receipt does not move it. `ended_at` is written when the conversation is next touched after the 24 hours, so a row without it may already be over; one function decides (`packages/db/src/sessions.ts`). **Built in M3 unit U2, with `reply_discards` and `pack_outcome`; the columns below arrive with the units that use them** |
 | `reply_discards` | How many replies in a row were dropped because the customer wrote again; at 2 the next is sent (decisions row 38) |
-| `disclosed` | Disclosure has been sent |
+| `disclosed_at` | When the session's customer was told that an automated assistant is replying: when the channel accepted a message that carried the disclosure (M3 unit U8, migration 0011; `notes/m3-u8-fixed-texts.md`, section 4). Null until then. Set back to null when that message is reported failed later and no other message of the session that carried the disclosure is sent, delivered or read; the next message sent then carries it. A customer can so be told twice in a session. They can also have read a message without it, when the message that carried it fails after a later one was sent (`notes/m3-u8-fixed-texts.md`, D2c) |
 | `guardrail_fallbacks`, `unreadable_batches`, `assistant_replies` | The counters of state machines, section 3 |
 | `awaiting_retry_since`, `provider_fallback_sent_at` | State machines, section 8 |
 | `language`, `unsupported_language` | For US-C3 and metrics. Built in M3 unit U7 (migration 0010; design note `notes/m3-u7-turn.md`, section 7). `language` is two small letters: what the model said the customer wrote in, at the session's latest reply; a reply whose language the model could not tell leaves it as it was. `unsupported_language` becomes true when a reply's language is not one of the supported ones, and is never set back. Both are the model's word, not a fact |
@@ -259,6 +259,7 @@ null when no worker holds it).
 | `answered_by` | For a customer's message: the reply that answered it. Null while not dealt with, and for one dealt with by no reply. It is how a discarded reply's messages are found again |
 | `direction` | `inbound` or `outbound` |
 | `turn_id`, `language` | For an assistant's reply made by a turn with the model (M3 unit U7): the turn, which joins the reply to the traces of the calls behind it, and the language that turn reported (`und` when the model could not tell). Null on every other row. The language is kept on each reply so that a session's mark can be checked and worked out again |
+| `disclosure`, `lead`, `buttons` | For a message of ours only (M3 unit U8, migration 0011). `disclosure`: the disclosure's text when this message carried it, at most 150 characters; set or cleared each time the message is taken to be sent, so it is what the last try sent. `lead`: a fixed text that code put before the body (today only the answer to "am I talking to a person?"), at most 700. `buttons`: null, or a list of 1 or 2, each the payload and the title shown; set to null when a message stored with buttons was sent without them, so that the row says what the customer saw. What was sent is the disclosure, the lead and the body, each that is present, a blank line between. The model is given the body only |
 | `class` | For outbound: one of the five message classes |
 | `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on). The first three are the system's own: a channel's type of one of those names that was not read is stored as `unknown`, and a template's quick reply that could not be read as `quick-reply`. From a customer, `button` is a tap that was read, and has a payload (a constraint; migration 0008) |
 | `channel_sent_at` | For a message from a customer, the time the channel says it was sent. `created_at` is when the row was stored, taken per row, so the messages of one webhook keep their order |
@@ -365,6 +366,19 @@ in `scheduled` per booking.
 tenant, key and language.
 
 ## AI and audit
+
+### `early_receipts` — tenant-owned
+
+`id`, `tenant_id`, `created_at`, `channel_message_id`, `status` (`sent`,
+`delivered`, `read`, `failed`), `error_code`. A receipt that arrived for
+a message no row has the channel's identifier of yet: the channel can
+report on a message between accepting it and the worker storing that it
+did. Kept, and applied by the step that records the send (M3 unit U8,
+migration 0011; `notes/m3-u8-fixed-texts.md`, D2b). One row for a tenant,
+an identifier and a status. Removed when applied, and after a day when
+a new one is kept: a receipt for a message this system never sent stays
+that long. Holds nothing of a customer: an identifier the channel made,
+and a code.
 
 ### `tool_calls` — tenant-owned
 

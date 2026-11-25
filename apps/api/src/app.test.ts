@@ -88,7 +88,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await administrator.query(
-    "TRUNCATE messages, conversations, contacts, jobs, unparsed_events, unroutable_events CASCADE",
+    "TRUNCATE early_receipts, messages, conversations, contacts, jobs, unparsed_events, unroutable_events CASCADE",
   );
   reported.length = 0;
 });

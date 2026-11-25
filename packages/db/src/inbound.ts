@@ -178,7 +178,14 @@ async function conversationFor(
 // so the `sending` cases below cannot match today (#290: a status that
 // arrives before that record is lost).
 // A failure's code is kept with it.
-const FORWARD = `
+/**
+ * Taken, for the transaction, by whoever applies a receipt and by whoever
+ * records the send it is about: so that a receipt either finds the
+ * message or is kept before the record looks for it.
+ */
+export const RECEIPT_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";
+
+export const FORWARD = `
   UPDATE messages SET status = $2, sending_at = NULL,
                       error_code = CASE WHEN $2 = 'failed' THEN $3 ELSE error_code END
   WHERE channel_message_id = $1 AND direction = 'outbound' AND (
@@ -298,6 +305,12 @@ export function storeInbound(
       });
     }
     let statusesApplied = 0;
+    // Every identifier's lock first, in one order, before any row a status
+    // changes: two webhooks, or a webhook and the record of a send, then
+    // never wait for each other in a ring.
+    for (const id of [...new Set(statuses.map((status) => status.channelMessageId))].sort()) {
+      await tx.query(RECEIPT_LOCK, [id]);
+    }
     for (const status of statuses) {
       // A status never moves a session's time or ends a run of dropped
       // replies: a receipt is not a message, and the acceptance itself is
@@ -308,6 +321,40 @@ export function storeInbound(
         status.errorCode,
       ]);
       statusesApplied += moved.rowCount;
+      if (moved.rowCount === 0) {
+        // No message of ours has this identifier yet: the send may not be
+        // recorded. Kept, and applied when it is.
+        const kept = await tx.query(
+          `INSERT INTO early_receipts (tenant_id, channel_message_id, status, error_code)
+           SELECT $1, $2, $3, $4
+           WHERE NOT EXISTS (
+             SELECT 1 FROM messages WHERE channel_message_id = $2 AND direction = 'outbound')
+           ON CONFLICT DO NOTHING`,
+          [tenantId, status.channelMessageId, status.status, status.errorCode],
+        );
+        if (kept.rowCount > 0) {
+          await tx.query("DELETE FROM early_receipts WHERE created_at < now() - interval '1 day'");
+        }
+      }
+      if (status.status === "failed" && moved.rowCount > 0) {
+        // A message the channel accepted and now reports failed told
+        // nobody. If it carried the disclosure, the session's mark comes
+        // off, unless another message that carried it reached the customer:
+        // the next message sent then carries it (design note M3 U8, D2a).
+        await tx.query(
+          `UPDATE sessions s SET disclosed_at = NULL
+           FROM messages failed
+           WHERE failed.channel_message_id = $1 AND failed.direction = 'outbound'
+             AND failed.tenant_id = $2
+             AND failed.status = 'failed' AND failed.disclosure IS NOT NULL
+             AND s.id = failed.session_id
+             AND NOT EXISTS (
+               SELECT 1 FROM messages other
+               WHERE other.session_id = s.id AND other.disclosure IS NOT NULL
+                 AND other.status IN ('sent', 'delivered', 'read'))`,
+          [status.channelMessageId, tenantId],
+        );
+      }
     }
     return { stored, duplicates, statusesApplied };
   });

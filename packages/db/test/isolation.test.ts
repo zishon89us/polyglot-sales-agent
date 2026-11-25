@@ -32,6 +32,7 @@ const PRIVILEGES = {
     ai_traces: "INSERT,SELECT",
     // Its two columns of text are removed by jobs that are not built; no grant for that yet.
     tool_calls: "INSERT,SELECT",
+    early_receipts: "DELETE,INSERT,SELECT",
     audit_log: "INSERT,SELECT",
     channel_accounts: "SELECT",
     contacts: "INSERT,SELECT,UPDATE",
@@ -111,6 +112,7 @@ describe("the seed covers every tenant-owned table", () => {
       "channel_accounts",
       "contacts",
       "conversations",
+      "early_receipts",
       "messages",
       "policies",
       "services",
@@ -567,6 +569,14 @@ describe("privileges", () => {
       },
       {
         name: "job_payload_ok",
+        definer: false,
+        settings: null,
+        app: true,
+        cross: true,
+        everyone: false,
+      },
+      {
+        name: "message_buttons_ok",
         definer: false,
         settings: null,
         app: true,

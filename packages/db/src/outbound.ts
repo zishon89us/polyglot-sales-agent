@@ -28,6 +28,7 @@ import {
   UNCONFIRMED,
 } from "@polyglot-sales-agent/core";
 import { type Database, poolOf } from "./connect.ts";
+import { FORWARD, RECEIPT_LOCK } from "./inbound.ts";
 import { enqueueJob } from "./jobs.ts";
 import { holdsLease, releaseLease, renewLease, takeLease } from "./lease.ts";
 import { lockConversation, noteAccepted, openSession, stamp } from "./sessions.ts";
@@ -231,7 +232,15 @@ export function finishTurn(
    * session's, and one that is not supported marks the session for good
    * (design note M3 U7, section 7).
    */
-  made?: { readonly turnId: string; readonly language: string },
+  made?: {
+    readonly turnId: string;
+    readonly language: string;
+    /**
+     * A fixed text code puts before the reply (the answer to "am I talking
+     * to a person?"). With one, the reply itself may be empty.
+     */
+    readonly lead?: (given: DisclosureFor) => string;
+  },
 ): Promise<TurnEnd> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
     if (!(await holdsLease(tx, conversationId, turn.token))) {
@@ -262,21 +271,52 @@ export function finishTurn(
       }
     }
     let replyId: string | null = null;
+    let lead: string | null = null;
+    if (reply === "" && made?.lead === undefined) {
+      // An empty reply is stored only beside a fixed text: alone it is nothing to send.
+      throw Object.assign(new Error("an empty reply with nothing before it"), {
+        code: "empty-reply",
+      });
+    }
+    if (reply !== undefined && made?.lead !== undefined) {
+      const known = await tx.query<{
+        session: string | null;
+        contact: string | null;
+        tenant: string;
+      }>(
+        `SELECT s.language AS session, p.last_language AS contact, t.default_language AS tenant
+         FROM conversations c
+         JOIN contacts p ON p.id = c.contact_id
+         JOIN tenants t ON t.id = c.tenant_id
+         LEFT JOIN sessions s ON s.id = $2
+         WHERE c.id = $1`,
+        [conversationId, turn.sessionId],
+      );
+      const row = known.rows[0];
+      if (row !== undefined) {
+        lead = made.lead({
+          preferred: [made.language, row.session, row.contact],
+          tenantDefault: row.tenant,
+        });
+      }
+    }
     if (reply !== undefined) {
       const stored = await tx.query<{ id: string }>(
         `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
-                               status, created_at, turn_id, language)
+                               status, created_at, turn_id, language, lead)
          VALUES ($1, $2, $3, 'outbound', 'assistant-reply', 'text', $4, 'pending', $5::timestamptz,
-                 $6, $7)
+                 $6, $7, $8)
          RETURNING id`,
         [
           tenantId,
           conversationId,
           turn.sessionId,
-          reply,
+          // A lead alone: the model wrote nothing beside the fixed text.
+          reply === "" ? null : reply,
           at,
           made?.turnId ?? null,
           made?.language ?? null,
+          lead,
         ],
       );
       replyId = stored.rows[0]?.id as string;
@@ -286,6 +326,15 @@ export function finishTurn(
            WHERE id = $1`,
           [turn.sessionId, made.language, !languageSupported(made.language)],
         );
+        if (languageSupported(made.language)) {
+          // What a fixed text is sent in when nothing newer is known. An
+          // unsupported language does not replace a supported one.
+          await tx.query(
+            `UPDATE contacts SET last_language = $2
+             WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`,
+            [conversationId, made.language],
+          );
+        }
       }
       await enqueueJob(tx, {
         type: SEND_MESSAGES_JOB,
@@ -497,6 +546,19 @@ export function abandonTurn(
 }
 
 /** A message whose call to the channel this worker must now make. */
+/** A button as a message is stored with it and sent: what it carries, and the title shown. */
+export interface StoredButton {
+  readonly payload: string;
+  readonly title: string;
+}
+
+/** What the disclosure is decided from (design note M3 U8, section 3). */
+export interface DisclosureFor {
+  /** The language the message's own turn reported, the session's, the contact's last. */
+  readonly preferred: readonly (string | null)[];
+  readonly tenantDefault: string;
+}
+
 export interface MessageToSend {
   readonly id: string;
   /** Which call this is, from 1. Presented again when the result is recorded. */
@@ -504,6 +566,11 @@ export interface MessageToSend {
   readonly class: MessageClass;
   readonly kind: string;
   readonly body: string | null;
+  /** The disclosure, when this message is the one that tells the session's customer. */
+  readonly disclosure: string | null;
+  /** A fixed text put before the body by code. */
+  readonly lead: string | null;
+  readonly buttons: readonly StoredButton[] | null;
   readonly to: { readonly phone: string | null; readonly userId: string | null };
   /** The name of the channel the conversation is on. */
   readonly channel: string;
@@ -527,6 +594,8 @@ interface Waiting {
   class: MessageClass;
   kind: string;
   body: string | null;
+  lead: string | null;
+  buttons: StoredButton[] | null;
   status: "pending" | "sending";
   send_attempts: number;
   unknown_outcomes: number;
@@ -560,7 +629,8 @@ const HELD_BACK = (now: number) => `(
       AND newer.handled_at IS NULL AND newer.created_at > m.created_at))`;
 
 const OLDEST_WAITING = (now: number) => `
-  SELECT m.id, m.class, m.kind, m.body, m.status, m.send_attempts, m.unknown_outcomes,
+  SELECT m.id, m.class, m.kind, m.body, m.lead, m.buttons, m.status, m.send_attempts,
+         m.unknown_outcomes,
          extract(epoch FROM ${NOW(now)} - m.sending_at) * 1000 AS sending_for,
          extract(epoch FROM m.send_not_before - ${NOW(now)}) * 1000 AS due_in,
          extract(epoch FROM ${NOW(now)} - greatest(m.created_at, m.send_not_before)) * 1000
@@ -639,6 +709,12 @@ export function claimNextSend(
   tenantId: string,
   conversationId: string,
   now?: Date,
+  /**
+   * The disclosure's text for a message of a session whose customer has
+   * not been told. Without it nothing is disclosed: only a caller that has
+   * no fixed texts, in a test, leaves it out.
+   */
+  disclose?: (given: DisclosureFor) => string,
 ): Promise<NextSend> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
     // Throws for a conversation the tenant does not have, which is a fault
@@ -708,11 +784,39 @@ export function claimNextSend(
       if (waiting.due_in !== null && Number(waiting.due_in) > 0) {
         return { kind: "wait", ms: Math.ceil(Number(waiting.due_in)), ...also() };
       }
+      // Decided afresh at each try, in the transaction that marks the
+      // message as being sent: the disclosure if the session's customer
+      // has not been told, none if another message told them meanwhile.
+      const told = await tx.query<{
+        message: string | null;
+        session: string | null;
+        contact: string | null;
+        tenant: string;
+      }>(
+        `SELECT m.language AS message, s.language AS session, p.last_language AS contact,
+                t.default_language AS tenant
+         FROM messages m
+         JOIN sessions s ON s.id = m.session_id AND s.disclosed_at IS NULL
+         JOIN conversations c ON c.id = m.conversation_id
+         JOIN contacts p ON p.id = c.contact_id
+         JOIN tenants t ON t.id = m.tenant_id
+         WHERE m.id = $1`,
+        [waiting.id],
+      );
+      const untold = told.rows[0];
+      const disclosure =
+        untold === undefined || disclose === undefined
+          ? null
+          : disclose({
+              preferred: [untold.message, untold.session, untold.contact],
+              tenantDefault: untold.tenant,
+            });
       await tx.query(
         `UPDATE messages SET status = 'sending', sending_at = ${NOW(2)},
-                             send_attempts = send_attempts + 1, send_not_before = NULL
+                             send_attempts = send_attempts + 1, send_not_before = NULL,
+                             disclosure = $3
          WHERE id = $1`,
-        [waiting.id, now ?? null],
+        [waiting.id, now ?? null, disclosure],
       );
       return {
         ...also(),
@@ -723,6 +827,9 @@ export function claimNextSend(
           class: waiting.class,
           kind: waiting.kind,
           body: waiting.body,
+          disclosure,
+          lead: waiting.lead,
+          buttons: waiting.buttons,
           to: { phone: waiting.phone, userId: waiting.channel_user_id },
           channel: waiting.channel,
           receivingNumberId: waiting.receiving_number_id,
@@ -750,6 +857,8 @@ export function recordSend(
   message: Pick<MessageToSend, "id" | "attempt">,
   result: CallResult,
   now?: Date,
+  /** True when a message stored with buttons was sent without them: the record then has none. */
+  buttonsDropped?: boolean,
 ): Promise<SendDecision | "superseded"> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
     // The conversation first, then the message: one order of locks everywhere.
@@ -760,6 +869,11 @@ export function recordSend(
     const conversationId = whose.rows[0]?.conversation_id;
     if (conversationId === undefined || !(await lockConversation(tx, conversationId))) {
       return "superseded";
+    }
+    // One order of locks everywhere: the conversation, the channel's
+    // identifier, the message, the session. A receipt takes the last three.
+    if (result.kind === "accepted") {
+      await tx.query(RECEIPT_LOCK, [result.channelMessageId]);
     }
     const found = await tx.query<{ class: MessageClass; unknown_outcomes: number }>(
       `SELECT class, unknown_outcomes FROM messages
@@ -783,6 +897,37 @@ export function recordSend(
     });
     if (decision.next === "sent") {
       await noteAccepted(tx, message.id, await stamp(tx, now));
+      if (result.kind === "accepted") {
+        // Receipts that arrived before this record: applied now, in the
+        // order they arrived, as they would have been had the record been
+        // first. Of two kept in one moment a failure goes first: a failure
+        // can no longer be applied once the message counts as delivered.
+        const early = await tx.query<{ status: string; error_code: string | null }>(
+          `WITH kept AS (
+             DELETE FROM early_receipts WHERE channel_message_id = $1
+             RETURNING status, error_code, created_at)
+           SELECT status, error_code FROM kept
+           ORDER BY created_at, (status = 'failed') DESC, status`,
+          [result.channelMessageId],
+        );
+        for (const receipt of early.rows) {
+          await tx.query(FORWARD, [result.channelMessageId, receipt.status, receipt.error_code]);
+        }
+      }
+      // The session's customer has been told once the channel has accepted
+      // a message that carried the disclosure. A send that failed, or whose
+      // outcome is not known, tells nobody: the next message carries it.
+      await tx.query(
+        `UPDATE sessions s SET disclosed_at = ${NOW(2)}
+         FROM messages m
+         WHERE m.id = $1 AND m.disclosure IS NOT NULL AND m.status <> 'failed'
+           AND s.id = m.session_id AND s.disclosed_at IS NULL`,
+        [message.id, now ?? null],
+      );
+      // The text went without its buttons: the record says what was shown.
+      if (buttonsDropped === true) {
+        await tx.query("UPDATE messages SET buttons = NULL WHERE id = $1", [message.id]);
+      }
     }
     return decision;
   });

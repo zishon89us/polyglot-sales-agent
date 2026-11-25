@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 to U6 done; U7 under way)
+## Current milestone: M3 AI core (U1 to U7 done; U8 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -658,6 +658,49 @@ M0 Inception met its exit criteria on 2026-11-16; see
   tool's wait for the conversation's row, **not fixed**, now said in the
   note with its worst case. **The last fixes are checked by the author
   only.**
+
+- 2026-11-25 — #331 merged: U7 is done. **M3 U8** (#307, pull request
+  #333): the fixed texts and the disclosure. The design note
+  (`design/notes/m3-u8-fixed-texts.md`) was read by a second agent before
+  any code (`reviews/2026-11-25-m3-u8-design-review.md`): 15 findings,
+  three High (a session stayed marked as told when the channel accepted
+  a message and reported it failed later; the note's own lengths did not
+  fit the in-memory channel, in two places). The note was rewritten and
+  **has not been reviewed again**. Built: eleven texts in English
+  (`texts/fixed/1/en.json`), a reader that refuses a file breaking a
+  rule, and the rule for which language a text is sent in; the
+  disclosure, decided each time a message is taken to be sent and
+  recorded on the message, with the session marked when the channel
+  accepts it and unmarked if it fails later; the fixed answer to "am I
+  talking to a person?", put before the model's reply by code; buttons
+  on a stored message, sent when the channel carries them (migration
+  0011). **Not built, and said in the note:** only English exists, and
+  its wording is the agent's and unread by the maintainer (row 51), so
+  US-C5, 2 is met for English only; nine of the eleven texts are sent
+  by nothing yet; **the prompt is not changed**, since no eval can run
+  on a new version, so a customer who asks may read that it is an
+  assistant twice; the other flags are still dropped and a reply is
+  still unchecked. Rows 50 and 51 ask about the buttons and the
+  languages.
+  A third agent reviewed the code
+  (`reviews/2026-11-25-gate4-u8-fixed-texts.md`): 12 findings, one
+  High, two Medium, and 16 of 51 mutants alive. The High one: a failure
+  the channel reports before the worker has stored that the message was
+  accepted matched no message and was lost, so the session stayed
+  marked as told. Fixed: such a receipt is now kept (`early_receipts`)
+  and applied when the send is recorded, which also mends a loss of
+  early statuses that M2 had left. The Medium ones: the note's claim
+  that a customer is "never not at all" told was not true, and is taken
+  out, with the case where they are not said plainly (D2c); and three
+  tests that could not tell a right rule from a wrong one, now added.
+  Another agent checked the fixes
+  (`reviews/2026-11-25-gate4-u8-fixed-texts-verification.md`): the lost
+  failure is fixed, and the fix had brought a deadlock, which it
+  measured, between a webhook reporting on two messages and the record
+  of a send. Fixed by one order of locks everywhere; **the test added
+  for it does not force that interleaving**, so the fix rests on the
+  order and not on a test. Five Low findings, fixed. **These last fixes
+  are checked by the author only.** What is left is #334.
 
 ## Next
 

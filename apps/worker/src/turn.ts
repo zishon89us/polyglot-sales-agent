@@ -20,6 +20,7 @@ import {
 import {
   type BusinessProfile,
   CORE_CLAIM_KINDS,
+  type FixedTextSet,
   MODEL_CALL_TIMEOUT_MS,
   MODEL_OUTPUT_TOKENS_MAX,
   priceText,
@@ -29,6 +30,7 @@ import {
   abandonTurn,
   answering,
   type Database,
+  type DisclosureFor,
   finishTurn,
   type HistoryMessage,
   loadBusinessProfile,
@@ -69,6 +71,11 @@ export interface TurnModel {
   readonly packs: PackRegistry;
   /** By name. For tests until M5. */
   readonly tools?: Readonly<Record<string, TurnTool>>;
+  /**
+   * The fixed texts: the answer to "am I talking to a person?" is code's.
+   * Without them that flag is dropped like the others; for tests.
+   */
+  readonly texts?: FixedTextSet;
 }
 
 /** The business, as the model is given it: the profile, with each price written out. */
@@ -178,8 +185,10 @@ export async function runTurn(
   const turnStartedAt = clock?.() ?? new Date();
   const now = clock === undefined ? undefined : turnStartedAt;
   const handled = at.messages.map((message) => message.id);
-  const end = (reply?: string, made?: { turnId: string; language: string }) =>
-    finishTurn(app, tenantId, conversationId, { token, sessionId }, handled, reply, now, made);
+  const end = (
+    reply?: string,
+    made?: { turnId: string; language: string; lead?: (given: DisclosureFor) => string },
+  ) => finishTurn(app, tenantId, conversationId, { token, sessionId }, handled, reply, now, made);
   try {
     const hasText = at.messages.some(
       (message) =>
@@ -230,12 +239,31 @@ export async function runTurn(
         // Not tried again: the same request would likely get the same answer.
         return { kind: "no-reply", code: "model-invalid-output", end: await end() };
       }
-      const { reply, toolCalls, language } = result.output;
+      const { reply, toolCalls, language, flags } = result.output;
       if (toolCalls.length === 0) {
+        // The customer asked whether a person is replying: the answer is a
+        // fixed text, put before whatever the model replied, and sent also
+        // when the model replied nothing (US-C5, 3). The other flags are
+        // still dropped here; acting on them is a later unit's.
+        const texts = model.texts;
+        const lead =
+          texts !== undefined && flags.includes("asks-if-person")
+            ? (given: DisclosureFor) =>
+                texts.pick(given.preferred, given.tenantDefault).texts["automated-assistant"]
+            : undefined;
         if (reply.trim() === "") {
-          return { kind: "no-reply", code: "empty-reply", end: await end() };
+          if (lead === undefined) {
+            return { kind: "no-reply", code: "empty-reply", end: await end() };
+          }
+          return { kind: "ended", end: await end("", { turnId, language, lead }) };
         }
-        return { kind: "ended", end: await end(reply, { turnId, language }) };
+        return {
+          kind: "ended",
+          end: await end(
+            reply,
+            lead === undefined ? { turnId, language } : { turnId, language, lead },
+          ),
+        };
       }
       if (round >= TOOL_ROUNDS_MAX) {
         return { kind: "no-reply", code: "tool-rounds", end: await end() };

@@ -74,7 +74,8 @@ export async function echoRoundTrip(options: RoundTripOptions): Promise<RoundTri
     const { sent } = (await response.json()) as { sent: Sent[] };
     const echo = sent.find(
       (message) =>
-        message.body === `Echo: ${text}` &&
+        // The first reply of a session begins with the disclosure, a blank line before the echo.
+        (message.body === `Echo: ${text}` || message.body.endsWith(`\n\nEcho: ${text}`)) &&
         message.to === from &&
         message.phoneNumberId === options.numberId,
     );
