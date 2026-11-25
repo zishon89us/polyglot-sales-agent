@@ -167,9 +167,15 @@ describe("O3: the cases of section 4.5", () => {
   test("V22: a number the business's data holds", () => {
     expect(verdict("It takes 45 minutes.")).toBe("passes");
   });
-  test("V23: a bare number passes only if the business's data holds it", () => {
-    expect(verdict("It is 150.")).toBe("passes");
-    expect(verdict("It is 140.")).toBe("O3 number-unknown");
+  test("V23: a number with no marker passes only with the word the business's text has after it", () => {
+    expect(verdict("It is 150.")).toBe("O3 number-unknown");
+    expect(verdict("It is 45.")).toBe("O3 number-unknown");
+    expect(verdict("It is 45 minutes.")).toBe("passes");
+    expect(verdict("It is 45 MINUTES.")).toBe("passes");
+    expect(verdict("It is 45-minutes long.")).toBe("passes");
+    expect(verdict("It is 45 hours.")).toBe("O3 number-unknown");
+    expect(verdict("It is 44 minutes.")).toBe("O3 number-unknown");
+    expect(verdict("It is 045.0 minutes.")).toBe("passes");
   });
   test("V24: three digits after the separator group", () => {
     expect(verdict("1.500 SAR", [price("1.500 SAR")])).toBe("O3 claim-failed");
@@ -216,7 +222,8 @@ describe("O3: the cases of section 4.5", () => {
   });
   test("V35: hours written as bare numbers pass only as hours that are stored", () => {
     expect(verdict("Open 9-5.")).toBe("O3 number-unknown");
-    expect(verdict("Open 9-1.")).toBe("passes");
+    // Also when both are hours that are stored: a bare number is no time.
+    expect(verdict("Open 9-1.")).toBe("O3 number-unknown");
   });
   test("V36: 24:00 is detected, as midnight", () => {
     expect(verdict("Open until 24:00.", [["opening-hours", "1", "24:00"]])).toBe("O3 claim-failed");
@@ -350,10 +357,15 @@ describe("O3: the rules alone", () => {
     expect(verdict("4 बजे सुबह", [claim])).toBe("O3 time-unclaimed");
     // With a dot and no marker it is a number, since "9.50" is also a price.
     expect(verdict("Yes, 9.50", [], { batch: ["is the trim 9.50?"] })).toBe("O3 number-unknown");
-    expect(verdict("From 16.00 on.", [claim])).toBe("passes");
+    expect(verdict("From 16.00 on.", [claim])).toBe("O3 number-unknown");
     expect(verdict("From 16.30 on.", [claim])).toBe("O3 number-unknown");
-    // The Arabic marker is not found at the start of a longer word.
-    expect(verdict("4 مرات")).toBe("passes");
+    // The Arabic marker is not found at the start of a longer word: this is a number, not a time.
+    expect(verdict("4 مرات")).toBe("O3 number-unknown");
+    // What may stand between an hour and its marker.
+    for (const form of ["*4* pm", "4  pm", "4 (pm)", "4-pm"]) {
+      expect(verdict(`From ${form} on.`, [claim]), form).toBe("passes");
+      expect(verdict(`From ${form.replace("pm", "am")} on.`), form).toBe("O3 time-unclaimed");
+    }
   });
 
   test("a date in its forms, day before month", () => {
@@ -400,8 +412,8 @@ describe("O3: the rules alone", () => {
     expect(verdict("Yes, 100.", [], { batch: ["is it 100?"] })).toBe("O3 number-unknown");
   });
 
-  test("the business's own numbers: prices, hours on both clocks, and its texts", () => {
-    for (const known of [
+  test("a price or an hour the business stored does not pass as a bare number", () => {
+    for (const bare of [
       "150",
       "150.00",
       "9",
@@ -410,16 +422,14 @@ describe("O3: the rules alone", () => {
       "16",
       "4",
       "21",
-      "45",
-      "10",
       "17",
       "50",
-      "09",
+      "10",
+      "2",
+      "2015",
     ]) {
-      expect(verdict(`The number ${known}.`), known).toBe("passes");
-    }
-    for (const unknown of ["2", "3", "5", "8", "15", "100", "2015", "1.5"]) {
-      expect(verdict(`The number ${unknown}.`), unknown).toBe("O3 number-unknown");
+      expect(verdict(`The number ${bare}.`), bare).toBe("O3 number-unknown");
+      expect(verdict(`The number ${bare} units.`), bare).toBe("O3 number-unknown");
     }
   });
 
@@ -591,7 +601,7 @@ describe("O5: the cases of section 6", () => {
     expect(verdict("See the red dot on the map")).toBe("passes");
   });
   test("L13: a sentence is not a bank account", () => {
-    expect(verdict("It is 45 minutes long, at 10 minutes before your appointment")).toBe("passes");
+    expect(verdict("It is 45 minutes long, about 45 minutes of your appointment")).toBe("passes");
   });
   test("L14: the path is compared as written, the host without regard to case", () => {
     expect(verdict("Book at salon.example/Book")).toBe("O5 link");
@@ -917,13 +927,12 @@ describe("what the code's review found (docs/reviews/2026-11-26-gate4-u9-reply-c
   });
 
   test("the review's surviving mutants: each rule now has a case that needs it", () => {
-    // The minutes of the opening hours are numbers the business holds.
+    // The minutes of the opening hours are part of the time that is claimed.
     const half: BusinessProfile = {
       ...SALON,
       openingHours: [{ weekday: 1, periods: [{ opens: "09:30", closes: "13:00" }] }],
     };
-    expect(verdict("The number 30.", [], { profile: half })).toBe("passes");
-    expect(verdict("The number 30.")).toBe("O3 number-unknown");
+    expect(verdict("At 9:30.", [["opening-hours", "1", "9:30"]], { profile: half })).toBe("passes");
     // A bank account needs its check digits right; without them it is a long number.
     expect(checkReply(input("Pay to GB82 WEST 1234 5698 7654 33")).checks.O5).toEqual({
       passed: false,
@@ -946,9 +955,172 @@ describe("what the code's review found (docs/reviews/2026-11-26-gate4-u9-reply-c
     expect(verdict("Visit salon.example", [], { profile: handle })).toBe("O5 link");
     // The tatweel is removed before a word is matched.
     expect(verdict(`200 ري${at(0x640)}ال`)).toBe("O3 amount-unclaimed");
-    // A code ends where a word ends: "USDT" is no dollar, and 150 is then a number the
-    // business stored, which passes whatever word follows it (the note, section 9).
-    expect(verdict("150 USDT")).toBe("passes");
+    // A code ends where a word ends: "USDT" is no dollar.
+    expect(verdict("150 USDT")).toBe("O3 number-unknown");
     expect(verdict("150 USD")).toBe("O3 amount-unclaimed");
+  });
+});
+
+describe("what the check of the fixes found (docs/reviews/2026-11-26-gate4-u9-reply-checks-verification.md)", () => {
+  const P150: Claim = price("150 SAR");
+  const fails = (reply: string, claims: readonly Claim[] = [], batch: string[] = []) =>
+    expect(verdict(reply, claims, { batch }), reply).not.toBe("passes");
+
+  test("V1: only a country's word may stand between a number and a currency's name", () => {
+    for (const reply of [
+      "150 thousands riyals",
+      "150 grand SAR",
+      "150 mn SAR",
+      "150 mil riyals",
+      "150 MM SAR",
+      "150 الاف ريال",
+      "150 ألفاً ريال",
+      "150 مليار ريال",
+      "150 SAR thousand",
+      "one thousand and 150 SAR",
+      "ألف و150 ريال",
+      "150 whatever riyals",
+    ]) {
+      fails(reply, [P150]);
+    }
+    expect(verdict("150 Saudi riyals", [P150])).toBe("passes");
+    expect(verdict("150 ريال سعودي", [P150])).toBe("passes");
+  });
+
+  test("V2: an hour or a price written with a decimal part and no marker", () => {
+    for (const reply of ["costs 9.00", "costs 9,00", "haircut 17.00", "it is 13.00", "at 16.00"]) {
+      fails(reply);
+      fails(reply, [["opening-hours", "1", "9:00"]]);
+      fails(reply, [["policy", P, "17:00"]]);
+    }
+  });
+
+  test("V3: an hour with its marker in a form the scanner joins, or left on the line", () => {
+    for (const reply of [
+      "We open at *4* am",
+      "We open at 4  am",
+      "We open at 4\nam",
+      "We open at 4 (am)",
+      "We open at 4-am",
+      "open until 4-45 pm",
+      "open until 4 : 45 pm",
+      "open until 9 50 pm",
+      "الساعة 4 صباحًا",
+      "4 في المساء",
+      "open at 4, in the pm",
+    ]) {
+      fails(reply);
+    }
+  });
+
+  test("V4: a stored number beside a word no list knows", () => {
+    for (const reply of [
+      "45 ريالاً",
+      "45 ريالا",
+      "45 الريال",
+      "45 رِيال",
+      "45 ر س",
+      "45 S.R",
+      "45 SARs",
+      "45 ryal",
+      "45 CHF",
+      "45 TRY",
+      "45 percents",
+      "45 بالمية",
+      "9 Ramadan",
+      "9 رمضان",
+      "closed 9 لمارس",
+      "10 bucks",
+      "150 SAR or 45",
+    ]) {
+      fails(reply, reply.startsWith("150") ? [P150] : []);
+    }
+  });
+
+  test("V5: the instructions repeated with a mark the compatibility form joins to its letter", () => {
+    const instructions =
+      "You are the assistant of a business. Never state a price that the data does not give. Write every amount in digits and return one claim for each.";
+    for (const inside of [at(0x301), "_", "*", at(0x2018), at(0x2bc), at(0xb7)]) {
+      const disguised = instructions
+        .split(" ")
+        .map((word, index) => (index % 3 === 0 ? `${word[0]}${inside}${word.slice(1)}` : word))
+        .join(" ");
+      expect(verdict(disguised, [], { instructions }), inside).toBe("O6 instructions");
+    }
+  });
+
+  test("V6: time does not grow with the square of the text", () => {
+    const long = "1$1%".repeat(2_000);
+    const started = performance.now();
+    checkReply(input("Hello.", [], { batch: [long] }));
+    const body = "9 am ".repeat(800);
+    const profile: BusinessProfile = {
+      ...SALON,
+      policies: Array.from({ length: 30 }, (_unused, index) => ({
+        id: `p${index}`,
+        title: `T${index}`,
+        body: `${index} ${body}`,
+      })),
+    };
+    checkReply(input("Hello.", [], { profile }));
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  test("V7: an address broken by a line break, a tab, a control or a blank character", () => {
+    for (const reply of [
+      "evil.\ncom",
+      "pay at evil\n.com/pay",
+      "evil.\tcom",
+      `evil.${at(1)}com`,
+      `evil${at(0x7f)}.com`,
+      `evil.${at(0x2800)}com`,
+      `evil.${at(0xfffc)}com`,
+      `evil.${at(0xe0fe)}com`,
+    ]) {
+      expect(verdict(reply), JSON.stringify(reply)).toBe("O5 link");
+    }
+  });
+
+  test("V8: a number on one line and its marker on the next", () => {
+    for (const reply of [
+      "Price: 45\nCurrency: SAR",
+      "The price is 45 in\nSAR",
+      "Haircut: 50\n(all prices in SAR)",
+      "closed on the 9\nof March",
+      "call 0 then 50 then\n150 then 45\nthen 10 then 17",
+    ]) {
+      fails(reply);
+    }
+  });
+
+  test("V9, V10: an apostrophe of another shape, and a short name at a provider", () => {
+    fails(`open until 9 o${at(0x2019)}clock`);
+    fails("open until 9 o-clock");
+    fails("at 9 hours");
+    expect(verdict("pay a@b")).toBe("O5 handle");
+    expect(verdict("pay x@y")).toBe("O5 handle");
+    // An "at" sign with spaces round it is not read as a handle.
+    expect(verdict("see you @ the salon")).toBe("passes");
+  });
+
+  test("ordinary replies: the percent sign before its number, and a heading before a list", () => {
+    expect(verdict("خصم %10 يوم الاثنين", [["service-detail", S, "10%"]])).toBe("passes");
+    expect(verdict("Our prices in SAR:\n1. Haircut: 150 SAR\n2. Colour", [P150])).toBe("passes");
+  });
+
+  test("the surviving mutants of the second round", () => {
+    // A letter glued before a number that is left over.
+    expect(verdict("It is x45 minutes.")).toBe("O3 value-unreadable");
+    // A letter glued before the number of an amount.
+    expect(verdict("It is x150 SAR.", [P150])).toBe("O3 value-unreadable");
+    // One numbered line is not a list.
+    expect(verdict("1. Haircut")).toBe("O3 number-unknown");
+    // A claim's value may hold nothing that cannot be read.
+    expect(verdict("Hello.", [["policy", P, "17:00 x9"]])).toBe("O3 claim-failed");
+    // A price claim holds one amount and no other number.
+    expect(verdict("Hello.", [price("150 SAR 45 minutes")])).toBe("O3 claim-failed");
+    // Up to three characters between a number and its marker, and not four.
+    expect(verdict("It is 200 (*SAR")).toBe("O3 amount-unclaimed");
+    expect(verdict("It is 200 (**SAR")).toBe("O3 value-unreadable");
   });
 });

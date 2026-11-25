@@ -3,9 +3,11 @@
 Status: proposed by the agent, 2026-11-26, before any code; rewritten
 the same day after its review
 (`docs/reviews/2026-11-26-m3-u9-design-review.md`, five High findings),
-and not reviewed again. Changed once more after the code's review
+and not reviewed again. Changed after the code's review
 (`docs/reviews/2026-11-26-gate4-u9-reply-checks.md`, eight High
-findings): section 4.6 lists what. Issue #308. Stories: US-C4, criteria 3, 5 to 9 and 15; US-C15,
+findings; section 4.6) and after the check of its fixes
+(`...-verification.md`, three more), which changed the rule of 4.4.
+**That last change is checked by the author only.** Issue #308. Stories: US-C4, criteria 3, 5 to 9 and 15; US-C15,
 10. Guardrail policy, section 4, checks O3, O5, O6 and O7. Findings #207,
 #208 and #213 are answered in section 8.
 
@@ -89,8 +91,8 @@ or "Glow.studio" is not read as a value on every mention.
 **A number** is a run of ASCII digits, in which `,` or `.` may stand
 between two digits, and a space or an apostrophe may stand between two
 digits only when exactly three digits follow it and no fourth. So
-`1 50` is two numbers and `2 150` is one (2150). Letters beside it do
-not matter: the `12` of `A12` is a number.
+`1 50` is two numbers and `2 150` is one (2150). A number with a
+letter glued to it is still found, and then cannot be read (4.4).
 
 The business's name is taken out only where it stands alone: an address
 that begins with the name is read as an address.
@@ -169,44 +171,49 @@ price").
 ### 4.4 Every number is accounted for
 
 This rule is not in the guardrail policy, which leaves a number with
-no marker unchecked. It is added because the review showed how many
-ordinary ways of writing a price or a time no list of markers
-recognises, and because the other end of a range ("100-150 SAR", "3 to
-9 pm") is such a number.
+no marker unchecked. It is here because two rounds of review each
+found the same thing: however long the lists of 4.1 are, a price or a
+time can be written in a form they do not know, and then it was a bare
+number.
 
-After the values of 4.1 and the contact details of section 6 have been
-taken out of the reply, **each number that is left must equal a number
-the business's own data holds**: a number in a service's name or
-description, in a policy's title or body, or in the business's name; a
-price, in whole units and in full; an hour or a minute of the opening
-hours, the hour also on the twelve-hour clock.
-Compared as numbers: `09` equals `9`.
+After the contact details of section 6 and the values of 4.1 have been
+taken out of the reply, **each number that is left must stand before
+the same word as it does somewhere in the business's own texts**: a
+service's name or description, a policy's title or body, or the
+business's name. "45 minutes" passes when a description says "45
+minutes". The word is the run of letters directly after the number,
+with at most one space or hyphen between, without regard to case; the
+number is compared as a number, so `045.0` equals `45`.
+
+A price or an opening hour is **never** such a number: "150" alone, "9"
+or "9.00" do not pass, whatever is stored. Nor does a number the
+customer wrote.
 
 Not counted as a number left over: the numbering of a list, which is
 lines that begin 1, 2, 3 and on, in order, two or more of them, each
 number followed by `.` or `)` and a space; and `24/7`.
 
 A number left over **cannot be read**, and the reply fails, when a
-letter is glued to it (`150k`, `16h`), when a word after it makes it
-another number ("150 thousand"; a list in the marker data), or when
-its grouping is no grouping (`0.150`, `1.50,00`).
+letter is glued to it (`150k`, `16h`, `x45`), when the word after it
+multiplies ("150 thousand"; a list in the marker data), or when its
+grouping is no grouping (`0.150`, `1.50,00`).
 
 A line that holds a number left over is held back when the line also
 still holds a marker that no number was joined to: a currency sign,
 code or name, `%` or a word for percent, a month's name (but not
-"may"), or a word for "o'clock". And seven or more digits left over
-on one line, in whatever pieces, fail as a long number said in parts.
+"may"), a word for the half or the part of the day, or a word for
+"o'clock". A word that multiplies, on a line that holds any number,
+holds the reply back. And seven or more digits left over in a reply,
+in whatever pieces, fail as a long number said in parts.
 
-A number from the customer's messages does **not** pass by this rule:
-"yes, 100" after "is it 100?" is held back.
-
-So a wrong number passes only when it happens to equal some other
-number the business stored: the same limit the guardrail policy
-already accepts for a claim ("a true price of one service stated as
-another's").
-
-What it costs: "we have 3 stylists" is held back unless the business's
-data says 3; so is "since 2015", "2 for 1" and "room 12".
+**What it costs.** A duration or a count in other words than the
+business's text is held back, and above all **in another language**:
+"45" before the Arabic word for minutes, when the description is in
+English. "Please arrive 10 minutes early" is held back unless some
+text says "10 minutes"; so is "we have 3 stylists", "since 2015" and
+"room 12". The remedy is for the model to claim such a number against
+the item it comes from; the prompt does not ask for that, and cannot
+be changed before an eval can run (#336).
 
 ### 4.5 Cases
 
@@ -240,8 +247,8 @@ closed. Today is 2026-11-26.
 | V19 | "on 12 March" | none | "12/3?" | passes by the exception (both are 2027-03-12). "on 12/3" does not: two numbers and a slash never pass this way |
 | V20 | "on March 12th" | none | | fails, `date-unclaimed` |
 | V21 | "open 24/7" | none | | passes |
-| V22 | "45 minutes" | none | | passes: 45 is a number in S's description |
-| V23 | "150" | none | | passes: 150 is a stored price. "140" fails, `number-unknown` |
+| V22 | "45 minutes" | none | | passes: S's description says "45 minutes". "45" alone, "45 hours" and "44 minutes" fail |
+| V23 | "150" | none | | fails, `number-unknown`: a stored price is no bare number |
 | V24 | "1.500 SAR" | price, S, "1.500 SAR" | | fails: three digits after the separator is grouping, so 1,500.00 |
 | V25 | "150.5 SAR" | price, S, "150.5 SAR" | | fails: 150.50 is not 150.00 |
 | V26 | "150.005 SAR" | price, S, "150.005 SAR" | | fails: grouping, so 150,005.00 |
@@ -250,10 +257,10 @@ closed. Today is 2026-11-26.
 | V29 | "1 5 0 SAR" | price, S, "150 SAR" | | fails: the amount is "0 SAR", and 1 and 5 are numbers left over |
 | V30 | "150 SAR" with a zero-width space inside the number | price, S, "150 SAR" | | passes: removed in section 3 |
 | V31 | "200 Saudi riyals" | price, S, "150 SAR" | | fails, `amount-unclaimed`: one word may stand before a currency's name |
-| V32 | "costs two hundred" then "200" with a marker the data does not know | price, S, "150" | | fails, `number-unknown`: 200 is nowhere in the business's data |
+| V32 | "200" with a marker the data does not know | price, S, "150" | | fails, `number-unknown`. So does "45" with such a marker, though 45 is stored: not before that word |
 | V33 | "100-150 SAR" | price, S, "150 SAR" | | fails, `number-unknown` on 100 |
 | V34 | "open 3 to 9 pm" | opening-hours, 1, "9 pm" | | fails, `number-unknown` on 3 |
-| V35 | "open 9-5" | none | | fails on 5: 17:00 is not a Monday time, and 5 is not stored. "open 9-1" passes: both are hours of the stored periods, on the twelve-hour clock |
+| V35 | "open 9-5", "open 9-1" | none | | both fail, `number-unknown`: an hour is no bare number |
 | V36 | "until 24:00" | opening-hours, 1, "24:00" | | fails, `claim-failed` |
 | V37 | lines beginning "1. ", "2. ", "3) " | | | passes: a list. "200. Would you like to book?" and "1. Haircut" followed by "250. Colour" fail |
 | V38 | "we have 3 stylists" | none | | fails, `number-unknown` |
@@ -265,8 +272,15 @@ closed. Today is 2026-11-26.
   values, on the whole text; long numbers after values. A value inside
   an address no longer hides the address.
 - A number and its marker may have up to three characters of space,
-  emphasis or brackets between them (`*45* SAR`, `45 (SAR)`, `SAR:
-  45`). The tenant's own currency code is read in any case.
+  emphasis or brackets between them, on one line (`*45* SAR`, `45
+  (SAR)`, `SAR: 45`, `4 (pm)`). The tenant's own currency code is read
+  in any case. A percent sign may stand before its number.
+- Between a number and a currency's name only a country's word may
+  stand ("200 Saudi riyals"; a list). Any other word makes the amount
+  unreadable.
+- Controls, private-use characters and two blank characters are
+  removed before anything is read, and the marks over Arabic letters
+  before a word is matched.
 - Groups of a number are 1 to 3 digits with no leading zero, then
   exactly three each. Anything else cannot be read.
 - In an amount, a letter glued to the number or a multiplier word
@@ -298,8 +312,9 @@ kinds (M5), which must extend this hook to do it.
 
 ### O5: contact details and links
 
-Looked for in the plain text, after every value O3 detected has been
-replaced by the unmatched character:
+Addresses, handles and bank accounts are looked for first, in the whole
+plain text; long numbers after the values of O3 have been replaced by
+the unmatched character:
 
 | What | Detected when the text has | Ends |
 | --- | --- | --- |
@@ -326,7 +341,7 @@ without spaces. Otherwise O5 fails.
 | L4 | "pay to @salon_pay" | | fails, `handle` |
 | L5 | "call +966 55 555 0100" | support contact "+966555550100" | passes |
 | L6 | the national form "055 555 0100" in Arabic-Indic digits | support contact "+966555550100" | fails, `number`: other digits (section 9) |
-| L7 | "055, then 1234, then 567" | | **O5 does not detect it**: letters stand between. It fails all the same, by 4.4: seven digits or more left over on one line |
+| L7 | "055, then 1234, then 567" | | **O5 does not detect it**: letters stand between. It fails all the same, by 4.4 |
 | L8 | "order 1234567" | | fails, `number` |
 | L9 | "17:30 on 12/03/2027" (both passed O3) | | passes |
 | L10 | "see you.Then" | | fails, `link`: a missing space after a full stop |
@@ -387,10 +402,10 @@ Not checked:
 
 - A value written in words; a weekday name; "tomorrow".
 - That a claimed value is said *about* the item claimed.
-- A number with no marker that equals some number in the business's
-  data (V23): "150" passes whatever it is said about, and so does
-  "150 SAR or 45" when 45 is such a number, or "150" before a word no
-  list knows.
+- A time or a date the customer wrote, in whatever sentence it stands
+  ("The price is 17:00" after "17:00").
+- A number before the same word as in the business's text, whatever
+  it is said about.
 - An address whose dot is disguised in a way section 6 does not list,
   or with an ending that is not in the lists.
 - A percentage or a fraction written as "45 pc" or with a fraction
@@ -405,8 +420,10 @@ Not checked:
 
 Held back though right (each sends the fallback):
 
+- **A number in other words than the business's text, and so every
+  such number in a reply in another language** (4.4).
 - A count, a year, a room or an address the business's data does not
-  hold (V38); a fraction such as "1/2 price", read as a date.
+  hold (V38); an ordinal; a fraction such as "1/2 price", read as a date.
 - Day before month, always: a business that writes month first sees
   right dates held back.
 - A stored international number written in its national form (L6); a

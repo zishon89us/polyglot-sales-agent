@@ -283,6 +283,12 @@ export const MULTIPLIERS: readonly string[] = [
   "crore",
   "crores",
   "dozen",
+  "thousands",
+  "millions",
+  "grand",
+  "mn",
+  "mil",
+  "mm",
   "مئة",
   "مائة",
   "ألف",
@@ -290,6 +296,9 @@ export const MULTIPLIERS: readonly string[] = [
   "آلاف",
   "مليون",
   "ملايين",
+  "ألفا",
+  "الاف",
+  "مليار",
   "سو",
   "ہزار",
   "لاکھ",
@@ -314,4 +323,42 @@ export const MULTIPLIERS: readonly string[] = [
  * Words that say a number beside them is a time, in a form the scanner
  * does not read. A line with one and a number left over is held back.
  */
-export const TIME_WORDS: readonly string[] = ["o'clock", "oclock", "o clock", "hrs"];
+export const TIME_WORDS: readonly string[] = ["o'clock", "oclock", "o clock", "o-clock", "hrs"];
+
+/**
+ * The one kind of word that may stand between a number and a currency's
+ * name: a country's. Any other word there makes the amount unreadable.
+ * The adjective is not checked against the currency: "200 Qatari riyals"
+ * reads as the tenant's riyal.
+ */
+export const COUNTRY_ADJECTIVES: readonly string[] = [
+  "saudi",
+  "emirati",
+  "uae",
+  "qatari",
+  "kuwaiti",
+  "bahraini",
+  "omani",
+  "jordanian",
+  "egyptian",
+  "pakistani",
+  "indian",
+  "bangladeshi",
+  "philippine",
+  "us",
+  "american",
+  "سعودي",
+  "إماراتي",
+  "اماراتي",
+  "قطري",
+  "كويتي",
+  "بحريني",
+  "عماني",
+  "أردني",
+  "مصري",
+  "پاکستانی",
+  "سعودی",
+  "भारतीय",
+  "पाकिस्तानी",
+  "বাংলাদেশি",
+];

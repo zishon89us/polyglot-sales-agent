@@ -717,6 +717,19 @@ M0 Inception met its exit criteria on 2026-11-16; see
   back more right replies ("we have 3 stylists"); row 52 asks the
   maintainer about the trade. The word lists for five languages are
   the agent's and unread by a speaker.
+  A third agent then ran 426 replies through the code
+  (`reviews/2026-11-26-gate4-u9-reply-checks.md`): a crash on a
+  business's name with a hyphen, and seven ways a wrong value or a
+  foreign address passed. Fixed. A fourth agent ran 1,112 inputs
+  against the fixes (`...-verification.md`): three more High findings
+  of the same kind, a stored number passing beside a word no list
+  knew ("45 ryal", "costs 9.00", "4 (am)"). The rule was changed and
+  not the lists: a number that is no claimed value passes only before
+  the same word as in the business's own texts. **That change is
+  checked by the author only; no third round was run.** It holds back
+  more right replies, above all a number said in another language
+  than the business's texts; of twenty ordinary replies the author
+  tried, four. What is left is #336.
 
 ## Next
 

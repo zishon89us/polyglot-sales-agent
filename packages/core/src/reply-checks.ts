@@ -6,6 +6,7 @@
 // a word of the reply, of the customer or of the business's data.
 
 import {
+  COUNTRY_ADJECTIVES,
   CURRENCY_CODES,
   CURRENCY_NAMES,
   CURRENCY_SIGNS,
@@ -127,6 +128,16 @@ const OTHER_STOPS = new RegExp(`[${at(0x3002)}${at(0xff0e)}${at(0xff61)}]`, "gu"
 /** Every way a line ends. */
 const LINE_ENDS = new RegExp(`\\r\\n|[\\r\\v\\f${at(0x85)}${at(0x2028)}${at(0x2029)}]`, "gu");
 
+/**
+ * What is no text and could stand inside a word or an address to split
+ * it: controls other than a line break and a tab, private-use characters
+ * (the scanner's own marks are of these), the blank Braille pattern and
+ * the object replacement character.
+ */
+const NOT_TEXT = new RegExp(`(?![\\n\\t])\\p{Cc}|\\p{Co}|[${at(0x2800)}${at(0xfffc)}]`, "gu");
+/** The short vowels and other marks written over Arabic letters: a word is matched without them. */
+const ARABIC_MARKS = new RegExp(`[${at(0x64b)}-${at(0x65f)}${at(0x670)}]`, "gu");
+
 /** The value of a decimal digit of any script: its place in its run of ten. */
 function digitValue(character: string): number {
   const codePoint = character.codePointAt(0) as number;
@@ -151,7 +162,8 @@ function folded(text: string): string {
 /** The text made plain. Case is kept; `folded` gives the copy words are matched in. */
 export function plainText(text: string): string {
   let marked = "";
-  for (const character of text.replace(LINE_ENDS, "\n").replace(OTHER_STOPS, ".")) {
+  const cleaned = text.replace(LINE_ENDS, "\n").replace(OTHER_STOPS, ".").replace(NOT_TEXT, "");
+  for (const character of cleaned) {
     if (CURRENCY_SIGN.test(character)) {
       const narrow = character.normalize("NFKC");
       const index = SIGNS.indexOf(SIGNS.includes(narrow) ? narrow : character);
@@ -171,6 +183,7 @@ export function plainText(text: string): string {
     .replace(DASHES, "-")
     .replace(IGNORABLE, "")
     .replace(MARK_AFTER_DIGIT, "")
+    .replace(ARABIC_MARKS, "")
     .replaceAll(at(0x640), "");
 }
 
@@ -191,7 +204,7 @@ const LETTER = /[\p{L}\p{M}]/u;
 /** A number: digits, `,` or `.` between two digits, a space or `'` only before exactly three. */
 const NUMBER = "[0-9]+(?:(?:[.,]|[ '](?=[0-9]{3}(?![0-9])))[0-9]+)*";
 /** What may stand between a number and its marker: a space, or the marks of emphasis and brackets. */
-const GAP = "[ \\t\\n*_():-]{0,3}";
+const GAP = "[ \\t*_():-]{0,3}";
 
 // ---------------------------------------------------------------------
 // Values (sections 4.1 and 4.2)
@@ -316,8 +329,18 @@ const PART_OF = new Map<string, "am" | "pm">(
 const PART = words(DAY_PARTS.flatMap(([parts]) => parts));
 const OCLOCK = words(OCLOCK_WORDS);
 const PERCENT = words(PERCENT_WORDS);
-const MULTIPLIER_SET = new Set(MULTIPLIERS.map((word) => folded(plainText(word))));
-const MULTIPLIER = words(MULTIPLIERS);
+const MULTIPLIER_WORDS = new Set(MULTIPLIERS.map((word) => folded(plainText(word))));
+/** The markers of the half of the day that are words: a single letter is also a word's start. */
+const HALF_WORDS = words(
+  DAY_HALVES.flatMap(([markers]) => markers).filter((marker) => marker.length > 1),
+);
+const COUNTRY_WORDS = new Set(COUNTRY_ADJECTIVES.map((word) => folded(plainText(word))));
+const MULTIPLIER_ON_LINE = new RegExp(
+  `${NOT_AFTER_WORD}(?:${words(MULTIPLIERS.filter((word) => word.length > 2))})${NOT_BEFORE_WORD}`,
+  "u",
+);
+/** How far from a number its marker is looked for, in UTF-16 units. */
+const NEAR = 48;
 
 interface Found {
   readonly start: number;
@@ -363,12 +386,15 @@ function currencyPatterns(tenant: Context["currency"]) {
 /** Finds every value of the four kinds, in the order of section 4.1. */
 function scanValues(plain: string, context: Context): Scan {
   let text = plain;
+  // Folded once, and patched where the text is: folding the whole text for every match is slow.
+  let lower = folded(plain);
   const found: Found[] = [];
   const take = (start: number, end: number, value: Value | undefined): void => {
     if (value !== undefined) {
       found.push({ start, end, value });
     }
     text = text.slice(0, start) + BLANK.repeat(end - start) + text.slice(end);
+    lower = lower.slice(0, start) + BLANK.repeat(end - start) + lower.slice(end);
   };
   /** Runs a pattern over the folded text; `read` says what a match is, and how much of it. */
   const each = (
@@ -377,7 +403,6 @@ function scanValues(plain: string, context: Context): Scan {
   ): void => {
     const expression = new RegExp(pattern, "gu");
     for (;;) {
-      const lower = folded(text);
       const match = expression.exec(lower);
       if (match === null) {
         return;
@@ -481,12 +506,14 @@ function scanValues(plain: string, context: Context): Scan {
       }
       const start = match.index;
       const end = start + match[0].length;
-      const lower = folded(text);
+      // A marker is near its number: only so much of the text on each side is looked at.
+      const near = Math.max(0, start - NEAR);
       const left =
-        currency.before.exec(text.slice(0, start)) ??
-        currency.beforeName.exec(lower.slice(0, start));
+        currency.before.exec(text.slice(near, start)) ??
+        currency.beforeName.exec(lower.slice(near, start));
       const right =
-        currency.after.exec(text.slice(end)) ?? currency.afterName.exec(lower.slice(end));
+        currency.after.exec(text.slice(end, end + NEAR)) ??
+        currency.afterName.exec(lower.slice(end, end + NEAR));
       if (left === null && right === null) {
         continue;
       }
@@ -496,9 +523,13 @@ function scanValues(plain: string, context: Context): Scan {
       ];
       // A word between the number and the name that makes it another
       // number, or a letter glued to the number: it cannot be read.
+      // The one word that may stand between a number and a currency's
+      // name is a country's ("200 Saudi riyals"). Any other word may make
+      // it another number ("150 thousand riyals", in forms no list ends):
+      // it cannot be read. Nor with a letter glued before the number.
       const between = right?.groups?.["word"];
-      const glued = between !== undefined && LETTER.test(text[end] ?? "");
-      const multiplied = between !== undefined && MULTIPLIER_SET.has(between);
+      const glued = left === null && LETTER.test(text[start - 1] ?? "");
+      const multiplied = between !== undefined && !COUNTRY_WORDS.has(between);
       const from =
         left === null ? start : start - left[0].length + (left.groups?.["letter"]?.length ?? 0);
       const to = right === null ? end : end + right[0].length;
@@ -511,7 +542,10 @@ function scanValues(plain: string, context: Context): Scan {
     }
   }
 
-  // Percentages.
+  // Percentages. The sign may come first, as it does in Arabic.
+  each(`%${GAP}(${NUMBER})(?![0-9])`, (match) => ({
+    value: { kind: "percentage", scaled: scaledNumber(match[1] as string, 4) },
+  }));
   each(`(?<![0-9]|[0-9][.,])(${NUMBER})${GAP}(?:%|(?:${PERCENT})${NOT_BEFORE_WORD})`, (match) => ({
     value: { kind: "percentage", scaled: scaledNumber(match[1] as string, 4) },
   }));
@@ -529,7 +563,7 @@ function scanValues(plain: string, context: Context): Scan {
   // With a colon; or with a dot, which needs a marker of the half of the
   // day, since "9.50" is also a price.
   each(
-    `(?<![0-9]|[0-9][.,:])([0-9]{1,2})(?::([0-9]{2})(?![0-9]|[.,:][0-9])(?: ?(${HALF})${NOT_BEFORE_WORD})?|\\.([0-9]{2}) ?(${HALF})${NOT_BEFORE_WORD})`,
+    `(?<![0-9]|[0-9][.,:])([0-9]{1,2})(?::([0-9]{2})(?![0-9]|[.,:][0-9])(?:${GAP}(${HALF})${NOT_BEFORE_WORD})?|\\.([0-9]{2})${GAP}(${HALF})${NOT_BEFORE_WORD})`,
     (match) => {
       const hour = Number(match[1]);
       const minute = Number(match[2] ?? match[4]);
@@ -541,7 +575,7 @@ function scanValues(plain: string, context: Context): Scan {
       return { value: { kind: "time", minutes: minutesOf(hour, minute, half) } };
     },
   );
-  each(`(?<![0-9]|[0-9][.,:/-])([0-9]{1,2}) ?(${HALF})${NOT_BEFORE_WORD}`, (match) => {
+  each(`(?<![0-9]|[0-9][.,:/-])([0-9]{1,2})${GAP}(${HALF})${NOT_BEFORE_WORD}`, (match) => {
     const hour = Number(match[1]);
     if (hour < 1 || hour > 12) {
       return undefined;
@@ -672,13 +706,13 @@ function scanContacts(input: string): { rest: string; contacts: Contact[] } {
   );
   each(
     new RegExp(
-      `(?<![\\p{L}\\p{N}])(${LABEL})(?: +\\. *| *\\. +)(${SPACED_ENDINGS.join("|")})(?![\\p{L}\\p{N}])`,
+      `(?<![\\p{L}\\p{N}])(${LABEL})(?:\\s+\\.\\s*|\\s*\\.\\s+)(${SPACED_ENDINGS.join("|")})(?![\\p{L}\\p{N}])`,
       "giu",
     ),
     (match) => ({ contact: { kind: "link", form: `${match[1]}.${match[2]}`.toLowerCase() } }),
   );
   // A handle; and a name at a provider with no dot, as payment addresses are written.
-  each(/[\p{L}\p{N}._%+-]*@[\p{L}\p{N}._-]{2,}/gu, (match) => ({
+  each(/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}._-]+|@[\p{L}\p{N}._-]{2,}/gu, (match) => ({
     contact: { kind: "handle", form: match[0].toLowerCase().replace(/[.-]+$/, "") },
   }));
   return { rest: state.text, contacts: state.contacts };
@@ -737,60 +771,76 @@ function withoutListNumbers(text: string): string {
 interface Reading {
   readonly values: readonly Value[];
   readonly contacts: readonly Contact[];
-  /** The numbers left over. */
-  readonly numbers: readonly number[];
+  /** The numbers left over, each with the word after it (`numberKey`). */
+  readonly numbers: readonly string[];
   /** Something left over that cannot be read: see `leftover`. */
   readonly stray: boolean;
 }
 
+/** A number and the word directly after it, as the two are compared. */
+const numberKey = (value: number, word: string): string => `${value} ${word}`;
+const WORD_AFTER = /^[ -]?([\p{L}\p{M}]+)/u;
+
+/** Every number of a line with the word after it; a number that cannot be read has no key. */
+function numbersOf(
+  line: string,
+): { key: string | null; start: number; end: number; word: string }[] {
+  const lower = folded(line);
+  return [...line.matchAll(new RegExp(`(?<![0-9]|[0-9][.,])${NUMBER}`, "gu"))].map((match) => {
+    const end = match.index + match[0].length;
+    const value = scaledNumber(match[0], 4);
+    const word = WORD_AFTER.exec(lower.slice(end, end + NEAR))?.[1] ?? "";
+    return {
+      key: value === null ? null : numberKey(value / 10_000, word),
+      start: match.index,
+      end,
+      word,
+    };
+  });
+}
+
 /**
- * The numbers no value and no contact took. `stray` when one cannot be
- * read as a plain number: a letter is glued to it, a word after it makes
- * it another number, its grouping is no grouping, or its line still holds
- * a marker of a currency, a percentage, a month or a time that the
- * scanner did not join to a number.
+ * The numbers no value and no contact took, each with the word after it.
+ * `stray` when one cannot be read as a plain number: a letter is glued to
+ * it, the word after it multiplies, its grouping is no grouping; or when its line still holds a
+ * marker of a currency, a percentage, a month or a time that the scanner
+ * did not join to a number, or a word that multiplies.
  */
-function leftover(rest: string, context: Context): { numbers: number[]; stray: boolean } {
+function leftover(rest: string, context: Context): { numbers: string[]; stray: boolean } {
   const currency = currencyPatterns(context.currency);
   const strayWords = new RegExp(
-    `%|${NOT_AFTER_WORD}(?:${PERCENT}|${OCLOCK}|${words(TIME_WORDS)}|${words(
-      MONTHS.flat().filter((name) => name !== "may"),
-    )})${NOT_BEFORE_WORD}`,
+    `%|${NOT_AFTER_WORD}(?:${PERCENT}|${OCLOCK}|${HALF_WORDS}|${PART}|${words(TIME_WORDS)}|${words(
+      MULTIPLIERS.filter((word) => word.length > 2),
+    )}|${words(MONTHS.flat().filter((name) => name !== "may"))})${NOT_BEFORE_WORD}`,
     "u",
   );
-  const multiplier = new RegExp(`^ ?(?:${MULTIPLIER})${NOT_BEFORE_WORD}`, "u");
-  const numbers: number[] = [];
+  const numbers: string[] = [];
   let stray = false;
   let digits = 0;
   for (const line of rest.split("\n")) {
-    const lower = folded(line);
-    let any = false;
-    let lineDigits = 0;
-    for (const match of line.matchAll(new RegExp(`(?<![0-9]|[0-9][.,])${NUMBER}`, "gu"))) {
-      any = true;
-      const end = match.index + match[0].length;
-      const value = scaledNumber(match[0], 4);
+    const found = numbersOf(line);
+    if (found.length === 0) {
+      continue;
+    }
+    for (const number of found) {
       if (
-        value === null ||
-        LETTER.test(line[match.index - 1] ?? "") ||
-        LETTER.test(line[end] ?? "") ||
-        multiplier.test(lower.slice(end))
+        number.key === null ||
+        LETTER.test(line[number.start - 1] ?? "") ||
+        LETTER.test(line[number.end] ?? "") ||
+        MULTIPLIER_WORDS.has(number.word)
       ) {
         stray = true;
       } else {
-        numbers.push(value / 10_000);
+        numbers.push(number.key);
       }
-      lineDigits += match[0].replace(/[^0-9]/g, "").length;
+      digits += line.slice(number.start, number.end).replace(/[^0-9]/g, "").length;
     }
-    if (
-      any &&
-      (currency.stray.test(lower) || currency.strayCode.test(line) || strayWords.test(lower))
-    ) {
+    const lower = folded(line);
+    if (currency.stray.test(lower) || currency.strayCode.test(line) || strayWords.test(lower)) {
       stray = true;
     }
-    digits = Math.max(digits, lineDigits);
   }
-  // Seven digits on a line, in pieces: a long number said in parts.
+  // Seven digits left over, in pieces: a long number said in parts.
   return { numbers, stray: stray || digits >= LONG_NUMBER_DIGITS };
 }
 
@@ -813,11 +863,16 @@ function read(text: string, context: Context, name: string | null): Reading {
   const scanned = scanValues(contacts.rest, context);
   const long = scanLongNumbers(scanned.rest);
   const left = leftover(withoutListNumbers(long.rest), context);
+  // A word that multiplies, on a line that holds any number at all: the
+  // number beside it may have been taken as a value ("150 SAR thousand").
+  const multiplied = plain
+    .split("\n")
+    .some((line) => /[0-9]/.test(line) && MULTIPLIER_ON_LINE.test(folded(line)));
   return {
     values: scanned.values,
     contacts: [...contacts.contacts, ...long.contacts],
     numbers: left.numbers,
-    stray: left.stray,
+    stray: left.stray || multiplied,
   };
 }
 
@@ -848,11 +903,20 @@ const lettersAndDigits = (text: string): string =>
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]/gu, "");
-/** Words, with what is unseen, marks, apostrophes and hyphens taken out of them first. */
+/**
+ * Words, cut after everything that could stand inside one without being
+ * read is taken out: what is unseen, marks (also those the compatibility
+ * form joins to their letter), and the signs of emphasis and joining.
+ */
+const INSIDE_WORDS = new RegExp(
+  `[\\p{M}'_*~\`${at(0x2018)}${at(0x2019)}${at(0x2bc)}${at(0xb7)}-]`,
+  "gu",
+);
 const wordsOf = (text: string): string[] =>
   plainText(text)
+    .normalize("NFKD")
     .toLowerCase()
-    .replace(/[\p{M}'’-]/gu, "")
+    .replace(INSIDE_WORDS, "")
     .match(/[\p{L}\p{N}]+/gu) ?? [];
 
 function checkLeak(input: ReplyCheckInput): CheckOutcome {
@@ -988,39 +1052,23 @@ function claimValues(
   }
 }
 
-/** Every number in a text, as a number; one that cannot be read is left out. */
-function numbersIn(text: string): number[] {
-  return [...text.matchAll(new RegExp(NUMBER, "gu"))].flatMap((match) => {
-    const value = scaledNumber(match[0], 4);
-    return value === null ? [] : [value / 10_000];
-  });
-}
-
-/** The numbers the business's own data holds (section 4.4). */
-function knownNumbers(profile: BusinessProfile): Set<number> {
-  const known = new Set<number>();
+/**
+ * Every number in the business's own texts with the word after it
+ * (section 4.4): what a number left over in a reply must be one of.
+ */
+function knownNumbers(profile: BusinessProfile): Set<string> {
+  const known = new Set<string>();
   const texts = [
     profile.name,
     ...profile.services.flatMap((service) => [service.name, service.description]),
     ...profile.policies.flatMap((policy) => [policy.title, policy.body]),
   ];
   for (const text of texts) {
-    for (const number of numbersIn(plainText(text))) {
-      known.add(number);
-    }
-  }
-  if (profile.currency !== null) {
-    for (const service of profile.services) {
-      known.add(service.priceMinor / 10 ** profile.currency.decimals);
-    }
-  }
-  for (const day of profile.openingHours ?? []) {
-    for (const period of day.periods) {
-      for (const time of [period.opens, period.closes]) {
-        const [hour, minute] = time.split(":").map(Number) as [number, number];
-        known.add(hour);
-        known.add(minute);
-        known.add(hour % 12 === 0 ? 12 : hour % 12);
+    for (const line of plainText(text).split("\n")) {
+      for (const number of numbersOf(line)) {
+        if (number.key !== null && number.word !== "") {
+          known.add(number.key);
+        }
       }
     }
   }

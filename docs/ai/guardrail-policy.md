@@ -108,9 +108,12 @@ decides the outcome.
 `design/notes/m3-u9-output-checks.md`). Nothing calls it yet: the turn
 does with the unit's second part. Three things differ from this section
 as written, each in the note: a claim that does not pass fails the reply
-even when its value is not in the text; **every number in a reply must be
-one the business's own data holds**, which this section leaves unchecked;
-and all four checks run, O7 and O6 first, so that each can be counted.
+even when its value is not in the text; **a number that is no claimed
+value passes only before the same word as in the business's own texts**,
+where this section leaves a bare number unchecked; a time written `H.MM`
+needs a marker of the half of the day; and all four checks run, O7 and O6
+first, so that each can be counted. Rewriting this section to match is in
+#336.
 
 Every check in this table is code, and each is tested by unit tests with a
 fake model that returns hostile output (ADR 0007). O7's number is set (M3
