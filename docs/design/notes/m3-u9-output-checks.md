@@ -1,7 +1,9 @@
 # Design note: the checks on a reply (M3 unit U9, first part)
 
-Status: proposed by the agent, 2026-11-26, before any code, and not yet
-reviewed. Issue #308. Stories: US-C4, criteria 3, 5 to 9 and 15; US-C15,
+Status: proposed by the agent, 2026-11-26, before any code; rewritten
+the same day after its review
+(`docs/reviews/2026-11-26-m3-u9-design-review.md`, five High findings),
+and not reviewed again. Issue #308. Stories: US-C4, criteria 3, 5 to 9 and 15; US-C15,
 10. Guardrail policy, section 4, checks O3, O5, O6 and O7. Findings #207,
 #208 and #213 are answered in section 8.
 
@@ -30,235 +32,294 @@ through the place section 5 describes.
 ## 2. What the function is given, and what it answers
 
 Given: the reply's text; its claims (each a kind, an item and a value,
-as the output structure has them); the business's profile as the model
-was given it; the texts of the customer's latest batch; the
-deployment's canary; the instruction text of the prompt; today's date
-in the tenant's time zone; and the checkers a pack registered.
+as the output structure has them); the business's profile as the turn
+read it and gave it to the model; the texts of the customer's latest
+batch; the deployment's canary; the instruction text of the prompt;
+today's date in the tenant's time zone; and the checkers a pack
+registered.
 
-Answers: for each of O7, O6, O3 and O5, in that order, `passed`,
-`failed` with a code, or `not-run`. The first failure decides, and the
-checks after it are not run. A code is one of a fixed list (section 7)
-and never holds a word of the reply, of the customer, or of the
-business's data.
+"As the turn read it" is not quite US-C4's "current stored price": an
+owner who changes a price while a turn runs gets one reply checked
+against the price the model was shown.
 
-O7 and O6 come first because they are cheap and because a reply that
-repeats the instructions should not be read further. The guardrail
-policy's table lists them last; the outcome is the same either way,
-since any failure is the fallback. Only the code that is recorded
-differs.
+Answers: for each of O7, O6, O3 and O5, `passed` or `failed` with a
+code. **All four run**, so that each can be counted; the reply passes
+only if all four do, and the first that failed, in that order, is the
+one the fallback is recorded under. A code is one of a fixed list
+(section 7) and never holds a word of the reply, of the customer, or
+of the business's data.
 
-The function is pure: no clock, no database, no network. The same
-input gives the same answer.
+The function is pure: no clock, no database, no network. Its answer
+does depend on the Unicode tables of the runtime; a test pins the facts
+the rules rest on.
 
 ## 3. Reading the text
 
-Before anything is looked for, a copy of the text is made plain:
+A copy of the text is made plain, in this order:
 
-1. Unicode's compatibility form (NFKC): full-width digits and letters
-   become ordinary ones.
-2. Every character Unicode calls a decimal digit becomes its ASCII
-   digit: Arabic-Indic, Persian, Devanagari and Bengali numerals read as
-   Latin ones. This runs before every scan, O5's too (#208).
-3. The Arabic decimal mark (U+066B) becomes `.`, the Arabic thousands
+1. Currency symbols are found first, on the text as written, and each
+   is replaced by a private mark that later steps leave alone. (The
+   compatibility form would otherwise turn the rupee sign into the
+   letters "Rs" and the rial sign into a word.)
+2. Unicode's compatibility form (NFKC).
+3. Every character Unicode calls a decimal digit becomes its ASCII
+   digit: Arabic-Indic, Persian, Devanagari and Bengali numerals read
+   as Latin ones. This runs before every scan, O5's too (#208).
+4. The Arabic decimal mark (U+066B) becomes `.`, the Arabic thousands
    mark (U+066C) becomes `,`, the Arabic percent sign (U+066A) becomes
-   `%`.
-4. Characters that are not seen (zero-width space and joiners, word
-   joiner, soft hyphen, byte-order mark, direction marks) are removed,
-   so that a digit run or an address cannot be split by one.
+   `%`. Every dash and minus sign becomes `-`.
+5. Every character with Unicode's property Default_Ignorable_Code_Point
+   is removed, and every combining mark that directly follows a digit:
+   a digit run or an address cannot be split by something unseen.
+6. For matching words only: lower case; the Persian forms of yeh and
+   kaf become the Arabic ones; the tatweel is removed.
 
-Words are compared without regard to case.
+The marker words of section 4.1 go through the same steps before they
+are compared.
 
-## 4. O3: the four kinds of value
+Every exact occurrence of the business's name is then replaced by a
+character that no pattern matches, so that a name such as "5 pm Cafe"
+or "Glow.studio" is not read as a value on every mention.
+
+**A number** is a run of ASCII digits, in which `,` or `.` may stand
+between two digits, and a space or an apostrophe may stand between two
+digits only when exactly three digits follow it and no fourth. It does
+not begin directly after a digit, a letter, or one of `. , : / -`
+that itself follows a digit; it does not end directly before a letter
+or digit. So `1 50` is two numbers, `2 150` is one (2150), and the `12`
+of `A12` is no number.
+
+## 4. O3: values, claims and numbers
 
 ### 4.1 Detection
 
-Values are looked for in this order, and text that one kind has taken
-is not read again by a later kind.
+Values are looked for in this order. Text that one kind has taken is
+replaced by the unmatched character and is not read again.
 
 | Kind | Detected when the plain text has | Not detected |
 | --- | --- | --- |
-| Date | `Y-M-D` with a four-digit year; `D/M`, `D/M/Y`, `D-M-Y`, `D.M.Y` where D is 1 to 31 and M is 1 to 12 and Y is two or four digits; a number 1 to 31 next to a month's name in a supported language, in either order, with an optional year | `24/7` exactly, when no year follows: "open 24/7" (#207). A number pair that is not a possible day and month (`13/13`) |
-| Amount | A number next to a currency marker, before or after it, with at most one space between: any currency symbol (Unicode's class Sc); an ISO 4217 code in capitals; a currency's name in a supported language | A number with no marker |
-| Percentage | A number next to `%`, or next to the word for "percent" in a supported language | |
-| Clock time | `H:MM` or `H.MM` with H 0 to 23 and MM 00 to 59, with or without a marker for morning or afternoon; or an hour 1 to 12 with such a marker in a supported language | An hour with no minutes and no marker. `H.MM` directly followed or preceded by another digit or separator (a longer number) |
+| Date | `Y-M-D` with a four-digit year; `D/M`, `D/M/Y`, `D-M-Y`, `D.M.Y` (D 1 to 31, M 1 to 12, Y two or four digits); a number 1 to 31, with or without an ordinal ending (`st`, `nd`, `rd`, `th`), next to a month's name or short name in a supported language, in either order, with "of" or a comma allowed between and an optional four-digit year after. A number directly followed by a currency marker is never the year | `24/7` exactly, when no year follows (#207) |
+| Amount | A number and a currency marker, before or after it, with at most one space between, or with one word between the number and a currency's *name*: a currency symbol; one of a list of currency codes, in capitals; a name, a short form or a plural from the marker data (`riyals`, `SR`, `Rs`, `Rs.`, `Dhs`, the Arabic short form of the riyal); or `/-` after the number, which means the tenant's own currency | |
+| Percentage | A number and `%`, or the word for "percent" in a supported language, with at most one space between | |
+| Clock time | `H:MM` or `H.MM` with H 0 to 23 and MM 00 to 59, or `24:00`, with or without a marker for morning or afternoon after at most one space; or an hour 1 to 12 with such a marker | An hour with no minutes and no marker |
 
-A number is ASCII digits, with `,`, `.`, `'` or a space allowed between
-digits as separators.
+A marker made of letters must end where a word ends: the Arabic letter
+that marks the afternoon is not found at the start of a longer word.
 
-**Marker lists.** The months, the currency names, the words for
-"percent" and the markers for morning and afternoon, in Arabic,
-English, Urdu, Hindi, Bengali and Tagalog, are data in one file. **The
-agent wrote them and no speaker of the five other languages has read
-them** (decisions, row 52). A word that is missing is a value that is
-not checked.
-
-**A marker that is also a word.** The Arabic markers for morning and
-afternoon are single letters, and one of them also stands for metres
-(#207). A number followed by such a letter is read as a time. The reply
-"5 metres" in Arabic is then an unclaimed time and is blocked. Chosen:
-block.
+**Marker data.** The months and their short names, the currency names,
+short forms and plurals, the words for "percent" and the markers for
+morning and afternoon, in Arabic, English, Urdu, Hindi, Bengali and
+Tagalog, are data in one file. **The agent wrote them and no speaker
+of the five other languages has read them** (decisions, row 52). A
+form that is missing leaves a number with no kind, which 4.4 still
+does not let pass freely.
 
 ### 4.2 Making values comparable
 
 | Kind | Becomes | Rules |
 | --- | --- | --- |
-| Amount | A whole number of the currency's smallest unit, and the set of currencies its marker can mean | The last separator is the decimal point if 1 or 2 digits follow it, or if exactly 3 follow and the tenant's currency has 3 decimals; otherwise every separator is grouping. Digits beyond the currency's decimals must be zeros, or the amount cannot be read. `150`, `150.00`, `1,50` (two decimals) and `١٥٠` compare as the model of section 3 says |
-| Percentage | A number with up to 4 decimals | `10%`, `10.0 %` and `١٠٪` are equal |
-| Clock time | Minutes after midnight | `5:30 pm` and `17:30` are 1050. `12 am` is 0, `12 pm` is 720. `24:00` is not detected (H is 0 to 23). A time with a 24-hour hour over 12 and a marker that contradicts it (`17:30 am`) cannot be read |
-| Date | Year, month, day | A two-digit year is 2000 plus it. With no year: the next such date on or after today. Day comes before month, always: the tenant has no locale setting (section 9). A date that does not exist (`31/2`) cannot be read |
+| Amount | A whole number of the currency's smallest unit, and the set of currencies its marker can mean | Spaces and apostrophes are grouping. Of `,` and `.`: the last one is the decimal point if 1 or 2 digits follow it, or if exactly 3 follow and the tenant's currency has 3 decimals; otherwise all are grouping. More decimal digits than the currency has cannot be read unless they are zeros. `150`, `150.00` and `150,00` are equal for a currency of two decimals |
+| Percentage | A number with up to 4 decimals | `10%` and `10.0 %` are equal |
+| Clock time | Minutes after midnight | `5:30 pm` and `17:30` are 1050. `12 am` is 0, `12 pm` is 720. `24:00` is 0. An hour over 12 with a marker (`17:30 am`) cannot be read |
+| Date | Year, month, day | A two-digit year is 2000 plus it. With no year: the next such date on or after the day given as today. Day comes before month, always (section 9). A date that does not exist cannot be read |
 
-A value that **cannot be read** never passes: no claim covers it and
-the exception does not apply.
+A value that **cannot be read** fails the reply.
 
 A marker can mean several currencies (`$`, "rupee", "riyal"). An amount
-passes only if the tenant's currency is among those its marker can
-mean; a marker the list does not know means none. **A tenant with no
-currency set has no amount that passes.**
+is in the tenant's currency only if that currency is among those its
+marker can mean. A number with a marker on each side needs both to
+mean it. A symbol with a letter directly before it (`A$`) and a marker
+the data does not know mean none. **A tenant with no currency set has
+no amount that passes.**
 
-### 4.3 When a detected value passes
+### 4.3 Claims
 
-Each claim is read the same way: its `value` goes through sections 3
-and 4.1. A claim whose value holds exactly one detected value is a
-claim *of* that value. A claim whose value holds none, or more than
-one, covers nothing and is otherwise ignored.
+Each claim is read by its kind:
 
-A detected value in the reply passes when at least one claim of an
-equal value (same kind, equal after 4.2) itself passes:
+| Claim kind | Item | Its value must hold | The claim passes only if |
+| --- | --- | --- | --- |
+| `price` | A service's identifier, as the model was given it | Exactly one amount, or exactly one number with no marker, read as an amount in the tenant's currency | It equals that service's price |
+| `opening-hours` | A weekday, `1` to `7`, as the model was given it | One or more clock times and nothing else that is detected | Each equals the opening or the closing of a period stored for that weekday. A closing stored as `24:00` equals `00:00` |
+| `service-detail` | A service's identifier | One or more detected values | Each is found, as an equal value of the same kind detected by these same rules, in that service's name or description. An amount must also be in the tenant's currency |
+| `policy` | A policy's identifier | The same | The same, in that policy's title or body |
+| Any other kind | | One or more clock times or dates | A checker registered for the kind says so for each (section 5) |
 
-| Claim kind | Item | Passes only if |
-| --- | --- | --- |
-| `price` | A service's identifier, as the model was given it | The value is an amount in the tenant's currency equal to that service's stored price |
-| `opening-hours` | A weekday, `1` to `7` as the model was given it | The value is a clock time equal to the opening or the closing of a period stored for that weekday. A closing stored as `24:00` equals `00:00` |
-| `service-detail` | A service's identifier | An equal value of the same kind is detected, by these same rules, in that service's name or description. An amount found there must also be in the tenant's currency |
-| `policy` | A policy's identifier | The same, in that policy's title or body |
-| Any other kind | | Only if a registered checker for that kind says so (section 5) |
+**A claim that does not pass fails the reply** (US-C4, criterion 10):
+an item that names nothing, a value that holds nothing its kind can
+read, or a value that is not what is stored. This is so even when the
+reply's text holds no such value, since the claim is the model's own
+word about what it said.
 
-An item that names nothing the model was given makes the claim fail.
+A detected value in the reply passes when a claim that passes holds an
+equal value of the same kind.
 
-**The exception.** A detected clock time or date with no passing claim
+**The exception.** A detected clock time or date that no claim holds
 still passes if an equal value is detected, by the same rules, in the
 texts of the customer's latest batch. An amount or a percentage never
 passes this way.
 
-A claim that fails does not by itself fail the reply: only a detected
-value with no passing claim does. A reply with no detected value passes
-O3 whatever its claims say.
+### 4.4 Every number is accounted for
 
-### 4.4 Cases
+This rule is not in the guardrail policy, which leaves a number with
+no marker unchecked. It is added because the review showed how many
+ordinary ways of writing a price or a time no list of markers
+recognises, and because the other end of a range ("100-150 SAR", "3 to
+9 pm") is such a number.
+
+After the values of 4.1 and the contact details of section 6 have been
+taken out of the reply, **each number that is left must equal a number
+the business's own data holds**: a number in a service's name or
+description, in a policy's title or body, or in the business's name; a
+price, in whole units and in full; an hour or a minute of the opening
+hours, the hour also on the twelve-hour clock; a weekday's number.
+Compared as numbers: `09` equals `9`.
+
+Not counted as a number left over: a number at the start of a line
+followed by `.` or `)` and a space (a list); `24/7`.
+
+A number from the customer's messages does **not** pass by this rule:
+"yes, 100" after "is it 100?" is held back.
+
+So a wrong number passes only when it happens to equal some other
+number the business stored: the same limit the guardrail policy
+already accepts for a claim ("a true price of one service stated as
+another's").
+
+What it costs: "we have 3 stylists" is held back unless the business's
+data says 3; so is "since 2015", "2 for 1" and "room 12".
+
+### 4.5 Cases
 
 The tenant's currency is SAR with two decimals. Service S costs 150.00;
 its description says "45 minutes, 10% off on Mondays". Policy P says
 "Cancel before 17:00 the day before; a 50 SAR fee applies after". Monday
-is open 09:00 to 13:00 and 16:00 to 21:00. Today is 2026-11-26.
+(weekday 1) is open 09:00 to 13:00 and 16:00 to 21:00; Tuesday is
+closed. Today is 2026-11-26.
 
 | # | Reply holds | Claims | Customer's batch | Result |
 | --- | --- | --- | --- | --- |
 | V1 | "150 SAR" | price, S, "150 SAR" | | passes |
-| V2 | "١٥٠ ريال" | price, S, "١٥٠ ريال" | | passes |
-| V3 | "SAR 150.00" | price, S, "150" (no marker: the claim's value holds no detected value) | | **fails**: no claim of the value |
-| V4 | "150 SAR" | none | | fails |
-| V5 | "200 SAR" | price, S, "200 SAR" | | fails |
-| V6 | "$150" | price, S, "$150" | | fails: `$` cannot mean SAR |
+| V2 | the same in Arabic-Indic digits with the Arabic word for riyal | price, S, the same | | passes |
+| V3 | "SAR 150.00" | price, S, "150" | | passes: a price claim's value needs no marker |
+| V4 | "150 SAR" | none | | fails, `amount-unclaimed` |
+| V5 | "200 SAR" | price, S, "200 SAR" | | fails, `claim-failed` |
+| V6 | "$150" | price, S, "150" | | fails: `$` cannot mean SAR |
 | V7 | "150 SAR" and "300 SAR" (a total) | price, S, "150 SAR" | | fails on 300 (O4) |
-| V8 | "150 SAR" | price, S, "150 SAR" | "is it 100 SAR?" and reply also holds "100 SAR" | fails on 100: an amount never passes by the exception (#207; section 8) |
+| V8 | "not 100 SAR, it is 150 SAR" | price, S, "150 SAR" | "is it 100 SAR?" | fails on 100 (#207; section 8) |
 | V9 | "50 SAR" | policy, P, "50 SAR" | | passes |
-| V10 | "50 SAR" | price, S, "50 SAR" | | fails |
+| V10 | "50 SAR" | price, S, "50 SAR" | | fails, `claim-failed` |
 | V11 | "10%" | service-detail, S, "10%" | | passes |
 | V12 | "100% sure" | none | | fails (#207; section 8) |
 | V13 | "opens at 9:00" | opening-hours, 1, "9:00" | | passes |
-| V14 | "closes at 9 pm" | opening-hours, 1, "9 pm" | | passes (21:00) |
-| V15 | "opens at 16:00" | opening-hours, 2, "16:00" where Tuesday has no such period | | fails |
+| V14 | "9 am to 1 pm and 4 pm to 9 pm" | opening-hours, 1, "9 am to 1 pm, 4 pm to 9 pm" | | passes: one claim holds four times and each is stored |
+| V15 | "opens at 16:00" | opening-hours, 2, "16:00" | | fails, `claim-failed` |
 | V16 | "at 5 pm" | none | "can I come at 5pm?" | passes by the exception |
-| V17 | "at 5 pm" | none | "can I come at 6?" | fails |
+| V17 | "at 5 pm" | none | "can I come at 5?" | fails: the customer's "5" is not a detected time |
 | V18 | "17:00" | policy, P, "17:00" | | passes |
 | V19 | "on 12/3" | none | "12 March?" | passes by the exception (both are 2027-03-12) |
-| V20 | "on 12/3" | none | | fails |
-| V21 | "open 24/7" | none | | passes: not a date |
-| V22 | "45 minutes" | none | | passes: a duration is not detected |
-| V23 | "150" | none | | passes: a bare number is not detected (a gap, section 9) |
+| V20 | "on March 12th" | none | | fails, `date-unclaimed` |
+| V21 | "open 24/7" | none | | passes |
+| V22 | "45 minutes" | none | | passes: 45 is a number in S's description |
+| V23 | "150" | none | | passes: 150 is a stored price. "140" fails, `number-unknown` |
 | V24 | "1.500 SAR" | price, S, "1.500 SAR" | | fails: three digits after the separator is grouping, so 1,500.00 |
 | V25 | "150.5 SAR" | price, S, "150.5 SAR" | | fails: 150.50 is not 150.00 |
-| V26 | "150.005 SAR" | any | | fails: cannot be read |
-| V27 | "150 SAR" | price, "no-such-id", "150 SAR" | | fails |
-| V28 | "150 SAR" | price, S, "150 SAR"; price, S, "999 SAR" | | passes: the second claim covers nothing in the reply |
-| V29 | "1 5 0 SAR" | price, S, "150 SAR" | | passes: a space is a separator, and the amounts are equal |
-| V30 | "150 SAR" with a zero-width space inside | price, S, "150 SAR" | | passes: removed in section 3 |
+| V26 | "150.005 SAR" | price, S, "150.005 SAR" | | fails: grouping, so 150,005.00 |
+| V27 | "150 SAR" | price, "no-such-id", "150 SAR" | | fails, `claim-failed` |
+| V28 | "150 SAR" | price, S, "150 SAR"; price, S, "999 SAR" | | fails, `claim-failed` |
+| V29 | "1 5 0 SAR" | price, S, "150 SAR" | | fails: the amount is "0 SAR", and 1 and 5 are numbers left over |
+| V30 | "150 SAR" with a zero-width space inside the number | price, S, "150 SAR" | | passes: removed in section 3 |
+| V31 | "200 Saudi riyals" | price, S, "150 SAR" | | fails, `amount-unclaimed`: one word may stand before a currency's name |
+| V32 | "costs two hundred" then "200" with a marker the data does not know | price, S, "150" | | fails, `number-unknown`: 200 is nowhere in the business's data |
+| V33 | "100-150 SAR" | price, S, "150 SAR" | | fails, `number-unknown` on 100 |
+| V34 | "open 3 to 9 pm" | opening-hours, 1, "9 pm" | | fails, `number-unknown` on 3 |
+| V35 | "open 9-5" | none | | fails on 5: 17:00 is not a Monday time, and 5 is not stored. "open 9-1" passes: both are hours of the stored periods, on the twelve-hour clock |
+| V36 | "until 24:00" | opening-hours, 1, "24:00" | | fails, `claim-failed` |
+| V37 | "1. Haircut" at the start of a line | | | passes: a list |
+| V38 | "we have 3 stylists" | none | | fails, `number-unknown` |
+| V39 | "5 May 50 SAR" | policy, P, "50 SAR" | | fails, `date-unclaimed`: 50 is the amount, not the year, and the date has no claim |
 
 ## 5. Where a pack registers a claim kind
 
 A pack gives, for each kind it adds, a function: given the claim's
-item, the detected value (its kind and its comparable form) and
-whatever the pack keeps for the turn, it answers whether the claim
-passes. The core calls it only for kinds that are not its own four,
-and a kind with no function never passes. A pack cannot replace one of
-the core's four, cannot make an amount or a percentage pass by the
-exception, and is not shown the reply.
+item and one clock time or date in its comparable form, it answers
+yes or no. Registered once: a second function for a kind, or one for
+a core kind, is refused when the registry is built. The function is
+synchronous; if it throws, the claim fails. It is asked about times
+and dates only: an amount or a percentage passes only by the core's
+own four kinds. It is not shown the reply.
+
+The guardrail policy's rule that a calendar-date claim may not be used
+beside a slot claim needs all of a reply's claims at once. It is not
+built here; it belongs to the unit that builds the booking pack's
+kinds (M5), which must extend this hook to do it.
 
 ## 6. O5, O6 and O7
 
 ### O5: contact details and links
 
-Looked for in the plain text of section 3, after every stretch of text
-that O3 detected has been taken out:
+Looked for in the plain text, after every value O3 detected has been
+replaced by the unmatched character:
 
-| What | Detected when the text has |
-| --- | --- |
-| Web address | A scheme and `://`; or `www.`; or two or more labels of letters, digits and hyphens joined by dots, the last of 2 to 24 letters |
-| The same in words | A label, then "dot" (alone, or in round or square brackets), then a label of 2 to 24 letters. English only |
-| Email address | Something, `@`, and a domain as above |
-| Handle | `@` and 2 or more letters, digits, dots or underscores, not part of an email address |
-| Long number | 7 or more digits, where only spaces and `- . ( ) + /` stand between one digit and the next |
-| Bank account | Two letters, two digits, and 11 to 30 more letters and digits, spaces allowed between groups (the IBAN shape) |
+| What | Detected when the text has | Ends |
+| --- | --- | --- |
+| Web address | A scheme and `://`; or `www.`; or two or more labels of letters (of any script), digits and hyphens joined by dots, the last of 2 to 24 letters | At white space; closing punctuation at the end is not part of it |
+| The same in words | A label, "dot" (alone, or in round or square brackets), and one of a short list of endings (`com`, `net`, `org`, `io`, `co`, `me`, `info`, `app`, `shop`, `store`, `online`, `site`, `link`, `xyz`, `sa`, `ae`, `pk`, `in`, `bd`, `ph`) | |
+| Email address | A local part, `@`, and a domain as above | |
+| Handle | `@` and 2 or more letters, digits, dots or underscores, not part of an email address | |
+| Long number | 7 or more digits with no letter between the first and the last | |
+| Bank account | At the start of a word, in capitals: two letters, two digits and 11 to 30 more letters and digits, single spaces allowed, whose check digits are right (ISO 13616, mod 97) | |
 
 Each one found must equal a value the business stored: one found by
-these same rules in the support contact, or in a service's name or
-description, or in a policy's title or body. Compared as: a web
-address without its scheme, a leading `www.`, a trailing `/` or full
-stop, in lower case; an email and a handle in lower case; a number as
-its digits alone; a bank account without spaces, in capitals. Otherwise
-O5 fails.
+these same rules in the support contact, the business's name, a
+service's name or description, or a policy's title or body. Compared
+as: a web address without its scheme and a leading `www.`, its host in
+lower case and its path as written, without a final `/`; an email and
+a handle in lower case; a number as its digits alone; a bank account
+without spaces. Otherwise O5 fails.
 
 | # | Reply holds | Stored | Result |
 | --- | --- | --- | --- |
-| L1 | "https://salon.example/book" | policy text holds "salon.example/book" | passes |
-| L2 | "salon.example/pay" | the same | fails: another address |
-| L3 | "evil dot com" | | fails |
-| L4 | "pay to @salon_pay" | | fails |
+| L1 | "https://salon.example/book." | policy text holds "salon.example/book" | passes |
+| L2 | "salon.example/pay" | the same | fails, `link` |
+| L3 | "evil dot com" | | fails, `link` |
+| L4 | "pay to @salon_pay" | | fails, `handle` |
 | L5 | "call +966 55 555 0100" | support contact "+966555550100" | passes |
-| L6 | "call ٠٥٥ ٥٥٥ ٠١٠٠" | support contact "+966555550100" | fails: other digits. The national form of a stored international number does not pass (section 9) |
-| L7 | "055, then 1234, then 567" | | **passes: not detected**; words stand between the digits (#208, section 8) |
-| L8 | "order 1234567" | | fails |
-| L9 | "17:30 on 12/03/2027" | (both passed O3) | passes: taken out before O5 |
-| L10 | "see you.Then" | | fails: read as an address. A missing space after a full stop blocks the reply |
+| L6 | the national form "055 555 0100" in Arabic-Indic digits | support contact "+966555550100" | fails, `number`: other digits (section 9) |
+| L7 | "055, then 1234, then 567" | | **O5 does not detect it**: letters stand between. It fails all the same, by 4.4: 055, 1234 and 567 are numbers the business's data does not hold |
+| L8 | "order 1234567" | | fails, `number` |
+| L9 | "17:30 on 12/03/2027" (both passed O3) | | passes |
+| L10 | "see you.Then" | | fails, `link`: a missing space after a full stop |
+| L11 | "055-555-0100" written with en dashes | | fails, `number` |
+| L12 | "the red dot on the map" | | passes: "on" is no ending |
+| L13 | "is 45 minutes long" | | passes: no bank account (not capitals) |
+| L14 | "salon.example/Book" | policy text holds "salon.example/book" | fails, `link`: the path is compared as written |
 
 ### O6: the canary and the instructions
 
-- **Canary.** Fails if the canary is found in the reply, in any
+- **Canary.** Fails if the canary is found in the reply or in any
   claim's item or value, with every character that is not a letter or
-  a digit removed from both first, without regard to case. So spacing
-  the canary out or putting marks between its characters does not hide
-  it.
+  a digit removed from both first, without regard to case.
 - **Instructions.** The instruction text and the reply are each cut
   into words (runs of letters and digits, lower case). Fails if any 12
   words in a row of the reply are 12 words in a row of the
   instructions. The business's data and the session are not
   instruction text: a reply may quote a policy at length.
 
+A reworded copy of the instructions is not caught.
+
 ### O7: length
 
-Fails if the reply, after section 3, has no character other than white
+Fails if the reply, made plain, has no character other than white
 space, or if the reply as written is longer than 1,200 code points.
-The client already refuses an answer over that length as not matching
-the schema; this check is the same number, kept where the other checks
-are.
 
 ## 7. The codes
 
 `empty`, `too-long`, `canary`, `instructions`, `value-unreadable`,
-`amount-unclaimed`, `percentage-unclaimed`, `time-unclaimed`,
-`date-unclaimed`, `link`, `email`, `handle`, `number`, `bank-account`.
+`claim-failed`, `amount-unclaimed`, `percentage-unclaimed`,
+`time-unclaimed`, `date-unclaimed`, `number-unknown`, `link`, `email`,
+`handle`, `number`, `bank-account`.
 
-One code for one failed check: the first value found that fails. The
+One code for one failed check: the first thing found that fails. The
 code says which kind failed and nothing of what it was.
 
 ## 8. The review findings this answers
@@ -266,47 +327,56 @@ code says which kind failed and nothing of what it was.
 | Finding | Answer |
 | --- | --- |
 | #207: "24/7" reads as a date | Not detected (V21) |
-| #207: "100% sure", a decimal such as "2.50" read as a time, the Arabic marker that is also "metres" | **Still blocked.** Each is a reply held back that was not wrong. Chosen because the opposite lets an unchecked percentage or time through. How often it happens is for the eval dimension E12 to measure once evals run (U16) |
-| #207: the correction "not 100 SAR, it is 150 SAR" is blocked (V8) | **Still blocked.** Letting an amount pass because the customer wrote it would let "yes, 100 SAR" pass too, and code cannot tell the two apart. The eval gate E3 will fail on such a case until this is revisited; said here, so that it is not found as a surprise |
+| #207: "100% sure", a decimal such as "2.50" read as a time, the Arabic marker that is also "metres" | **Still blocked.** Each is a reply held back that was not wrong. How often is for the eval dimension E12 to measure once evals run (U16) |
+| #207: the correction "not 100 SAR, it is 150 SAR" is blocked (V8) | **Still blocked.** Letting an amount pass because the customer wrote it would let "yes, 100 SAR" pass too. The eval gate E3 will fail on such a case until this is revisited |
 | #207: stale tool results, the ten-minute rule | Not in M3: no tools |
-| #208: normalise before the digit scan | Done (section 3, L6's first half) |
-| #208: "dot" forms and handles | Detected (L3, L4), in English only for "dot" |
-| #208: look-alike letters, wallet addresses, digits split by words | **Not detected** (L7). A wallet address of letters and digits with no dots is not a shape these rules know |
+| #208: normalise before the digit scan | Done (section 3) |
+| #208: "dot" forms and handles | Detected (L3, L4); "dot" in English only |
+| #208: digits split by words | Not detected by O5, and held back by 4.4 (L7) |
+| #208: look-alike letters, wallet addresses | **Not detected.** A wallet address of letters and digits with no dots is not a shape these rules know, unless a number inside it is left over for 4.4 |
 | #213: a wrong weekday beside a right date | Not in M3: the calendar is the booking pack's |
 | #209: an owner's stolen account can store a payment link, which then passes O5 | Not answered by a check on replies: what is stored is trusted here |
 
-#207 and #208 stay open with what is left; the second part's pull
-request says so.
+#207 and #208 stay open with what is left.
 
-## 9. What is not checked, in one place
+## 9. What is not checked, and what is held back though right
 
-- A value written in words; a bare number (V23); a duration; a weekday
-  name; "tomorrow".
-- That a claimed value is said *about* the item claimed: a true price
-  of one service can be stated as another's (guardrail policy, "what a
-  passing claim does and does not show").
+Not checked:
+
+- A value written in words; a weekday name; "tomorrow".
+- That a claimed value is said *about* the item claimed.
+- A number with no marker that equals some number in the business's
+  data (V23): "150" passes whatever it is said about.
 - Opening and closing times are interchangeable, and so are the
   periods of a split day.
-- Day before month, always. A business that writes month first will
-  see right dates blocked, or `3/4` read as 3 April. No setting exists
-  to say otherwise.
-- With three-decimal currencies, `1.500` is read as one and a half,
-  never as fifteen hundred.
-- A stored international number written in its national form is
-  blocked (L6); so is a missing space after a full stop (L10).
-- Words in the marker lists were not read by a speaker (row 52).
-- Text in a language that writes numbers in a script Unicode does not
-  class as decimal digits (Chinese numerals, Roman numerals).
+- "Qatari riyal" passes as the tenant's riyal: the word before a
+  currency's name is not read.
+- With three-decimal currencies, `1.500` is one and a half, never
+  fifteen hundred.
+- Numbers in a script Unicode does not class as decimal digits.
+
+Held back though right (each sends the fallback):
+
+- A count, a year, a room or an address the business's data does not
+  hold (V38); a fraction such as "1/2 price", read as a date.
+- Day before month, always: a business that writes month first sees
+  right dates held back.
+- A stored international number written in its national form (L6); a
+  missing space after a full stop (L10).
+- "at 5 pm" when the customer wrote "at 5" (V17).
+- "100% sure" and a correction that repeats a wrong price (section 8).
+
+Words in the marker data were not read by a speaker (row 52).
 
 ## 10. Tests
 
-One test for each row of the tables in 4.4 and 6, named by its number;
-the rules of 3, 4.1 and 4.2 each alone, with the digits of four
-scripts; every month name, currency name, percent word and day-half
-marker of the six languages detected once; a pack's checker called for
-its kind and never for a core kind; the codes of section 7 carrying
-nothing of the input (a reply with a marked word, and no code holding
-it); the function answering the same for the same input.
+One test for each row of the tables in 4.5 and 6, named by its number;
+the rules of 3, 4.1, 4.2 and 4.4 each alone, with the digits of four
+scripts; every entry of the marker data detected once; a pack's checker
+asked about its kind, never about a core kind, an amount or a
+percentage, and failing the claim when it throws; the codes of section
+7 carrying nothing of the input; the Unicode facts section 3 rests on;
+the function answering the same for the same input.
 
 "A fake that returns hostile output is stopped" is the second part's
 test, through the worker.
