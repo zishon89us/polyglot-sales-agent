@@ -308,6 +308,24 @@ export function storeInbound(
         status.errorCode,
       ]);
       statusesApplied += moved.rowCount;
+      if (status.status === "failed" && moved.rowCount > 0) {
+        // A message the channel accepted and now reports failed told
+        // nobody. If it carried the disclosure, the session's mark comes
+        // off, unless another message that carried it reached the customer:
+        // the next message sent then carries it (design note M3 U8, D2a).
+        await tx.query(
+          `UPDATE sessions s SET disclosed_at = NULL
+           FROM messages failed
+           WHERE failed.channel_message_id = $1 AND failed.direction = 'outbound'
+             AND failed.status = 'failed' AND failed.disclosure IS NOT NULL
+             AND s.id = failed.session_id
+             AND NOT EXISTS (
+               SELECT 1 FROM messages other
+               WHERE other.session_id = s.id AND other.disclosure IS NOT NULL
+                 AND other.status IN ('sent', 'delivered', 'read'))`,
+          [status.channelMessageId],
+        );
+      }
     }
     return { stored, duplicates, statusesApplied };
   });

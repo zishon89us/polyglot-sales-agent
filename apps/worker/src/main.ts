@@ -8,6 +8,7 @@ import {
 } from "@polyglot-sales-agent/channel-whatsapp";
 import {
   errorCode,
+  FIXED_TEXTS_VERSION,
   logTo,
   settingsNamed,
   startFailure,
@@ -23,6 +24,7 @@ import {
 import { PACKS } from "@polyglot-sales-agent/packs-registry";
 import { readConfig } from "./config.ts";
 import { createHandlers } from "./handlers.ts";
+import { loadFixedTexts } from "./texts.ts";
 import { traceRecorder } from "./traces.ts";
 import { REPLY_PROMPT } from "./turn.ts";
 import { jobName, runWorker } from "./worker.ts";
@@ -75,8 +77,14 @@ try {
       );
     }
   }
+  // The fixed texts likewise: a worker that cannot read them does not start.
+  const texts = loadFixedTexts(
+    fileURLToPath(new URL("../../../texts/", import.meta.url)),
+    FIXED_TEXTS_VERSION,
+  );
   const handlers = createHandlers({
     app,
+    texts,
     channels: { [whatsapp.name]: whatsapp },
     accessToken: config.whatsappAccessToken,
     report,
@@ -90,6 +98,7 @@ try {
       fragments,
       canary: config.promptCanary,
       packs: PACKS,
+      texts,
     },
   });
   await runWorker({

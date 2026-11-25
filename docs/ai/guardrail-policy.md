@@ -337,8 +337,19 @@ suits the customer.
 ## 7. Fixed texts
 
 Written once per supported language, stored as data, added by code, never
-written by the model (G13). A contact whose language is unknown or
-unsupported gets the tenant's default language.
+written by the model (G13). A text is sent in the first of these that is a
+supported language and has texts: the language the message's own turn
+reported, the session's, the contact's last. Failing those, in the
+tenant's default language if it has texts, and failing that in English
+(`design/notes/m3-u8-fixed-texts.md`, section 3).
+
+**Built in M3 unit U8:** the files (`texts/fixed/1/`, rules in
+`texts/README.md`), the disclosure, and the automated-assistant answer.
+**Only English exists, and its wording is the agent's** (decisions, row
+51): until a speaker writes or checks the other five languages, every
+fixed text is sent in English. The other texts in the table are written
+and are sent by nothing yet; each is sent by the unit that builds its
+rule. The booking texts are the booking pack's and are not written.
 
 | Text | Sent when | Must say |
 | --- | --- | --- |

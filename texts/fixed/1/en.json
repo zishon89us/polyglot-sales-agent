@@ -1,0 +1,48 @@
+{
+  "language": "en",
+  "texts": {
+    "disclosure": {
+      "body": "You are chatting with an automated assistant."
+    },
+    "automated-assistant": {
+      "body": "This is an automated assistant, not a person. If you would like a person to reply, just ask."
+    },
+    "fallback": {
+      "body": "Sorry, I could not answer that. If you would like a person to reply, tap the button below or ask for a person.",
+      "buttons": ["person"]
+    },
+    "unsupported-type": {
+      "body": "Sorry, I can only read text messages. Please type your question. If you would like a person to reply, tap the button below or ask for a person.",
+      "buttons": ["person"]
+    },
+    "handover-in-hours": {
+      "body": "A person will reply to you here."
+    },
+    "handover-out-of-hours": {
+      "body": "We are closed right now. A person will reply after we open: {{opening}}. You can also reach us at {{contact}}."
+    },
+    "emergency": {
+      "body": "If this is an emergency, please contact your local emergency services now. This assistant cannot help with emergencies."
+    },
+    "opt-out-confirmation": {
+      "body": "You will get no more messages from us that you did not ask for. To get them again, tap the button below or send START.",
+      "buttons": ["start"]
+    },
+    "opt-in-confirmation": {
+      "body": "You will get our messages again. To stop them, tap the button below or send STOP.",
+      "buttons": ["stop"]
+    },
+    "rate-notice": {
+      "body": "You have sent many messages in a short time, so the assistant will pause for a while. Please try again later."
+    },
+    "opt-in-question": {
+      "body": "Would you like to get our messages again? Tap the button below or send START.",
+      "buttons": ["start"]
+    }
+  },
+  "buttons": {
+    "stop": "Stop messages",
+    "start": "Get messages",
+    "person": "Talk to a person"
+  }
+}

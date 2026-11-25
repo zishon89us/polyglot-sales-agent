@@ -11,8 +11,8 @@
 // claim and a record, so the worker can stop at any point and the send
 // policy still holds (architecture, "Sending a message once").
 
-import type { Channel } from "@polyglot-sales-agent/channel";
-import { JOB_MAX_DEFER_MS } from "@polyglot-sales-agent/core";
+import { type Channel, checkButtonMessage } from "@polyglot-sales-agent/channel";
+import { composeMessage, type FixedTextSet, JOB_MAX_DEFER_MS } from "@polyglot-sales-agent/core";
 import {
   beginTurn,
   type CallResult,
@@ -58,6 +58,11 @@ export interface HandlerOptions {
   /** The model, the prompt and the packs a turn answers with. */
   readonly model: TurnModel;
   readonly report?: SendReport;
+  /**
+   * The fixed texts. Without them no disclosure is sent: only a test that
+   * is not about them leaves them out.
+   */
+  readonly texts?: FixedTextSet;
   /** For tests: the time, in place of the database's clock. */
   readonly clock?: () => Date;
 }
@@ -72,29 +77,49 @@ function ids(job: Job): { tenantId: string; conversationId: string } {
   return { tenantId: job.tenantId, conversationId };
 }
 
-async function call(options: HandlerOptions, message: MessageToSend): Promise<CallResult> {
+/** The call's result, and whether a message stored with buttons went without them. */
+async function call(
+  options: HandlerOptions,
+  message: MessageToSend,
+): Promise<{ result: CallResult; buttonsDropped: boolean }> {
+  const refused = (code: string) =>
+    ({ result: { kind: "refused", retryable: false, code }, buttonsDropped: false }) as const;
   // Not `channels[name]`: that would find what the object inherits.
   const channel = Object.hasOwn(options.channels, message.channel)
     ? options.channels[message.channel]
     : undefined;
   if (channel === undefined) {
-    return { kind: "refused", retryable: false, code: "no-channel" };
+    return refused("no-channel");
   }
+  // What the customer reads: the disclosure, a fixed text put before the
+  // reply, and the reply, each that is present, a blank line between.
+  const text = composeMessage([message.disclosure, message.lead, message.body]);
   // Only a free-form text can be sent so far; a template is a later unit's.
-  if (message.kind !== "text" || message.body === null) {
-    return { kind: "refused", retryable: false, code: "unsupported-kind" };
+  if (message.kind !== "text" || text === "") {
+    return refused("unsupported-kind");
   }
-  const result = await channel.sendText(
-    { receivingNumberId: message.receivingNumberId, accessToken: options.accessToken },
-    message.to,
-    message.body,
-  );
+  const from = { receivingNumberId: message.receivingNumberId, accessToken: options.accessToken };
+  const buttons = message.buttons ?? [];
+  // Buttons the channel would refuse are left off, and the record then
+  // says so: every text that has a button also says in words what to do.
+  const withButtons =
+    buttons.length > 0 && checkButtonMessage(channel.limits, text, buttons) === undefined;
+  const result = withButtons
+    ? await channel.sendButtons(from, message.to, text, buttons)
+    : await channel.sendText(from, message.to, text);
+  const buttonsDropped = buttons.length > 0 && !withButtons;
   if (result.accepted) {
-    return { kind: "accepted", channelMessageId: result.channelMessageId };
+    return {
+      result: { kind: "accepted", channelMessageId: result.channelMessageId },
+      buttonsDropped,
+    };
   }
-  return result.mayHaveArrived
-    ? { kind: "unknown" }
-    : { kind: "refused", retryable: result.retryable, code: result.code };
+  return {
+    result: result.mayHaveArrived
+      ? { kind: "unknown" }
+      : { kind: "refused", retryable: result.retryable, code: result.code },
+    buttonsDropped,
+  };
 }
 
 export function createHandlers(options: HandlerOptions): Record<string, JobHandler> {
@@ -143,7 +168,16 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
     async [SEND_MESSAGES_JOB](job) {
       const { tenantId, conversationId } = ids(job);
       for (let sent = 0; sent < SENDS_PER_RUN; sent += 1) {
-        const next = await claimNextSend(options.app, tenantId, conversationId, options.clock?.());
+        const texts = options.texts;
+        const next = await claimNextSend(
+          options.app,
+          tenantId,
+          conversationId,
+          options.clock?.(),
+          texts === undefined
+            ? undefined
+            : (given) => texts.pick(given.preferred, given.tenantDefault).texts.disclosure,
+        );
         for (const code of next.ended ?? []) {
           options.report?.("send-failed", code);
         }
@@ -153,13 +187,14 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
         if (next.kind === "wait") {
           return { deferMs: Math.min(next.ms, JOB_MAX_DEFER_MS) };
         }
-        const result = await call(options, next.message);
+        const { result, buttonsDropped } = await call(options, next.message);
         const decision = await recordSend(
           options.app,
           tenantId,
           next.message,
           result,
           options.clock?.(),
+          buttonsDropped,
         );
         if (decision !== "superseded" && decision.next === "failed") {
           options.report?.("send-failed", decision.code);

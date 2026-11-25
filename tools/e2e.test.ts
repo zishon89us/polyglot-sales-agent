@@ -140,7 +140,10 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
       from: CUSTOMER,
       timeoutMs: 30_000,
     });
-    expect(first.received).toBe(`Echo: ${first.sent}`);
+    // The first reply of the session tells the customer what is replying (US-C5, 1).
+    expect(first.received).toBe(
+      `You are chatting with an automated assistant.\n\nEcho: ${first.sent}`,
+    );
     // And again, now that everything is up: a second message, a second echo, no more.
     const second = await echoRoundTrip({
       mockUrl,
@@ -148,6 +151,7 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
       from: CUSTOMER,
       timeoutMs: 30_000,
     });
+    // Told once: the second reply is the echo alone.
     expect(second.received).toBe(`Echo: ${second.sent}`);
     const sent = (await (await fetch(`${mockUrl}/mock/sent`)).json()) as { sent: unknown[] };
     expect(sent.sent).toHaveLength(2);
