@@ -109,7 +109,9 @@ describe("a provider's library is imported only by its adapter", () => {
       expect(read).toContain(expected);
     }
     expect(read.some((path) => path.includes("node_modules"))).toBe(false);
-  });
+    // It reads every source file of the repository. Beside forty other test files that took
+    // just over the usual five seconds twice (2026-11-25), so it is given longer.
+  }, 30_000);
 
   test("no package but packages/ai depends on one, the root included", () => {
     const manifests = everyFile().filter((path) => /(^|\/)package\.json$/.test(path));
