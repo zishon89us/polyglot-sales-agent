@@ -2,7 +2,9 @@
 // loads, every text would be sent by every channel there is, and the list
 // of languages that have no texts is true.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import { loadFixedTexts } from "../apps/worker/src/texts.ts";
@@ -103,6 +105,42 @@ describe("the fixed texts in the repository", () => {
     expect(english["opt-out-confirmation"]).toMatch(/send START/);
     expect(english["opt-in-question"]).toMatch(/send START/);
     expect(english["opt-in-confirmation"]).toMatch(/send STOP/);
+  });
+
+  test("the loader refuses a directory with a file not named for a language, a file that breaks a rule, a title no channel would show, and one without English; its message repeats nothing of the file", () => {
+    const english = readFileSync(`${TEXTS}fixed/${FIXED_TEXTS_VERSION}/en.json`, "utf8");
+    const directory = (files: Record<string, string>): string => {
+      const root = mkdtempSync(join(tmpdir(), "fixed-texts-"));
+      mkdirSync(join(root, "fixed", "1"), { recursive: true });
+      for (const [name, content] of Object.entries(files)) {
+        writeFileSync(join(root, "fixed", "1", name), content);
+      }
+      return root;
+    };
+    const failure = (files: Record<string, string>): string => {
+      const root = directory(files);
+      try {
+        loadFixedTexts(root, 1);
+        return "loaded";
+      } catch (error) {
+        return (error as Error).message;
+      } finally {
+        rmSync(root, { recursive: true });
+      }
+    };
+    expect(failure({ "en.json": english })).toBe("loaded");
+    expect(failure({ "en.json": english, "notes.txt": "x" })).toMatch(/notes\.txt is not named/);
+    expect(failure({ "en.json": english, "english.json": english })).toMatch(/not named/);
+    expect(failure({ "ar.json": english.replace('"language": "en"', '"language": "ar"') })).toMatch(
+      /last resort/,
+    );
+    expect(failure({})).toMatch(/last resort/);
+    const secret = "A sentence nobody should find in a log";
+    const broken = failure({
+      "en.json": english.replace("You are chatting with an automated assistant.", ` ${secret}`),
+    });
+    expect(broken).toMatch(/en\.json disclosure has a blank end/);
+    expect(broken).not.toContain("sentence");
   });
 
   test("the README's table of languages is true: a file for each it says has one, none for each it says has none", () => {

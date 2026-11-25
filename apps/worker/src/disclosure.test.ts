@@ -15,6 +15,8 @@ import {
 import {
   BATCH_MAX_MS,
   FIXED_TEXTS_VERSION,
+  type FixedTextSet,
+  fixedTextSet,
   PART_SEPARATOR,
   REPLY_MAX,
   readProfileFile,
@@ -100,7 +102,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await administrator.query("TRUNCATE messages, conversations, contacts, jobs CASCADE");
+  await administrator.query(
+    "TRUNCATE early_receipts, messages, conversations, contacts, jobs CASCADE",
+  );
   mock = createMockChannel();
   reported.length = 0;
 });
@@ -134,20 +138,25 @@ const answer = (reply: string, flags: string[] = [], language = "en"): FakeStep 
 });
 
 /** Runs every job that is due. `ahead` moves the queue's clock, to outlast a wait. */
-async function work(script: FakeStep[], channel: Channel = mock, ahead = 0): Promise<void> {
+async function work(
+  script: FakeStep[],
+  channel: Channel = mock,
+  ahead = 0,
+  texts: FixedTextSet = TEXTS,
+): Promise<void> {
   const handlers = createHandlers({
     app,
     channels: { mock: channel },
     accessToken: MOCK_ACCESS_TOKEN,
     report: (event, code) => reported.push(`${event} ${code}`),
-    texts: TEXTS,
+    texts,
     model: {
       client: bounded(new FakeLlmAdapter(script), { record: traceRecorder(app) }),
       prompt: PROMPT,
       fragments: {},
       canary: "testcanary0000000000",
       packs: { "faq-only": { name: "faq-only" } },
-      texts: TEXTS,
+      texts,
     },
   });
   for (let runs = 0; runs < 50; runs += 1) {
@@ -319,7 +328,138 @@ describe("the disclosure (US-C5, 1)", () => {
     expect(await sessions()).toEqual([{ told: true }]);
   });
 
-  test("D2a: a delivery or a read receipt changes nothing, and a failure of another tenant's message with the same id is not this session's", async () => {
+  test("D2a: a message without the disclosure reached the customer and the one with it failed: the mark comes off, and the next message carries it", async () => {
+    await exchange("first");
+    await exchange("second");
+    const [first] = await outbound();
+    await fails(first?.channel_message_id as string);
+    // "second" was read undisclosed; it does not count as telling.
+    expect(await sessions()).toEqual([{ told: false }]);
+    await exchange("third");
+    expect(bodies()[2]).toBe(`${TOLD}\n\nthird`);
+  });
+
+  test("a session is marked only by a message that carried the disclosure", async () => {
+    // A worker given no texts sends no disclosure: what it sends marks nothing.
+    await arrives("question");
+    const handlers = createHandlers({
+      app,
+      channels: { mock },
+      accessToken: MOCK_ACCESS_TOKEN,
+      model: {
+        client: bounded(new FakeLlmAdapter([answer("no texts")]), { record: traceRecorder(app) }),
+        prompt: PROMPT,
+        fragments: {},
+        canary: "testcanary0000000000",
+        packs: { "faq-only": { name: "faq-only" } },
+      },
+    });
+    while ((await workOnce(cross, handlers, { clock: () => new Date(Date.now() + 50) })).ran) {
+      // Until the queue is empty.
+    }
+    expect(bodies()).toEqual(["no texts"]);
+    expect(await sessions()).toEqual([{ told: false }]);
+  });
+
+  test("R1: a failure the channel reports before the send is recorded is kept and applied: the message is failed, the session unmarked, the next message carries the disclosure", async () => {
+    const early: Channel = {
+      ...mock,
+      async sendText(from, to, body) {
+        const result = await mock.sendText(from, to, body);
+        if (result.accepted) {
+          // The receipt arrives while the worker has not yet stored the acceptance.
+          const stored = await fails(result.channelMessageId);
+          expect(stored.statusesApplied).toBe(0);
+        }
+        return result;
+      },
+    };
+    await exchange("first", [], early);
+    expect((await outbound()).map((row) => row.status)).toEqual(["failed"]);
+    expect(await sessions()).toEqual([{ told: false }]);
+    expect((await administrator.query("SELECT 1 FROM early_receipts")).rowCount).toBe(0);
+    await exchange("second");
+    expect(bodies()[1]).toBe(`${TOLD}\n\nsecond`);
+    expect(await sessions()).toEqual([{ told: true }]);
+  });
+
+  test("R1: a delivery reported before the send is recorded is applied too, and the session is marked", async () => {
+    const early: Channel = {
+      ...mock,
+      async sendText(from, to, body) {
+        const result = await mock.sendText(from, to, body);
+        if (result.accepted) {
+          await storeInbound(
+            app,
+            tenant,
+            NUMBER,
+            [],
+            [{ channelMessageId: result.channelMessageId, status: "delivered", errorCode: null }],
+          );
+        }
+        return result;
+      },
+    };
+    await exchange("first", [], early);
+    expect((await outbound()).map((row) => row.status)).toEqual(["delivered"]);
+    expect(await sessions()).toEqual([{ told: true }]);
+  });
+
+  test("a receipt for a message that is not ours is kept for a day at most, once, and one for a message already recorded is not kept", async () => {
+    const stray = { channelMessageId: "wamid.NOTOURS", status: "read", errorCode: null } as const;
+    await storeInbound(app, tenant, NUMBER, [], [stray]);
+    await storeInbound(app, tenant, NUMBER, [], [stray]);
+    const kept = () =>
+      administrator.query<{ id: string }>("SELECT channel_message_id AS id FROM early_receipts");
+    expect((await kept()).rows).toEqual([{ id: "wamid.NOTOURS" }]);
+    await administrator.query("UPDATE early_receipts SET created_at = now() - interval '25 hours'");
+    await storeInbound(app, tenant, NUMBER, [], [{ ...stray, channelMessageId: "wamid.OTHER" }]);
+    expect((await kept()).rows).toEqual([{ id: "wamid.OTHER" }]);
+    // A receipt that moves nothing for a message we do have (a repeat) is not kept.
+    await exchange("first");
+    const id = (await outbound())[0]?.channel_message_id as string;
+    await storeInbound(
+      app,
+      tenant,
+      NUMBER,
+      [],
+      [{ channelMessageId: id, status: "sent", errorCode: null }],
+    );
+    expect((await kept()).rows).toEqual([{ id: "wamid.OTHER" }]);
+  });
+
+  test("D2a: another tenant's receipt with the same identifier is not this session's", async () => {
+    await exchange("first");
+    const id = (await outbound())[0]?.channel_message_id as string;
+    const other = await administrator.query<{ id: string }>(
+      `INSERT INTO tenants (name, pack, time_zone, default_language)
+       VALUES ('Other', 'faq-only', 'Asia/Riyadh', 'en') RETURNING id`,
+    );
+    const otherNumber = "100000000000042";
+    await administrator.query(
+      "INSERT INTO channel_accounts (tenant_id, channel, receiving_number_id) VALUES ($1, 'mock', $2)",
+      [other.rows[0]?.id, otherNumber],
+    );
+    const stored = await storeInbound(
+      app,
+      other.rows[0]?.id as string,
+      otherNumber,
+      [],
+      [{ channelMessageId: id, status: "failed", errorCode: "131026" }],
+    );
+    expect(stored.statusesApplied).toBe(0);
+    expect((await outbound())[0]?.status).toBe("sent");
+    expect(await sessions()).toEqual([{ told: true }]);
+    await administrator.query("DELETE FROM early_receipts WHERE tenant_id = $1", [
+      other.rows[0]?.id,
+    ]);
+    await administrator.query("DELETE FROM channel_accounts WHERE tenant_id = $1", [
+      other.rows[0]?.id,
+    ]);
+    await administrator.query("DELETE FROM tenants WHERE id = $1", [other.rows[0]?.id]);
+  });
+
+  test("D2a: a delivery or a read receipt changes nothing, and after one a failure moves neither the message nor the mark", async () => {
     await exchange("first");
     const id = (await outbound())[0]?.channel_message_id as string;
     await storeInbound(
@@ -350,6 +490,53 @@ describe("the disclosure (US-C5, 1)", () => {
   test("the language: the tenant's default has no texts and no translation exists, so the disclosure is in English whatever the reply's language", async () => {
     await exchange("مرحبا", [], mock, "ar");
     expect(bodies()).toEqual([`${TOLD}\n\nمرحبا`]);
+  });
+
+  test("G1 to G4 through the database: the turn's language, then the session's, then the contact's last, then the tenant's default; an unsupported turn does not replace the contact's last", async () => {
+    const synthetic = (language: string) => ({
+      language,
+      buttons: TEXTS.pick(["en"], "en").buttons,
+      texts: {
+        ...ENGLISH,
+        disclosure: `[${language}] told`,
+        "automated-assistant": `[${language}] not a person`,
+      },
+    });
+    const many = fixedTextSet([synthetic("en"), synthetic("ar"), synthetic("ur"), synthetic("hi")]);
+    if (many === undefined) {
+      throw new Error("no set");
+    }
+    const next = async (language: string, flags: string[] = []) => {
+      await arrives("question");
+      await work([answer("reply", flags, language)], mock, 0, many);
+      return bodies().at(-1);
+    };
+    const untell = () => administrator.query("UPDATE sessions SET disclosed_at = NULL");
+    // The turn's own language first: Urdu, though the tenant's default is Arabic.
+    expect(await next("ur", ["asks-if-person"])).toBe("[ur] told\n\n[ur] not a person\n\nreply");
+    // Bengali is supported and has no texts, and is now the session's and the contact's
+    // last too: none of the three has texts, so the tenant's default, Arabic.
+    await untell();
+    expect(await next("bn")).toBe("[ar] told\n\nreply");
+    // An unsupported language replaces neither: the contact's last stays Bengali.
+    await untell();
+    expect(await next("fr", ["asks-if-person"])).toBe("[ar] told\n\n[ar] not a person\n\nreply");
+    expect((await administrator.query("SELECT last_language FROM contacts")).rows).toEqual([
+      { last_language: "bn" },
+    ]);
+    // The model could not tell: the session's language stays, here French, unsupported;
+    // the contact's last has no texts; the tenant's default has.
+    await untell();
+    expect(await next("und")).toBe("[ar] told\n\nreply");
+    // The session's language is used when the turn's is unknown.
+    await administrator.query("UPDATE sessions SET language = 'hi'");
+    await untell();
+    expect(await next("und", ["asks-if-person"])).toBe("[hi] told\n\n[hi] not a person\n\nreply");
+    // And the contact's last when neither is known.
+    await administrator.query("UPDATE sessions SET language = NULL");
+    await administrator.query("UPDATE contacts SET last_language = 'ur'");
+    await untell();
+    expect(await next("und")).toBe("[ur] told\n\nreply");
   });
 
   test("the model is never shown the disclosure or a fixed text: the next turn's request holds the reply's body alone", async () => {
@@ -480,6 +667,35 @@ describe("buttons on a sent message (section 6, D9)", () => {
     expect((await outbound()).at(-1)?.buttons).toBeNull();
   });
 
+  test("D9: the disclosure counts toward the limit: a text that fits with buttons alone goes without them as the first of a session", async () => {
+    await waiting(BUTTONS, "s".repeat(480));
+    await administrator.query("UPDATE sessions SET disclosed_at = NULL");
+    await work([]);
+    expect(mock.sent.at(-1)?.body).toBe(`${TOLD}\n\n${"s".repeat(480)}`);
+    expect(mock.sent.at(-1)?.buttons).toEqual([]);
+    expect((await outbound()).at(-1)?.buttons).toBeNull();
+  });
+
+  test("the disclosure alone is no message: a row with no body and no lead is not sent, and marks nothing", async () => {
+    await exchange("first");
+    await administrator.query("UPDATE sessions SET disclosed_at = NULL");
+    await administrator.query(
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, status)
+       SELECT tenant_id, conversation_id, session_id, 'outbound', 'system-reply', 'text', 'pending'
+       FROM messages WHERE direction = 'outbound' LIMIT 1`,
+    );
+    await administrator.query(
+      `INSERT INTO jobs (tenant_id, type, payload, run_at)
+       SELECT tenant_id, 'send-messages', jsonb_build_object('conversationId', conversation_id),
+              now()
+       FROM messages WHERE direction = 'outbound' LIMIT 1`,
+    );
+    await work([]);
+    expect(mock.sent).toHaveLength(1);
+    expect(await sessions()).toEqual([{ told: false }]);
+    expect(reported).toContain("send-failed unsupported-kind");
+  });
+
   test("D9: when the send without them fails, the record still says which buttons the message has: nothing was shown", async () => {
     await waiting(BUTTONS);
     const plain: Channel = { ...mock, limits: { ...mock.limits, buttons: null } };
@@ -503,6 +719,20 @@ describe("buttons on a sent message (section 6, D9)", () => {
     await expect(insert("buttons", "'[]'::jsonb")).rejects.toThrow(/check/);
     await expect(insert("buttons", "'{}'::jsonb")).rejects.toThrow(/check/);
     await expect(insert("buttons", "'[1,2,3]'::jsonb")).rejects.toThrow(/check/);
+    for (const bad of [
+      "[1]",
+      "[{}]",
+      '[{"payload":"core.stop"}]',
+      '[{"payload":"core.stop","title":5}]',
+      '[{"payload":null,"title":"Stop"}]',
+      '["core.stop"]',
+    ]) {
+      await expect(insert("buttons", `'${bad}'::jsonb`)).rejects.toThrow(
+        /messages_buttons_are_buttons/,
+      );
+    }
+    await expect(insert("lead", "E' \\n '")).rejects.toThrow(/not_blank/);
+    await expect(insert("disclosure", "'   '")).rejects.toThrow(/not_blank/);
     await expect(insert("lead", "''")).rejects.toThrow(/check/);
     await expect(insert("disclosure", `'${"d".repeat(151)}'`)).rejects.toThrow(/check/);
     await expect(

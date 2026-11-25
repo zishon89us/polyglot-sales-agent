@@ -245,7 +245,7 @@ null when no worker holds it).
 | --- | --- |
 | `conversation_id`, `started_at`, `last_message_at`, `ended_at` | A partial unique index allows one session with `ended_at` null per conversation. `last_message_at` is the stored time of the newest customer message, or the time the worker recorded that the channel accepted the newest message of ours; a delivery or read receipt does not move it. `ended_at` is written when the conversation is next touched after the 24 hours, so a row without it may already be over; one function decides (`packages/db/src/sessions.ts`). **Built in M3 unit U2, with `reply_discards` and `pack_outcome`; the columns below arrive with the units that use them** |
 | `reply_discards` | How many replies in a row were dropped because the customer wrote again; at 2 the next is sent (decisions row 38) |
-| `disclosed_at` | When the session's customer was told that an automated assistant is replying: when the channel accepted a message that carried the disclosure (M3 unit U8, migration 0011; `notes/m3-u8-fixed-texts.md`, section 4). Null until then. Set back to null when that message is reported failed later and no other message of the session that carried the disclosure is sent, delivered or read; the next message sent then carries it. A customer can so be told twice in a session, never not at all |
+| `disclosed_at` | When the session's customer was told that an automated assistant is replying: when the channel accepted a message that carried the disclosure (M3 unit U8, migration 0011; `notes/m3-u8-fixed-texts.md`, section 4). Null until then. Set back to null when that message is reported failed later and no other message of the session that carried the disclosure is sent, delivered or read; the next message sent then carries it. A customer can so be told twice in a session. They can also have read a message without it, when the message that carried it fails after a later one was sent (`notes/m3-u8-fixed-texts.md`, D2c) |
 | `guardrail_fallbacks`, `unreadable_batches`, `assistant_replies` | The counters of state machines, section 3 |
 | `awaiting_retry_since`, `provider_fallback_sent_at` | State machines, section 8 |
 | `language`, `unsupported_language` | For US-C3 and metrics. Built in M3 unit U7 (migration 0010; design note `notes/m3-u7-turn.md`, section 7). `language` is two small letters: what the model said the customer wrote in, at the session's latest reply; a reply whose language the model could not tell leaves it as it was. `unsupported_language` becomes true when a reply's language is not one of the supported ones, and is never set back. Both are the model's word, not a fact |
@@ -366,6 +366,19 @@ in `scheduled` per booking.
 tenant, key and language.
 
 ## AI and audit
+
+### `early_receipts` — tenant-owned
+
+`id`, `tenant_id`, `created_at`, `channel_message_id`, `status` (`sent`,
+`delivered`, `read`, `failed`), `error_code`. A receipt that arrived for
+a message no row has the channel's identifier of yet: the channel can
+report on a message between accepting it and the worker storing that it
+did. Kept, and applied by the step that records the send (M3 unit U8,
+migration 0011; `notes/m3-u8-fixed-texts.md`, D2b). One row for a tenant,
+an identifier and a status. Removed when applied, and after a day when
+a new one is kept: a receipt for a message this system never sent stays
+that long. Holds nothing of a customer: an identifier the channel made,
+and a code.
 
 ### `tool_calls` — tenant-owned
 

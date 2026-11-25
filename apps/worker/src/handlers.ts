@@ -95,7 +95,8 @@ async function call(
   // reply, and the reply, each that is present, a blank line between.
   const text = composeMessage([message.disclosure, message.lead, message.body]);
   // Only a free-form text can be sent so far; a template is a later unit's.
-  if (message.kind !== "text" || text === "") {
+  // The disclosure alone is no message: there must be a lead or a body to carry it.
+  if (message.kind !== "text" || composeMessage([message.lead, message.body]) === "") {
     return refused("unsupported-kind");
   }
   const from = { receivingNumberId: message.receivingNumberId, accessToken: options.accessToken };

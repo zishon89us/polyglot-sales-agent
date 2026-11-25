@@ -217,6 +217,11 @@ export async function seedTenant(
       [tenantId, sessionId],
     );
     await tx.query(
+      `INSERT INTO early_receipts (tenant_id, channel_message_id, status)
+       VALUES ($1, 'wamid.EARLY', 'delivered')`,
+      [tenantId],
+    );
+    await tx.query(
       `INSERT INTO ai_traces (tenant_id, session_id, turn_id, turn_started_at, started_at,
                               latency_ms, prompt_names, prompt_versions, outcome)
        VALUES ($1, $2, gen_random_uuid(), now(), now(), 0, '{reply}', '{1}', 'timeout')`,

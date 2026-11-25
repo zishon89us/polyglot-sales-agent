@@ -118,6 +118,20 @@ describe("reading a file (rules F1 to F8)", () => {
     expect(problem(change("fallback", "Sorry.\n\nReally."))).toBe("accepted");
   });
 
+  test("a body holds nothing unseen that changes how it reads, and no half of a pair; the joiners a script needs are allowed", () => {
+    for (const unseen of ["\u2028", "\u2029", "\u200b", "\u2060", "\ufeff", "\u202e", "\u2066"]) {
+      expect(problem(change("fallback", `Sorry.${unseen}Really.`)), unseen).toMatch(
+        /control character/,
+      );
+    }
+    expect(problem(change("fallback", "Sorry\ud800."))).toMatch(/control character/);
+    expect(problem(change("fallback", "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645"))).toBe(
+      "accepted",
+    );
+    expect(problem(change("fallback", "\u0915\u094d\u200d\u0937"))).toBe("accepted");
+    expect(problem(change("fallback", "Sorry \u{1F600}."))).toBe("accepted");
+  });
+
   test("F3: lengths are UTF-16 units, as the channels count", () => {
     // 150 emoji are 300 units.
     expect(problem(change("fallback", "\u{1F600}".repeat(150)))).toBe("accepted");
@@ -134,6 +148,12 @@ describe("reading a file (rules F1 to F8)", () => {
     expect(problem(change("fallback", "Sorry, {{Contact}}."))).toMatch(/places/);
     expect(problem(change("fallback", "Sorry, {{ contact }}."))).toMatch(/places/);
     expect(problem(change("fallback", "Sorry, {{."))).toMatch(/places/);
+    // A brace beside a place could make a place of whatever is filled in.
+    expect(problem(change("handover-out-of-hours", "{{opening}}{x}} {{contact}}"))).toMatch(
+      /places/,
+    );
+    expect(problem(change("handover-out-of-hours", "{{{opening}}} {{contact}}"))).toMatch(/places/);
+    expect(problem(change("fallback", "Sorry {really}."))).toMatch(/places/);
     expect(problem(change("handover-out-of-hours", "{{contact}}, then {{opening}}."))).toBe(
       "accepted",
     );
@@ -187,6 +207,15 @@ describe("reading a file (rules F1 to F8)", () => {
       /title of stop/,
     );
     expect(problem(titled({ stop: 4, start: "Start", person: "P" }))).toMatch(/title of stop/);
+    expect(problem(titled({ stop: "\u200b", start: "Start", person: "P" }))).toMatch(
+      /title of stop/,
+    );
+    expect(problem(titled({ stop: "Stop\u202e", start: "Start", person: "P" }))).toMatch(
+      /title of stop/,
+    );
+    expect(problem(titled({ stop: "Stop\ud800", start: "Start", person: "P" }))).toMatch(
+      /title of stop/,
+    );
     expect(problem(titled({ stop: "Start", start: "start", person: "P" }))).toMatch(/same title/);
     // Full-width letters read the same.
     expect(problem(titled({ stop: "Ｓtop", start: "Stop", person: "P" }))).toMatch(/same title/);
@@ -303,6 +332,16 @@ describe("filling a text's places", () => {
     expect(fill("bell\u0007")).toBeUndefined();
     expect(fill("{{opening}}")).toBeUndefined();
     expect(fill(" padded")).toBeUndefined();
+    expect(fill("a{b")).toBeUndefined();
+    expect(fill("a}b")).toBeUndefined();
+    expect(fill("a\u202eb")).toBeUndefined();
+    expect(fill("a\ud800b")).toBeUndefined();
+  });
+
+  test("no value and no body can make a place that is sent open", () => {
+    expect(fillFixedText("{{a}}{b}}", { a: "{" })).toBeUndefined();
+    expect(fillFixedText("{{{a}}", { a: "{b}}" })).toBeUndefined();
+    expect(fillFixedText("{{{a}}", { a: "b" })).toBeUndefined();
   });
 
   test("a value is put in as it is: what looks like a pattern of the replacement is plain text", () => {

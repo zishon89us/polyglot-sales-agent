@@ -682,6 +682,17 @@ M0 Inception met its exit criteria on 2026-11-16; see
   assistant twice; the other flags are still dropped and a reply is
   still unchecked. Rows 50 and 51 ask about the buttons and the
   languages.
+  A third agent reviewed the code
+  (`reviews/2026-11-25-gate4-u8-fixed-texts.md`): 12 findings, one
+  High, two Medium, and 16 of 51 mutants alive. The High one: a failure
+  the channel reports before the worker has stored that the message was
+  accepted matched no message and was lost, so the session stayed
+  marked as told. Fixed: such a receipt is now kept (`early_receipts`)
+  and applied when the send is recorded, which also mends a loss of
+  early statuses that M2 had left. The Medium ones: the note's claim
+  that a customer is "never not at all" told was not true, and is taken
+  out, with the case where they are not said plainly (D2c); and three
+  tests that could not tell a right rule from a wrong one, now added.
 
 ## Next
 

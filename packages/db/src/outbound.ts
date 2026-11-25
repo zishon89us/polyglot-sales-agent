@@ -28,6 +28,7 @@ import {
   UNCONFIRMED,
 } from "@polyglot-sales-agent/core";
 import { type Database, poolOf } from "./connect.ts";
+import { FORWARD, RECEIPT_LOCK } from "./inbound.ts";
 import { enqueueJob } from "./jobs.ts";
 import { holdsLease, releaseLease, renewLease, takeLease } from "./lease.ts";
 import { lockConversation, noteAccepted, openSession, stamp } from "./sessions.ts";
@@ -271,6 +272,12 @@ export function finishTurn(
     }
     let replyId: string | null = null;
     let lead: string | null = null;
+    if (reply === "" && made?.lead === undefined) {
+      // An empty reply is stored only beside a fixed text: alone it is nothing to send.
+      throw Object.assign(new Error("an empty reply with nothing before it"), {
+        code: "empty-reply",
+      });
+    }
     if (reply !== undefined && made?.lead !== undefined) {
       const known = await tx.query<{
         session: string | null;
@@ -878,6 +885,9 @@ export function recordSend(
       { attempts: message.attempt, unknownBefore: row.unknown_outcomes },
       outcome,
     );
+    if (result.kind === "accepted") {
+      await tx.query(RECEIPT_LOCK, [result.channelMessageId]);
+    }
     await apply(tx, { id: message.id, attempts: message.attempt }, decision, {
       unknown: result.kind === "unknown",
       now,
@@ -885,16 +895,30 @@ export function recordSend(
     });
     if (decision.next === "sent") {
       await noteAccepted(tx, message.id, await stamp(tx, now));
+      if (result.kind === "accepted") {
+        // Receipts that arrived before this record: applied now, a failure last.
+        const early = await tx.query<{ status: string; error_code: string | null }>(
+          `DELETE FROM early_receipts WHERE channel_message_id = $1
+           RETURNING status, error_code`,
+          [result.channelMessageId],
+        );
+        for (const status of ["sent", "delivered", "read", "failed"]) {
+          for (const receipt of early.rows.filter((row) => row.status === status)) {
+            await tx.query(FORWARD, [result.channelMessageId, status, receipt.error_code]);
+          }
+        }
+      }
       // The session's customer has been told once the channel has accepted
       // a message that carried the disclosure. A send that failed, or whose
       // outcome is not known, tells nobody: the next message carries it.
       await tx.query(
         `UPDATE sessions s SET disclosed_at = ${NOW(2)}
          FROM messages m
-         WHERE m.id = $1 AND m.disclosure IS NOT NULL AND s.id = m.session_id
-           AND s.disclosed_at IS NULL`,
+         WHERE m.id = $1 AND m.disclosure IS NOT NULL AND m.status <> 'failed'
+           AND s.id = m.session_id AND s.disclosed_at IS NULL`,
         [message.id, now ?? null],
       );
+      // The text went without its buttons: the record says what was shown.
       if (buttonsDropped === true) {
         await tx.query("UPDATE messages SET buttons = NULL WHERE id = $1", [message.id]);
       }

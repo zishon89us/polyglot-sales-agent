@@ -3,7 +3,9 @@
 Status: proposed by the agent, 2026-11-25, before any code; rewritten the
 same day after its review
 (`docs/reviews/2026-11-25-m3-u8-design-review.md`, three High findings),
-and not reviewed again. Issue #307.
+and not reviewed again. Changed once more after the code's review
+(`docs/reviews/2026-11-25-gate4-u8-fixed-texts.md`): cases D2b and D2c,
+and the sentence "never not at all", which was not true. Issue #307.
 Story: US-C5, criteria 1 to 3. Also #107, #212, #184 (part l) and #222
 (where the stop button appears).
 
@@ -118,7 +120,7 @@ there is not the supported languages that have no file.
 ## 4. The disclosure (US-C5, 1 and 2)
 
 A session records when its customer was told (`sessions.disclosed_at`).
-A message records the disclosure that was sent with it
+A message records the disclosure its last try sent, or would have
 (`messages.disclosure`), apart from any other fixed text put before its
 body (`messages.lead`, section 5).
 
@@ -132,7 +134,9 @@ and the first message written is not always the first one sent.
 | D1 | A message of a session that has not been told is taken to be sent | Its `disclosure` is set to the text, in the language of section 3. What is sent is the disclosure, the lead and the body, each present one separated by a blank line |
 | D2 | The channel accepts it | The session is marked as told, in the transaction that records the send |
 | D2a | The channel accepted it and reports later that it failed | The session's mark is taken off in the transaction that stores the report, unless another message of the session that carried the disclosure is sent, delivered or read. The next message sent carries the disclosure |
-| D3 | The send fails for good, or its outcome is never known | The session is **not** marked. The next message sent carries the disclosure. A customer can so be told twice; never not at all |
+| D2b | The channel reports the failure before the worker has stored that the message was accepted: no message has the channel's identifier yet | The report is kept (`early_receipts`) and applied when the send is recorded: the message ends failed and the session is not marked. The two steps take one lock on the identifier, so the report either finds the message or is kept before the record looks |
+| D2c | A message with the disclosure was accepted, a later one went without it, and then the first is reported failed | The mark comes off, and the next message carries the disclosure. **The customer has by then read a message that did not say it**, and if nothing more is sent in the session they are not told in it. Messages already waiting when the mark comes off are not decided again. Accepted for now; in the follow-up issue |
+| D3 | The send fails for good, or its outcome is never known | The session is **not** marked. The next message sent carries the disclosure. A customer can so be told twice |
 | D4 | The same message is taken again, after a failure that may be tried again | Decided afresh: the disclosure if the session has still not been told, none if another message told it meanwhile. Nothing is kept from the earlier try |
 | D5 | A later message of a session that was told | No disclosure |
 | D6 | A new session of the same conversation | Told again: the mark is the session's |
@@ -194,7 +198,16 @@ and U11's.
 ## 7. The database
 
 Migration 0011: `sessions.disclosed_at`; `messages.disclosure`,
-`messages.lead`, `messages.buttons`; `contacts.last_language`.
+`messages.lead`, `messages.buttons`; `contacts.last_language`; and the
+table `early_receipts` (case D2b): the tenant, the channel's identifier
+of a message, the status reported and its code. A row is removed when
+it is applied, or after a day.
+
+A lead may be 700 long once its places are filled, and then the
+disclosure, the lead and the longest reply are 2,056, over the smallest
+channel's 2,000. No lead is filled in today (the only one is at most
+300). The unit that first sends one must bound it; in the follow-up
+issue.
 
 ## 8. Documents changed with this unit
 

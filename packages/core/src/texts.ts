@@ -66,6 +66,15 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const CONTROL = /(?!\n)\p{Cc}/u;
 /** A control character or a line or paragraph separator: nothing a filled-in value may hold. */
 const UNPRINTABLE = /\p{Cc}|[\u2028\u2029]/u;
+/**
+ * What changes how a text reads without being seen: a line or paragraph
+ * separator, a zero-width space or word joiner, a byte-order mark, and the
+ * marks that turn the direction of text. The joiners that Arabic and the
+ * Indic scripts need are not among them.
+ */
+const UNSEEN = /[\u2028\u2029\u200b\u2060\ufeff\u202a-\u202e\u2066-\u2069]/;
+/** Half of a pair of UTF-16 units, alone. */
+const LONE = /\p{Cs}/u;
 const PLACE = /\{\{([a-z]+)\}\}/g;
 
 function bodyProblem(name: FixedTextName, body: unknown): string | undefined {
@@ -73,8 +82,11 @@ function bodyProblem(name: FixedTextName, body: unknown): string | undefined {
   if (typeof body !== "string" || body.length < 1 || body.length > max) {
     return `is not a text of 1 to ${max}`;
   }
-  if (body !== body.trim() || CONTROL.test(body)) {
+  if (body !== body.trim() || CONTROL.test(body) || UNSEEN.test(body) || LONE.test(body)) {
     return "has a blank end or a control character";
+  }
+  if (/[{}]/.test(body.replace(PLACE, ""))) {
+    return "does not hold exactly the places it is given, each once";
   }
   const places = [...body.matchAll(PLACE)].map((found) => found[1] as string);
   const wanted: readonly string[] = FIXED_TEXTS[name].places;
@@ -147,7 +159,9 @@ export function readFixedTexts(
       title.length < 1 ||
       title.length > BUTTON_TITLE_MAX ||
       title !== title.trim() ||
-      /\p{Cc}/u.test(title)
+      /\p{Cc}/u.test(title) ||
+      UNSEEN.test(title) ||
+      LONE.test(title)
     ) {
       return no(`the title of ${button} is not a text of 1 to ${BUTTON_TITLE_MAX}`);
     }
@@ -210,7 +224,7 @@ export function fillFixedText(
   values: Readonly<Record<string, string>>,
 ): string | undefined {
   // Braces that are no place of ours would be sent as they are.
-  let open = body.replace(PLACE, "").includes("{{");
+  let open = /[{}]/.test(body.replace(PLACE, ""));
   const filled = body.replace(PLACE, (_whole, place: string): string => {
     const value = Object.hasOwn(values, place) ? values[place] : undefined;
     if (
@@ -218,7 +232,9 @@ export function fillFixedText(
       value.length >= 1 &&
       value.length <= FILLED_VALUE_MAX &&
       !UNPRINTABLE.test(value) &&
-      !value.includes("{{") &&
+      !UNSEEN.test(value) &&
+      !LONE.test(value) &&
+      !/[{}]/.test(value) &&
       value === value.trim()
     ) {
       return value;
@@ -226,7 +242,7 @@ export function fillFixedText(
     open = true;
     return "";
   });
-  return open || filled.length > FILLED_TEXT_MAX ? undefined : filled;
+  return open || filled.includes("{{") || filled.length > FILLED_TEXT_MAX ? undefined : filled;
 }
 
 /** The parts of a message as it is sent: each that is present, a blank line between. */
