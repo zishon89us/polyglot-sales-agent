@@ -33,6 +33,7 @@ const PRIVILEGES = {
     // Its two columns of text are removed by jobs that are not built; no grant for that yet.
     tool_calls: "INSERT,SELECT",
     early_receipts: "DELETE,INSERT,SELECT",
+    handovers: "INSERT,SELECT,UPDATE",
     reply_checks: "INSERT,SELECT",
     audit_log: "INSERT,SELECT",
     channel_accounts: "SELECT",
@@ -114,6 +115,7 @@ describe("the seed covers every tenant-owned table", () => {
       "contacts",
       "conversations",
       "early_receipts",
+      "handovers",
       "messages",
       "policies",
       "reply_checks",
@@ -567,6 +569,14 @@ describe("privileges", () => {
         settings: ["search_path=pg_catalog, public"],
         app: false,
         cross: false,
+        everyone: false,
+      },
+      {
+        name: "handover_reasons_ok",
+        definer: false,
+        settings: null,
+        app: true,
+        cross: true,
         everyone: false,
       },
       {

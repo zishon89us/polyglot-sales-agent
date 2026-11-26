@@ -103,6 +103,16 @@ decides the outcome.
 | O7 | The reply is not empty and not longer than 1,200 code points (#158; glossary) | Fallback |
 | O8 | Code adds the disclosure if this is the session's first outbound message, then applies the message-class checks and sends | As state machines §7 |
 
+**Built in M3 unit U11:** the flags for a person, a sensitive topic, a
+data request and an emergency now hand the session over, and their
+reply is discarded unchecked for the event's fixed text, as O2 says
+(`design/notes/m3-u11-handover.md`). Two fallbacks in a row hand over,
+and the fallback carries its button. Still not as O2 says: the flags to
+stop and to receive again are dropped (U10). **No person can reply
+before M4**, and the emergency rule of section 6 is only half built: an
+emergency is seen only when the model flags it, so one written in a
+session already handed over gets nothing until U10's phrase list.
+
 **Built in M3 unit U9, second part:** the turn runs these checks on
 every answer; a reply that fails one, or an answer that does not match
 the schema (O1), is not sent, and the fallback is the turn's reply

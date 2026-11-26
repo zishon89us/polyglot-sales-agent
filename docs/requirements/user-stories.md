@@ -542,7 +542,6 @@ A few criteria depend on a story in a later milestone. The story is built in its
 
 | Criterion | Depends on | Completed in |
 | --- | --- | --- |
-| US-C11 criterion 4 (hand over on a request inside a batch) | US-C6 | M4 |
 | US-C12 criterion 4 (hand over after three unreadable batches) | US-C6 | M4 |
 | US-C7 criterion 3 (withheld message is listed) | US-D12 | M5 |
 | US-C18 criterion 5 (failed message is listed) | US-D12 | M5 |

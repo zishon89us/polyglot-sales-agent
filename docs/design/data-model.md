@@ -284,6 +284,19 @@ null when no worker holds it).
 
 ### `handovers` — tenant-owned
 
+**As built in M3 unit U11** (migration 0013; `notes/m3-u11-handover.md`):
+`tenant_id`, `contact_id`, `session_id`, `state`, `reasons`, `urgent`,
+`created_at`, `attached_at`, `detached_at`, `closed_reason`, `ended_at`.
+Only `waiting`, `detached` and `closed-unanswered` (reason `expired`)
+are entered: the other states need staff. The columns below for staff,
+the escalation clock and the follow-up are **not built**; M4 adds them
+with the code that fills them. In M3 a handover is also detached 24
+hours after it was attached, since nobody can reply; M4 takes that out.
+`messages.handover_id` and `messages.tells` (`handover` or `emergency`)
+mark the message of ours that told the customer; it is a system reply,
+never held back or discarded for a newer message. `reply_checks.outcome`
+may be `handed-over`.
+
 | Column | Notes |
 | --- | --- |
 | `contact_id`, `session_id` (nullable) | Attached to a session only in `waiting` and `in-progress` |

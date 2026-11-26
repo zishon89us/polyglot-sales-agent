@@ -59,12 +59,17 @@ try {
   });
   // Every line in the one shape (NFR-O2): no key of it can hold a sentence.
   const report = (
-    event: "loop-error" | "turn-skipped" | "send-failed" | "reply-blocked",
+    event: "loop-error" | "turn-skipped" | "send-failed" | "reply-blocked" | "handed-over",
     code: string,
   ): void =>
     // A reply that was held back is a warning: one is expected now and then, many are not.
     log({
-      level: event === "turn-skipped" ? "info" : event === "reply-blocked" ? "warn" : "error",
+      level:
+        event === "turn-skipped"
+          ? "info"
+          : event === "reply-blocked" || event === "handed-over"
+            ? "warn"
+            : "error",
       event,
       code,
     });

@@ -25,6 +25,7 @@ export const LOG_EVENTS = [
   "turn-skipped",
   "send-failed",
   "reply-blocked",
+  "handed-over",
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 

@@ -72,6 +72,13 @@ export async function openSession(
     session.id,
   ]);
   // What ending a session does. Later units add to this one place.
+  // A handover attached to it is detached: the assistant answers the
+  // customer's next message, in a new session (US-C6, 8).
+  await tx.query(
+    `UPDATE handovers h SET state = 'detached', session_id = NULL, detached_at = s.ended_at
+     FROM sessions s WHERE s.id = $1 AND h.session_id = s.id AND h.state = 'waiting'`,
+    [session.id],
+  );
   // Its customer messages nobody dealt with are over 24 hours old: the
   // assistant does not answer them (design note, W2; decisions row 40).
   await tx.query(

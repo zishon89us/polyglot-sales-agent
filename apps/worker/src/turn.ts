@@ -22,8 +22,10 @@ import {
   CORE_CLAIM_KINDS,
   checkReply,
   composeMessage,
+  coreButton,
   type FixedTextName,
   type FixedTextSet,
+  type HandoverReason,
   LANGUAGE_UNKNOWN,
   MODEL_CALL_TIMEOUT_MS,
   MODEL_OUTPUT_TOKENS_MAX,
@@ -37,7 +39,9 @@ import {
   type Database,
   type DisclosureFor,
   finishTurn,
+  type HandoverTell,
   type HistoryMessage,
+  joinHandover,
   loadBusinessProfile,
   packOf,
   type ReplyChecksRecord,
@@ -49,6 +53,7 @@ import {
   type UnhandledMessage,
 } from "@polyglot-sales-agent/db";
 import { type PackRegistry, packNamed } from "@polyglot-sales-agent/pack-interface";
+import { handoverTeller } from "./handover.ts";
 
 /** The prompt a reply is made with. Which version runs is named here and changed by pull request. */
 export const REPLY_PROMPT = { name: "reply", version: 1 } as const;
@@ -127,19 +132,25 @@ export function givenTexts(batch: readonly Pick<UnhandledMessage, "kind" | "body
  * on them, and until then are dropped.
  */
 export const FLAGS_FOR_LATER = {
-  emergency: "U11",
-  "asks-for-person": "U11",
-  "sensitive-topic": "U11",
-  "data-request": "U11",
   "asks-to-stop": "U10",
   "asks-to-resume": "U10",
 } as const;
+/** The flags that hand the session over, with the reason each gives, in the order the reasons are added. */
+export const HANDOVER_FLAGS = [
+  ["asks-for-person", "requested"],
+  ["sensitive-topic", "sensitive-topic"],
+  ["data-request", "data-request"],
+  ["emergency", "emergency"],
+] as const satisfies readonly (readonly [string, HandoverReason])[];
 export function readFlags(flags: readonly string[]): {
   readonly answerIsAutomated: boolean;
+  /** The reasons to hand over for, without repeats. */
+  readonly handover: readonly HandoverReason[];
   readonly dropped: readonly string[];
 } {
   return {
     answerIsAutomated: flags.includes("asks-if-person"),
+    handover: HANDOVER_FLAGS.filter(([flag]) => flags.includes(flag)).map(([, reason]) => reason),
     dropped: flags.filter((flag) => Object.hasOwn(FLAGS_FOR_LATER, flag)),
   };
 }
@@ -212,6 +223,8 @@ export type TurnOutcome =
       readonly kind: "ended";
       readonly end: Awaited<ReturnType<typeof finishTurn>>;
       readonly blocked?: string;
+      /** The session was handed over by this turn, or reasons were added: the reasons it now has. */
+      readonly handedOver?: readonly string[];
     }
   /** Nothing is answered and the batch is marked as dealt with; `code` says why. */
   | {
@@ -253,18 +266,69 @@ export async function runTurn(
   const handled = at.messages.map((message) => message.id);
   const end = (reply?: string, made?: Parameters<typeof finishTurn>[7]) =>
     finishTurn(app, tenantId, conversationId, { token, sessionId }, handled, reply, now, made);
+  const turnId = randomUUID();
+  // Without the fixed texts (a test of an earlier unit) nothing can be told, and nothing is handed over.
+  const tell = model.texts === undefined ? undefined : handoverTeller(model.texts);
+  /** Hands the session over: there is no reply, and the telling is stored with the turn's end. */
+  const handOver = async (
+    reasons: readonly HandoverReason[],
+    with_: { checks?: ReplyChecksRecord; answerIsAutomated?: boolean } = {},
+  ): Promise<TurnOutcome> => {
+    let made: readonly string[] | undefined;
+    const ended = await end(undefined, {
+      turnId,
+      language: LANGUAGE_UNKNOWN,
+      ...(with_.checks === undefined ? {} : { checks: with_.checks }),
+      handover: {
+        reasons,
+        tell: tell as HandoverTell,
+        answerIsAutomated: with_.answerIsAutomated === true,
+        done: (result) => {
+          made = result.reasons;
+        },
+      },
+    });
+    return { kind: "ended", end: ended, ...(made === undefined ? {} : { handedOver: made }) };
+  };
   try {
+    // A tap on the person button (order of checks, step 11).
+    const tapped =
+      tell !== undefined &&
+      at.messages.some(
+        (message) => message.kind === "button" && message.buttonPayload === coreButton("person"),
+      );
+    if (tell !== undefined) {
+      // Step 10: a session that is handed over is not answered by the assistant.
+      const joined = await joinHandover(
+        app,
+        tenantId,
+        conversationId,
+        { token, sessionId },
+        handled,
+        { tapped, tell, ...(now === undefined ? {} : { now }) },
+      );
+      if (joined === "lost-lease") {
+        return { kind: "lost-lease" };
+      }
+      if (joined === "handed-over") {
+        return { kind: "no-reply", code: "handed-over", end: "stored" };
+      }
+    }
     const hasText = at.messages.some(
       (message) =>
         message.kind === "text" && typeof message.body === "string" && message.body !== "",
     );
-    if (!hasText) {
+    if (!hasText && !tapped) {
       // Step 13 is a later unit's: for now the batch is only marked.
       return { kind: "no-reply", code: "no-text", end: await end() };
     }
     if ((await answering(app, tenantId)).settingsMissing.length > 0) {
       await abandonTurn(app, tenantId, conversationId, token);
       return { kind: "not-answering" };
+    }
+    if (!hasText) {
+      // The tap alone: handed over without the model.
+      return handOver(["requested"]);
     }
     const pack = packNamed(model.packs, await packOf(app, tenantId));
     if (pack === undefined) {
@@ -289,7 +353,6 @@ export async function runTurn(
     if (request === undefined) {
       return { kind: "no-reply", code: "no-text", end: await end() };
     }
-    const turnId = randomUUID();
     const place = { tenantId, sessionId, turnId, turnStartedAt };
     const messages = [...request.messages];
     for (let round = 0; ; round += 1) {
@@ -299,6 +362,11 @@ export async function runTurn(
       // Outside any transaction: the trace is stored on a connection of its own.
       const result = await model.client.generate({ ...request, messages }, place);
       if (result.kind === "timeout" || result.kind === "provider-error") {
+        if (tapped) {
+          // The tap needs no model: the customer is handed over now, not
+          // when the provider is back. The text beside it goes unread.
+          return handOver(["requested"]);
+        }
         throw failure(`model-${result.kind}`);
       }
       const texts = model.texts;
@@ -319,19 +387,51 @@ export async function runTurn(
           const picked = texts.pick(given.preferred, given.tenantDefault).texts;
           return composeMessage([before === undefined ? null : picked[before], picked.fallback]);
         };
+        // The fallback carries the person button, in the language of its text.
+        const buttons = (given: DisclosureFor) => [
+          {
+            payload: coreButton("person"),
+            title: texts.pick(given.preferred, given.tenantDefault).buttons.person,
+          },
+        ];
         return {
           kind: "ended",
-          end: await end("", { turnId, language: LANGUAGE_UNKNOWN, lead, fallback: true, checks }),
+          end: await end("", {
+            turnId,
+            language: LANGUAGE_UNKNOWN,
+            lead,
+            fallback: true,
+            checks,
+            buttons,
+          }),
           blocked,
         };
       };
+      if (result.kind === "invalid-output" && tapped) {
+        // The tap hands over whatever the model answered to the text beside it.
+        return handOver(["requested"], {
+          checks: { outcome: "handed-over", o1: "invalid-output" },
+        });
+      }
       if (result.kind === "invalid-output") {
         // O1. Not tried again: the same request would likely get the same answer.
         return fallBack({ outcome: "blocked", o1: "invalid-output" }, "schema-invalid-output");
       }
       const { reply, toolCalls, language, flags, claims } = result.output;
       if (toolCalls.length === 0) {
-        const { answerIsAutomated } = readFlags(flags);
+        const { answerIsAutomated, handover } = readFlags(flags);
+        const reasons: HandoverReason[] = [
+          ...(tapped ? (["requested"] as const) : []),
+          ...handover.filter((reason) => !(tapped && reason === "requested")),
+        ];
+        if (reasons.length > 0 && tell !== undefined) {
+          // O2: the model's reply is discarded, unchecked, for the fixed
+          // text of the event. No other answer is attempted (US-C11, 4).
+          return handOver(reasons, {
+            checks: { outcome: "handed-over", o1: "passed" },
+            answerIsAutomated,
+          });
+        }
         // The customer asked whether a person is replying, and the model
         // wrote nothing else: the fixed answer alone. Not a failed reply.
         if (answerIsAutomated && reply.trim() === "" && texts !== undefined) {
@@ -396,6 +496,10 @@ export async function runTurn(
         };
       }
       if (round >= TOOL_ROUNDS_MAX) {
+        if (tapped) {
+          // The tap hands over whatever the model did with the text beside it.
+          return handOver(["requested"]);
+        }
         return { kind: "no-reply", code: "tool-rounds", end: await end() };
       }
       messages.push({ role: "tool-calls", toolCalls });
