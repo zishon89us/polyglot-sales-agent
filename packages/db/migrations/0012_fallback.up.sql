@@ -26,8 +26,10 @@ CREATE TABLE reply_checks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES tenants (id),
   created_at timestamptz NOT NULL DEFAULT now(),
-  session_id uuid NOT NULL REFERENCES sessions (id),
+  session_id uuid NOT NULL,
   turn_id uuid NOT NULL,
+  -- With the tenant: a row cannot name another tenant's session.
+  FOREIGN KEY (tenant_id, session_id) REFERENCES sessions (tenant_id, id),
   outcome text NOT NULL CHECK (outcome IN ('passed', 'blocked', 'error')),
   o1 text NOT NULL CHECK (o1 ~ '^[a-z][a-z-]{0,39}$'),
   o7 text CHECK (o7 ~ '^[a-z][a-z-]{0,39}$'),

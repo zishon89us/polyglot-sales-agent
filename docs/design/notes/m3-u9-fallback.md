@@ -3,7 +3,8 @@
 Status: proposed by the agent, 2026-11-27, before any code; rewritten
 the same day after its review
 (`docs/reviews/2026-11-27-m3-u9-fallback-design-review.md`, three High
-findings), and not reviewed again. Issue #308. Stories: US-C4, criterion 10; US-C6, criterion 2
+findings), and not reviewed again. Small corrections after the code's review
+(`docs/reviews/2026-11-27-gate4-u9-fallback.md`). Issue #308. Stories: US-C4, criterion 10; US-C6, criterion 2
 (its count; the handover is U11's); US-C15, criterion 10. Guardrail
 policy, section 4.
 
@@ -84,7 +85,9 @@ records that the channel **accepted** a message:
 
 A fallback or a reply that is discarded, refused or expires changes
 nothing: the customer did not get it (US-C6, 2: "when the second
-fallback is sent").
+fallback is sent"). Nor does one whose send ended with its outcome
+not known and was then closed as unconfirmed, though the customer may
+have got that one: the count is then one short.
 
 Not undone when the channel reports later that an accepted message
 failed. The disclosure's mark is undone then (U8); this count is not,
@@ -124,8 +127,8 @@ other, where O2 discards it for the event's fixed text; and beside
 Building these inputs and running the function are inside one guard.
 If either throws, the reply is treated as failed and the fallback is
 the turn's reply: a reply is never sent unchecked because the checker
-broke. The record says `error`, a line `reply-check-error` is
-reported, and it counts like any fallback, since the customer got one.
+broke. The record says `error`, the line `reply-blocked` is reported
+with the code `check-error`, and it counts like any fallback, since the customer got one.
 A checker that always throws would so hand every session over once U11
 is built; the line is what an operator sees first.
 
@@ -140,9 +143,12 @@ others do not). Each is held to a pattern of lower-case letters and
 hyphens. No text of the reply, of a claim or of the customer.
 
 Written in the transaction that stores the turn's reply, so there is a
-row exactly when there is a reply or a fallback: a turn that lost its
-lease, or was dropped for a newer message, leaves none, and its next
-try writes its own.
+row exactly when there is a reply or a fallback (under T5, where there
+is no reply to check, the row says only that the answer matched the
+schema). A row stays when its message is later discarded for a newer
+one: the table counts turns stored, not messages sent. And a turn that lost its
+lease, or was dropped for a newer message before it was stored, leaves
+none, and its next try writes its own.
 
 The trace of the model call is not touched: it is written once
 (migration 0009). A row here and the traces of the turn share the

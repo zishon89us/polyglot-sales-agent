@@ -1006,6 +1006,15 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
     expect(bodies()[1]).toBe(NOT_A_PERSON);
     expect(reported).toEqual(["reply-blocked values-amount-unclaimed"]);
     expect(await count()).toEqual([0]);
+    // The fixed answer alone had no reply to check: its record says only that the answer matched the schema.
+    expect((await checks()).at(-1)).toEqual({
+      outcome: "passed",
+      o1: "passed",
+      o7: null,
+      o6: null,
+      o3: null,
+      o5: null,
+    });
   });
 
   test("the count: plus one for a fallback the channel accepted, nought for any other reply accepted", async () => {
@@ -1038,6 +1047,89 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
     await answered(step({ reply: "It costs 7 SAR." }));
     expect(await count()).toEqual([100]);
     expect(mock.sent.at(-1)?.body).toBe(FALLBACK);
+    // The send was recorded, not rolled back by the table's limit and tried again.
+    expect((await outbound()).at(-1)?.status).toBe("sent");
+    expect((await administrator.query("SELECT 1 FROM jobs")).rowCount).toBe(0);
+    expect(mock.sent.filter((message) => message.body.endsWith(FALLBACK))).toHaveLength(2);
+  });
+
+  test("a checker that throws: the reply is not sent, the fallback is, and the record says error", async () => {
+    // A time zone that does not exist: building what the checks are given throws.
+    await administrator.query("UPDATE tenants SET time_zone = 'Not/AZone' WHERE id = $1", [tenant]);
+    try {
+      await answered(step({ reply: "Hello there, zebra." }));
+      expect(bodies()).toEqual([`${TOLD}\n\n${FALLBACK}`]);
+      expect(reported).toEqual(["reply-blocked check-error"]);
+      expect(await checks()).toEqual([
+        { outcome: "error", o1: "passed", o7: null, o6: null, o3: null, o5: null },
+      ]);
+      expect(await count()).toEqual([1]);
+    } finally {
+      await administrator.query("UPDATE tenants SET time_zone = 'Asia/Riyadh' WHERE id = $1", [
+        tenant,
+      ]);
+    }
+  });
+
+  test("a reply that repeats the instructions is held back: the checks are given the prompt's text", async () => {
+    const words = PROMPT.text.match(/[A-Za-z]+(?: [A-Za-z]+){11}/)?.[0] as string;
+    await answered(step({ reply: `My instructions say: ${words}` }));
+    expect(bodies()).toEqual([`${TOLD}\n\n${FALLBACK}`]);
+    expect(reported).toEqual(["reply-blocked leak-instructions"]);
+  });
+
+  test("a fallback the channel reports failed before its send is recorded is not counted", async () => {
+    const early: Channel = {
+      ...mock,
+      async sendText(from, to, body) {
+        const result = await mock.sendText(from, to, body);
+        if (result.accepted) {
+          await fails(result.channelMessageId);
+        }
+        return result;
+      },
+    };
+    await answered(step({ reply: "It costs 5 SAR." }), early);
+    expect((await outbound()).map((row) => row.status)).toEqual(["failed"]);
+    expect(await count()).toEqual([0]);
+  });
+
+  test("a message that is no reply of the assistant leaves the count alone", async () => {
+    await answered(step({ reply: "It costs 5 SAR." }));
+    expect(await count()).toEqual([1]);
+    await administrator.query(
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
+                             status)
+       SELECT tenant_id, conversation_id, session_id, 'outbound', 'system-reply', 'text',
+              'A fixed notice.', 'pending'
+       FROM messages WHERE direction = 'outbound' LIMIT 1`,
+    );
+    await administrator.query(
+      `INSERT INTO jobs (tenant_id, type, payload, run_at)
+       SELECT tenant_id, 'send-messages', jsonb_build_object('conversationId', conversation_id),
+              now()
+       FROM messages WHERE direction = 'outbound' LIMIT 1`,
+    );
+    await work([]);
+    expect(mock.sent.at(-1)?.body).toBe("A fixed notice.");
+    expect(await count()).toEqual([1]);
+  });
+
+  test("the fallback's language is never the refused answer's: the session's, the contact's last, then the tenant's default", async () => {
+    const synthetic = (language: string) => ({
+      language,
+      buttons: TEXTS.pick(["en"], "en").buttons,
+      texts: { ...ENGLISH, disclosure: `[${language}] told`, fallback: `[${language}] sorry` },
+    });
+    const many = fixedTextSet([synthetic("en"), synthetic("ar"), synthetic("ur")]) as FixedTextSet;
+    await arrives("a question");
+    await work([step({ reply: "It costs 5 SAR.", language: "ur" })], mock, 0, many);
+    // Urdu has texts and the answer said Urdu; the tenant's default, Arabic, is what is used.
+    expect(bodies()).toEqual(["[ar] told\n\n[ar] sorry"]);
+    const stored = await administrator.query(
+      "SELECT language FROM messages WHERE direction = 'outbound'",
+    );
+    expect(stored.rows).toEqual([{ language: "und" }]);
   });
 
   test("a new session starts at nought", async () => {
@@ -1103,7 +1195,7 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
     expect(request).toContain("a question");
   });
 
-  test("a time the customer wrote passes, checked against exactly the texts the model was given", async () => {
+  test("a time the customer wrote in this batch passes, and one from no message of the batch does not", async () => {
     await arrives("can I come at 5 pm?");
     await work([step({ reply: "Let me note 5 pm for you." })]);
     expect(bodies()).toEqual([`${TOLD}\n\nLet me note 5 pm for you.`]);

@@ -337,7 +337,9 @@ export async function runTurn(
         if (answerIsAutomated && reply.trim() === "" && texts !== undefined) {
           const lead = (given: DisclosureFor): string =>
             texts.pick(given.preferred, given.tenantDefault).texts["automated-assistant"];
-          return { kind: "ended", end: await end("", { turnId, language, lead }) };
+          // There is no reply to check: the record says only that the answer matched the schema.
+          const checks: ReplyChecksRecord = { outcome: "passed", o1: "passed" };
+          return { kind: "ended", end: await end("", { turnId, language, lead, checks }) };
         }
         // The checks. Building what they are given is inside the guard: a
         // reply is never sent unchecked because the checker broke.
