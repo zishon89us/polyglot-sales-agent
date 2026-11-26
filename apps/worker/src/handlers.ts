@@ -42,7 +42,10 @@ export const SENDS_PER_RUN = 20;
  * that was not answered, with the reason. For a log: never anything of a
  * message.
  */
-export type SendReport = (event: "send-failed" | "turn-skipped", code: string) => void;
+export type SendReport = (
+  event: "send-failed" | "turn-skipped" | "reply-blocked",
+  code: string,
+) => void;
 
 export interface HandlerOptions {
   /** The application role's. */
@@ -157,8 +160,13 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
         return undefined;
       }
       if (outcome.kind === "no-reply" && outcome.code !== "no-text") {
-        // The customer gets nothing: a fallback to send is a later unit's.
+        // The customer gets nothing.
         options.report?.("turn-skipped", outcome.code);
+      }
+      if (outcome.kind === "ended" && outcome.blocked !== undefined && outcome.end === "stored") {
+        // The model's answer failed a check and the fallback is stored in
+        // its place. The check and its code; nothing of the answer.
+        options.report?.("reply-blocked", outcome.blocked);
       }
       if (outcome.end === "session-over") {
         // The session's 24 hours passed while the reply was being made.

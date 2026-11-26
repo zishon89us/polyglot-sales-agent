@@ -157,6 +157,25 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
     expect(sent.sent).toHaveLength(2);
   }, 90_000);
 
+  test("a reply that fails a check is not sent: a message with a number in it is echoed by the stand-in, and the customer gets the fallback (US-C4, 10)", async () => {
+    const fallback =
+      "Sorry, I could not answer that. If you would like a person to reply, tap the button below or ask for a person.";
+    const blocked = await echoRoundTrip({
+      mockUrl,
+      numberId: NUMBER,
+      from: CUSTOMER,
+      timeoutMs: 30_000,
+      text: "is the haircut 5 SAR?",
+      reply: fallback,
+    });
+    // The session's customer was told with the first echo: the fallback alone, and no echo.
+    expect(blocked.received).toBe(fallback);
+    const sent = (await (await fetch(`${mockUrl}/mock/sent`)).json()) as {
+      sent: { body: string }[];
+    };
+    expect(sent.sent.some((message) => message.body.includes("5 SAR"))).toBe(false);
+  });
+
   test("after the stand-in is stopped and started again, with the database kept, a message is still echoed", async () => {
     // As `docker compose up` a second time without removing the volume. A stand-in that
     // counted its messages from 1 again would have them taken for ones already seen.

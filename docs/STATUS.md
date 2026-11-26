@@ -731,6 +731,26 @@ M0 Inception met its exit criteria on 2026-11-16; see
   than the business's texts; of twenty ordinary replies the author
   tried, four. What is left is #336.
 
+- 2026-11-27 — #335 merged. **M3 U9, second part** (#308, pull request
+  #337): a turn now runs the checks on the model's answer, and a reply
+  that fails one, or an answer that does not match the schema, is not
+  sent: the fallback text is the turn's reply. The design note
+  (`design/notes/m3-u9-fallback.md`) was read by a second agent before
+  any code (`reviews/2026-11-27-m3-u9-fallback-design-review.md`): 11
+  findings, three High (a tap on the fallback's button would have got
+  silence; the fallback escaped the rules a reply has for a newer
+  message; the count moved for messages the customer never got). The
+  note was rewritten and **has not been reviewed again**. Built: the
+  fallback as the turn's reply with no body, sent without its button;
+  the count of fallbacks in a row, moved when the channel accepts a
+  message; a table that records what each check said of each stored
+  turn, with nothing of the reply; the flags read in one place
+  (migration 0012). **Not built:** the handover at two fallbacks in a
+  row, the button and what a tap does, acting on six of the seven
+  flags. **Now felt by customers:** the checks hold back right replies
+  (row 52, #336), and the stand-in model's echo of any message with a
+  number in it is held back.
+
 ## Next
 
 1. Maintainer reads the M3 plan (`plans/m3-ai-core.md`) and answers rows 1

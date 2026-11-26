@@ -266,7 +266,7 @@ const findTimes: TurnTool = {
 
 const reported: string[] = [];
 const REPLY = {
-  reply: "We open at 10:00 on Friday.",
+  reply: "We are open on Friday.",
   claims: [],
   flags: [],
   toolCalls: [],
@@ -360,7 +360,7 @@ describe("a turn (sections 6 to 8)", () => {
     expect(await turn(handlers)).toBe("done");
     expect(await replies()).toEqual([
       {
-        body: "We open at 10:00 on Friday.",
+        body: "We are open on Friday.",
         status: "pending",
         language: "en",
         turn_id: expect.any(String),
@@ -468,10 +468,10 @@ describe("a turn (sections 6 to 8)", () => {
   test("G2 (US-C3, 4): an unsupported language is attempted and the session marked", async () => {
     await arrives("Haben Sie am Freitag offen?");
     const { handlers } = scripted([
-      { kind: "answer", value: { ...REPLY, reply: "Ja, ab 10:00.", language: "de" } },
+      { kind: "answer", value: { ...REPLY, reply: "Ja, am Freitag.", language: "de" } },
     ]);
     expect(await turn(handlers)).toBe("done");
-    expect(await replies()).toMatchObject([{ body: "Ja, ab 10:00.", language: "de" }]);
+    expect(await replies()).toMatchObject([{ body: "Ja, am Freitag.", language: "de" }]);
     expect(await rows("SELECT language, unsupported_language FROM sessions")).toEqual([
       { language: "de", unsupported_language: true },
     ]);
@@ -614,19 +614,15 @@ describe("a turn (sections 6 to 8)", () => {
   });
 
   test.each([
-    [
-      "an answer the client refuses",
-      [{ kind: "answer", value: { reply: 7 } }],
-      "model-invalid-output",
-    ],
-    ["an answer cut at the limit", [{ kind: "truncated" }], "model-invalid-output"],
+    ["an answer the client refuses", [{ kind: "answer", value: { reply: 7 } }], "reply-blocked"],
+    ["an answer cut at the limit", [{ kind: "truncated" }], "reply-blocked"],
     [
       "a reply of nothing but space",
       [{ kind: "answer", value: { ...REPLY, reply: " \n " } }],
-      "empty-reply",
+      "reply-blocked",
     ],
   ] as [string, FakeStep[], string][])(
-    "S2a: %s is not tried again: no reply, the batch marked, and a line says why",
+    "S2a: %s is not tried again; with no fixed texts given nothing is sent, the batch is marked, and a line says why",
     async (_name, script, code) => {
       await arrives("hello");
       const { adapter, handlers } = scripted(script);
@@ -808,7 +804,7 @@ describe("the tool loop (section 6)", () => {
     const { handlers } = scripted([{ kind: "answer", value: asks("Thursday") }], {});
     expect(await turn(handlers)).toBe("done");
     expect(await calls()).toEqual([]);
-    expect(reported).toEqual(["turn-skipped model-invalid-output"]);
+    expect(reported).toEqual(["turn-skipped reply-blocked"]);
   });
 
   test("L8: with no tool offered the loop is one call", async () => {

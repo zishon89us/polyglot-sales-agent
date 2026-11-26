@@ -20,10 +20,15 @@ import {
 import {
   type BusinessProfile,
   CORE_CLAIM_KINDS,
+  checkReply,
+  composeMessage,
+  type FixedTextName,
   type FixedTextSet,
+  LANGUAGE_UNKNOWN,
   MODEL_CALL_TIMEOUT_MS,
   MODEL_OUTPUT_TOKENS_MAX,
   priceText,
+  type ReplyCheck,
   TOOL_ROUNDS_MAX,
 } from "@polyglot-sales-agent/core";
 import {
@@ -35,6 +40,7 @@ import {
   type HistoryMessage,
   loadBusinessProfile,
   packOf,
+  type ReplyChecksRecord,
   renewTurn,
   runTool,
   sessionHistory,
@@ -97,6 +103,62 @@ export function businessData(profile: BusinessProfile): unknown {
   };
 }
 
+const textsOf = (batch: readonly Pick<UnhandledMessage, "kind" | "body">[]): string[] =>
+  batch.flatMap((message) =>
+    message.kind === "text" && typeof message.body === "string" && message.body !== ""
+      ? [message.body]
+      : [],
+  );
+
+/**
+ * The customer's texts exactly as the request gives them to the model:
+ * after the batch is bounded, so a text that was cut or left out is cut
+ * or left out here too. The checks on the reply are given these.
+ */
+export function givenTexts(batch: readonly Pick<UnhandledMessage, "kind" | "body">[]): string[] {
+  const texts = textsOf(batch);
+  return texts.length === 0 ? [] : [...boundBatch(texts).texts];
+}
+
+/**
+ * What the turn does with the flags of an answer: the one place they are
+ * read (guardrail policy, O2). Only the question "am I talking to a
+ * person?" is acted on. The others are named with the unit that will act
+ * on them, and until then are dropped.
+ */
+export const FLAGS_FOR_LATER = {
+  emergency: "U11",
+  "asks-for-person": "U11",
+  "sensitive-topic": "U11",
+  "data-request": "U11",
+  "asks-to-stop": "U10",
+  "asks-to-resume": "U10",
+} as const;
+export function readFlags(flags: readonly string[]): {
+  readonly answerIsAutomated: boolean;
+  readonly dropped: readonly string[];
+} {
+  return {
+    answerIsAutomated: flags.includes("asks-if-person"),
+    dropped: flags.filter((flag) => Object.hasOwn(FLAGS_FOR_LATER, flag)),
+  };
+}
+
+/** The checks by name, for a line of the log: a code there holds letters and hyphens only. */
+export const CHECK_NAMES = { O7: "length", O6: "leak", O3: "values", O5: "contacts" } as const;
+
+/** Today's date where the business is. */
+export function todayIn(timeZone: string, at: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(at);
+  const part = (type: string): number => Number(parts.find((one) => one.type === type)?.value);
+  return { year: part("year"), month: part("month"), day: part("day") };
+}
+
 /**
  * The request for a batch, or undefined if the batch holds no text. The
  * order is the one the prompt describes: the business, the session so far,
@@ -109,11 +171,7 @@ export function buildRequest(parts: {
   readonly batch: readonly Pick<UnhandledMessage, "kind" | "body">[];
   readonly tools: readonly ToolOffer[];
 }): LlmRequest | undefined {
-  const texts = parts.batch.flatMap((message) =>
-    message.kind === "text" && typeof message.body === "string" && message.body !== ""
-      ? [message.body]
-      : [],
-  );
+  const texts = textsOf(parts.batch);
   if (texts.length === 0) {
     return undefined;
   }
@@ -145,8 +203,16 @@ export function buildRequest(parts: {
 
 /** How a turn with the model ended. */
 export type TurnOutcome =
-  /** The reply is stored, or was dropped for a newer message: what `finishTurn` said. */
-  | { readonly kind: "ended"; readonly end: Awaited<ReturnType<typeof finishTurn>> }
+  /**
+   * The reply is stored, or was dropped for a newer message: what
+   * `finishTurn` said. `blocked` when the model's answer failed a check and
+   * the reply is the fallback: the check and its code, nothing of the answer.
+   */
+  | {
+      readonly kind: "ended";
+      readonly end: Awaited<ReturnType<typeof finishTurn>>;
+      readonly blocked?: string;
+    }
   /** Nothing is answered and the batch is marked as dealt with; `code` says why. */
   | {
       readonly kind: "no-reply";
@@ -185,10 +251,8 @@ export async function runTurn(
   const turnStartedAt = clock?.() ?? new Date();
   const now = clock === undefined ? undefined : turnStartedAt;
   const handled = at.messages.map((message) => message.id);
-  const end = (
-    reply?: string,
-    made?: { turnId: string; language: string; lead?: (given: DisclosureFor) => string },
-  ) => finishTurn(app, tenantId, conversationId, { token, sessionId }, handled, reply, now, made);
+  const end = (reply?: string, made?: Parameters<typeof finishTurn>[7]) =>
+    finishTurn(app, tenantId, conversationId, { token, sessionId }, handled, reply, now, made);
   try {
     const hasText = at.messages.some(
       (message) =>
@@ -213,9 +277,11 @@ export async function runTurn(
       throw failure("unknown-pack");
     }
     const tools = model.tools ?? {};
+    const system = assemblePrompt(model.prompt, fragment, model.canary);
+    const profile = await loadBusinessProfile(app, tenantId);
     const request = buildRequest({
-      system: assemblePrompt(model.prompt, fragment, model.canary),
-      profile: await loadBusinessProfile(app, tenantId),
+      system,
+      profile,
       history: await sessionHistory(app, tenantId, sessionId),
       batch: at.messages,
       tools: Object.values(tools).map((tool) => tool.offer),
@@ -235,33 +301,95 @@ export async function runTurn(
       if (result.kind === "timeout" || result.kind === "provider-error") {
         throw failure(`model-${result.kind}`);
       }
+      const texts = model.texts;
+      /**
+       * The answer failed a check: it is not sent, and the fallback is the
+       * turn's reply (US-C4, 10). `before` is a fixed text that goes first.
+       */
+      const fallBack = async (
+        checks: ReplyChecksRecord,
+        blocked: string,
+        before?: FixedTextName,
+      ): Promise<TurnOutcome> => {
+        if (texts === undefined) {
+          // No fixed texts were given (a test): nothing is sent at all.
+          return { kind: "no-reply", code: "reply-blocked", end: await end() };
+        }
+        const lead = (given: DisclosureFor): string => {
+          const picked = texts.pick(given.preferred, given.tenantDefault).texts;
+          return composeMessage([before === undefined ? null : picked[before], picked.fallback]);
+        };
+        return {
+          kind: "ended",
+          end: await end("", { turnId, language: LANGUAGE_UNKNOWN, lead, fallback: true, checks }),
+          blocked,
+        };
+      };
       if (result.kind === "invalid-output") {
-        // Not tried again: the same request would likely get the same answer.
-        return { kind: "no-reply", code: "model-invalid-output", end: await end() };
+        // O1. Not tried again: the same request would likely get the same answer.
+        return fallBack({ outcome: "blocked", o1: "invalid-output" }, "schema-invalid-output");
       }
-      const { reply, toolCalls, language, flags } = result.output;
+      const { reply, toolCalls, language, flags, claims } = result.output;
       if (toolCalls.length === 0) {
-        // The customer asked whether a person is replying: the answer is a
-        // fixed text, put before whatever the model replied, and sent also
-        // when the model replied nothing (US-C5, 3). The other flags are
-        // still dropped here; acting on them is a later unit's.
-        const texts = model.texts;
+        const { answerIsAutomated } = readFlags(flags);
+        // The customer asked whether a person is replying, and the model
+        // wrote nothing else: the fixed answer alone. Not a failed reply.
+        if (answerIsAutomated && reply.trim() === "" && texts !== undefined) {
+          const lead = (given: DisclosureFor): string =>
+            texts.pick(given.preferred, given.tenantDefault).texts["automated-assistant"];
+          return { kind: "ended", end: await end("", { turnId, language, lead }) };
+        }
+        // The checks. Building what they are given is inside the guard: a
+        // reply is never sent unchecked because the checker broke.
+        let checked: ReturnType<typeof checkReply> | undefined;
+        try {
+          checked = checkReply({
+            reply,
+            claims,
+            profile,
+            batch: givenTexts(at.messages),
+            canary: model.canary,
+            instructions: system.instructions,
+            today: todayIn(profile.timeZone, turnStartedAt),
+          });
+        } catch {
+          checked = undefined;
+        }
+        const before = answerIsAutomated ? "automated-assistant" : undefined;
+        if (checked === undefined) {
+          return fallBack({ outcome: "error", o1: "passed" }, "check-error", before);
+        }
+        const code = (check: ReplyCheck): string => {
+          const outcome = checked.checks[check];
+          return outcome.passed ? "passed" : outcome.code;
+        };
+        const checks: ReplyChecksRecord = {
+          outcome: checked.passed ? "passed" : "blocked",
+          o1: "passed",
+          o7: code("O7"),
+          o6: code("O6"),
+          o3: code("O3"),
+          o5: code("O5"),
+        };
+        if (checked.failed !== undefined) {
+          return fallBack(
+            checks,
+            `${CHECK_NAMES[checked.failed.check]}-${checked.failed.code}`,
+            before,
+          );
+        }
+        // The reply passed. The fixed answer to "am I talking to a person?"
+        // goes before it (US-C5, 3).
         const lead =
-          texts !== undefined && flags.includes("asks-if-person")
+          texts !== undefined && answerIsAutomated
             ? (given: DisclosureFor) =>
                 texts.pick(given.preferred, given.tenantDefault).texts["automated-assistant"]
             : undefined;
-        if (reply.trim() === "") {
-          if (lead === undefined) {
-            return { kind: "no-reply", code: "empty-reply", end: await end() };
-          }
-          return { kind: "ended", end: await end("", { turnId, language, lead }) };
-        }
         return {
           kind: "ended",
           end: await end(
             reply,
-            lead === undefined ? { turnId, language } : { turnId, language, lead },
+            lead === undefined ? { turnId, language, checks } : { turnId, language, lead, checks },
           ),
         };
       }

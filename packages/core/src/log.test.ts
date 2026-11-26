@@ -77,6 +77,7 @@ describe("a log line", () => {
       "webhook-unavailable",
       "turn-skipped",
       "send-failed",
+      "reply-blocked",
     ]);
     expect(LOG_NUMBERS).toEqual(["status", "durationMs", "attempts", "port"]);
   });

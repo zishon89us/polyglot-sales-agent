@@ -57,7 +57,7 @@ Its text is the fixed text `fallback` (U8), in the language of the rule
 of `m3-u8-fixed-texts.md`, section 3: the session's, then the contact's
 last, then the tenant's default, then English. **The language a failed
 answer reported is neither stored nor used**: it is the word of an
-answer that was just refused. The message's own `language` is empty, and
+answer that was just refused. The message's own `language` is `und`, unknown, and
 the session's language, its unsupported mark and the contact's last
 language are left as they were.
 
@@ -149,8 +149,10 @@ The trace of the model call is not touched: it is written once
 turn's identifier. `guardrail_results` on the trace, which the data
 model foresaw, is not built; the data model is corrected.
 
-After the store, a line `reply-blocked` with the first failed check and
-its code is reported, with the tenant and the turn.
+After the store, a line `reply-blocked` is reported with the first
+failed check by name (`schema`, `length`, `leak`, `values`, `contacts`)
+and its code, or `check-error`. The tenant and the turn are on the
+job's own line.
 
 ## 7. The database
 

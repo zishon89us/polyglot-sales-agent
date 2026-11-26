@@ -24,6 +24,7 @@ export const LOG_EVENTS = [
   "webhook-unavailable",
   "turn-skipped",
   "send-failed",
+  "reply-blocked",
 ] as const;
 export type LogEvent = (typeof LOG_EVENTS)[number];
 

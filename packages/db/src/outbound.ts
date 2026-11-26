@@ -240,6 +240,14 @@ export function finishTurn(
      * to a person?"). With one, the reply itself may be empty.
      */
     readonly lead?: (given: DisclosureFor) => string;
+    /**
+     * The reply is the fallback: the model's answer failed a check. The
+     * reply is then empty and `lead` is the fallback's text. The language
+     * the refused answer reported is neither stored nor used.
+     */
+    readonly fallback?: boolean;
+    /** What the checks said, stored with the reply (`reply_checks`). */
+    readonly checks?: ReplyChecksRecord;
   },
 ): Promise<TurnEnd> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
@@ -272,6 +280,12 @@ export function finishTurn(
     }
     let replyId: string | null = null;
     let lead: string | null = null;
+    const fallback = made?.fallback === true;
+    if (fallback && (reply !== "" || made?.lead === undefined)) {
+      throw Object.assign(new Error("a fallback is a fixed text and no reply"), {
+        code: "fallback-with-reply",
+      });
+    }
     if (reply === "" && made?.lead === undefined) {
       // An empty reply is stored only beside a fixed text: alone it is nothing to send.
       throw Object.assign(new Error("an empty reply with nothing before it"), {
@@ -295,7 +309,7 @@ export function finishTurn(
       const row = known.rows[0];
       if (row !== undefined) {
         lead = made.lead({
-          preferred: [made.language, row.session, row.contact],
+          preferred: [fallback ? null : made.language, row.session, row.contact],
           tenantDefault: row.tenant,
         });
       }
@@ -303,9 +317,9 @@ export function finishTurn(
     if (reply !== undefined) {
       const stored = await tx.query<{ id: string }>(
         `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
-                               status, created_at, turn_id, language, lead)
+                               status, created_at, turn_id, language, lead, fallback)
          VALUES ($1, $2, $3, 'outbound', 'assistant-reply', 'text', $4, 'pending', $5::timestamptz,
-                 $6, $7, $8)
+                 $6, $7, $8, $9)
          RETURNING id`,
         [
           tenantId,
@@ -315,12 +329,34 @@ export function finishTurn(
           reply === "" ? null : reply,
           at,
           made?.turnId ?? null,
-          made?.language ?? null,
+          // A refused answer's word on the language is not stored: unknown.
+          fallback ? LANGUAGE_UNKNOWN : (made?.language ?? null),
           lead,
+          fallback,
         ],
       );
       replyId = stored.rows[0]?.id as string;
-      if (made !== undefined && made.language !== LANGUAGE_UNKNOWN) {
+      if (made?.checks !== undefined) {
+        const { checks } = made;
+        await tx.query(
+          `INSERT INTO reply_checks (tenant_id, session_id, turn_id, created_at, outcome,
+                                     o1, o7, o6, o3, o5)
+           VALUES ($1, $2, $3, $4::timestamptz, $5, $6, $7, $8, $9, $10)`,
+          [
+            tenantId,
+            turn.sessionId,
+            made.turnId,
+            at,
+            checks.outcome,
+            checks.o1,
+            checks.o7 ?? null,
+            checks.o6 ?? null,
+            checks.o3 ?? null,
+            checks.o5 ?? null,
+          ],
+        );
+      }
+      if (made !== undefined && !fallback && made.language !== LANGUAGE_UNKNOWN) {
         await tx.query(
           `UPDATE sessions SET language = $2, unsupported_language = unsupported_language OR $3
            WHERE id = $1`,
@@ -546,6 +582,19 @@ export function abandonTurn(
 }
 
 /** A message whose call to the channel this worker must now make. */
+/**
+ * What the checks said of a turn's answer: each `passed`, a code of the
+ * checker's list, or left out when the check did not run.
+ */
+export interface ReplyChecksRecord {
+  readonly outcome: "passed" | "blocked" | "error";
+  readonly o1: string;
+  readonly o7?: string;
+  readonly o6?: string;
+  readonly o3?: string;
+  readonly o5?: string;
+}
+
 /** A button as a message is stored with it and sent: what it carries, and the title shown. */
 export interface StoredButton {
   readonly payload: string;
@@ -923,6 +972,19 @@ export function recordSend(
          WHERE m.id = $1 AND m.disclosure IS NOT NULL AND m.status <> 'failed'
            AND s.id = m.session_id AND s.disclosed_at IS NULL`,
         [message.id, now ?? null],
+      );
+      // The count of fallbacks in a row that the customer was sent: plus 1
+      // for a fallback the channel accepted, 0 for any other reply of the
+      // assistant. A message that is refused, discarded or expires is
+      // never here, and changes nothing (design note M3 U9, fallback, 3).
+      await tx.query(
+        `UPDATE sessions s
+         SET guardrail_fallbacks = CASE WHEN m.fallback THEN least(s.guardrail_fallbacks + 1, 100)
+                                        ELSE 0 END
+         FROM messages m
+         WHERE m.id = $1 AND m.class = 'assistant-reply' AND m.status <> 'failed'
+           AND s.id = m.session_id`,
+        [message.id],
       );
       // The text went without its buttons: the record says what was shown.
       if (buttonsDropped === true) {
