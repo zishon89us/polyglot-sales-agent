@@ -33,6 +33,7 @@ const PRIVILEGES = {
     // Its two columns of text are removed by jobs that are not built; no grant for that yet.
     tool_calls: "INSERT,SELECT",
     early_receipts: "DELETE,INSERT,SELECT",
+    reply_checks: "INSERT,SELECT",
     audit_log: "INSERT,SELECT",
     channel_accounts: "SELECT",
     contacts: "INSERT,SELECT,UPDATE",
@@ -115,6 +116,7 @@ describe("the seed covers every tenant-owned table", () => {
       "early_receipts",
       "messages",
       "policies",
+      "reply_checks",
       "services",
       "sessions",
       "tenants",

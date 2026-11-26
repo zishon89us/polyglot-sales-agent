@@ -246,7 +246,8 @@ null when no worker holds it).
 | `conversation_id`, `started_at`, `last_message_at`, `ended_at` | A partial unique index allows one session with `ended_at` null per conversation. `last_message_at` is the stored time of the newest customer message, or the time the worker recorded that the channel accepted the newest message of ours; a delivery or read receipt does not move it. `ended_at` is written when the conversation is next touched after the 24 hours, so a row without it may already be over; one function decides (`packages/db/src/sessions.ts`). **Built in M3 unit U2, with `reply_discards` and `pack_outcome`; the columns below arrive with the units that use them** |
 | `reply_discards` | How many replies in a row were dropped because the customer wrote again; at 2 the next is sent (decisions row 38) |
 | `disclosed_at` | When the session's customer was told that an automated assistant is replying: when the channel accepted a message that carried the disclosure (M3 unit U8, migration 0011; `notes/m3-u8-fixed-texts.md`, section 4). Null until then. Set back to null when that message is reported failed later and no other message of the session that carried the disclosure is sent, delivered or read; the next message sent then carries it. A customer can so be told twice in a session. They can also have read a message without it, when the message that carried it fails after a later one was sent (`notes/m3-u8-fixed-texts.md`, D2c) |
-| `guardrail_fallbacks`, `unreadable_batches`, `assistant_replies` | The counters of state machines, section 3 |
+| `guardrail_fallbacks` | How many fallbacks in a row the customer was sent, 0 to 100. Built in M3 unit U9 (migration 0012; `notes/m3-u9-fallback.md`, section 3). It moves when the channel accepts a message: plus 1 for a fallback, 0 for any other reply of the assistant; a message that is refused, discarded or expires changes nothing. Reaching 2 hands over (US-C6, 2), which is not built: the count goes on rising |
+| `unreadable_batches`, `assistant_replies` | The other counters of state machines, section 3. Not built |
 | `awaiting_retry_since`, `provider_fallback_sent_at` | State machines, section 8 |
 | `language`, `unsupported_language` | For US-C3 and metrics. Built in M3 unit U7 (migration 0010; design note `notes/m3-u7-turn.md`, section 7). `language` is two small letters: what the model said the customer wrote in, at the session's latest reply; a reply whose language the model could not tell leaves it as it was. `unsupported_language` becomes true when a reply's language is not one of the supported ones, and is never set back. Both are the model's word, not a fact |
 | `is_inquiry`, `pack_outcome`, `had_handover`, `contained` | Written when the session ends (US-C19). `is_inquiry` is set by the model; the others by code. `pack_outcome` is a short label the pack supplies (for the booking pack: created, changed, cancelled or none); the core stores it without interpreting it |
@@ -260,6 +261,7 @@ null when no worker holds it).
 | `direction` | `inbound` or `outbound` |
 | `turn_id`, `language` | For an assistant's reply made by a turn with the model (M3 unit U7): the turn, which joins the reply to the traces of the calls behind it, and the language that turn reported (`und` when the model could not tell). Null on every other row. The language is kept on each reply so that a session's mark can be checked and worked out again |
 | `disclosure`, `lead`, `buttons` | For a message of ours only (M3 unit U8, migration 0011). `disclosure`: the disclosure's text when this message carried it, at most 150 characters; set or cleared each time the message is taken to be sent, so it is what the last try sent. `lead`: a fixed text that code put before the body (today only the answer to "am I talking to a person?"), at most 700. `buttons`: null, or a list of 1 or 2, each the payload and the title shown; set to null when a message stored with buttons was sent without them, so that the row says what the customer saw. What was sent is the disclosure, the lead and the body, each that is present, a blank line between. The model is given the body only |
+| `fallback` | True on a reply of the assistant that is the fallback: the model's answer failed a check, the row has no body, and its `lead` is the fallback text (M3 unit U9, migration 0012). Stored as the turn's reply so that every rule a reply has holds for it; its `language` is `und`, since what a refused answer said of the language is not kept |
 | `class` | For outbound: one of the five message classes |
 | `kind` | `text`, `button`, `template`, or the channel's name for a type that is not read (`image`, `audio` and so on). The first three are the system's own: a channel's type of one of those names that was not read is stored as `unknown`, and a template's quick reply that could not be read as `quick-reply`. From a customer, `button` is a tap that was read, and has a payload (a constraint; migration 0008) |
 | `channel_sent_at` | For a message from a customer, the time the channel says it was sent. `created_at` is when the row was stored, taken per row, so the messages of one webhook keep their order |
@@ -367,6 +369,19 @@ tenant, key and language.
 
 ## AI and audit
 
+### `reply_checks` — tenant-owned
+
+`id`, `tenant_id`, `created_at`, `session_id`, `turn_id`, `outcome`
+(`passed`, `blocked`, `error`), and `o1`, `o7`, `o6`, `o3`, `o5`: for each
+check of the guardrail policy's section 4 either `passed`, a code of the
+checker's fixed list, or null when the check did not run. One row for a
+turn whose reply or fallback was stored, written in that transaction and
+never changed (M3 unit U9, migration 0012; `notes/m3-u9-fallback.md`,
+section 6). A turn that stored nothing leaves no row. **No text of the
+reply, of a claim or of the customer**: each column is held to a pattern
+of lower-case letters and hyphens. The reply that failed is stored
+nowhere. Not in the retention table yet.
+
 ### `early_receipts` — tenant-owned
 
 `id`, `tenant_id`, `created_at`, `channel_message_id`, `status` (`sent`,
@@ -425,8 +440,10 @@ application may insert and read; it may not change or delete.
 | `tool_names` | The tools an answer asked for, by name, in order; 4 at most |
 | `outcome`, `outcome_code` | `ok`, `invalid-output`, `timeout`, `provider-error`, `fault`; and the code of the second and fourth |
 
-`guardrail_results` is not a column yet: M3 unit U9 adds it with the code
-that fills it. **No message text, no phone number, no name** (US-C10):
+`guardrail_results` is not a column, and will not be: a trace is written
+once, and what the checks said of an answer is known only later. It is
+in `reply_checks`, below, which shares the turn's identifier with the
+traces of the turn. **No message text, no phone number, no name** (US-C10):
 no column holds free text, and each text column has a pattern the table
 checks. One function sums a session's cost, and gives beside the sum how
 many of the session's calls have no cost.

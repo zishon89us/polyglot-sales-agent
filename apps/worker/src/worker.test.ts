@@ -677,7 +677,7 @@ describe("the send policy when the channel answers", () => {
   });
 
   test("each message that ends failed is reported with its code, and nothing of the message", async () => {
-    await arrives("hello from +15550142");
+    await arrives("hello from a customer");
     mock.failNextSend("meta-131047", false);
     await work();
     expect(failed).toEqual(["send-failed meta-131047"]);
@@ -1179,8 +1179,11 @@ describe("the worker's loop", () => {
       runWorker({ cross, handlers: handlersFor(mock), signal: stop.signal, workerId, pollMs: 5 }),
     );
     const customers = ["+15550101", "+15550102", "+15550103"];
+    // In letters: the stand-in echoes the text, and a reply with a number in it is held back.
+    const saying = (phone: string, n: number): string =>
+      `customer ${"abc"[customers.indexOf(phone)]} says ${["zero", "one", "two", "three", "four"][n]}`;
     for (let n = 0; n < 5; n += 1) {
-      await Promise.all(customers.map((phone) => arrives(`${phone} says ${n}`, "a", phone)));
+      await Promise.all(customers.map((phone) => arrives(saying(phone, n), "a", phone)));
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
     const said = (phone: string) =>
@@ -1191,7 +1194,7 @@ describe("the worker's loop", () => {
     stop.abort();
     await Promise.all(workers);
     for (const phone of customers) {
-      expect(said(phone)).toEqual([0, 1, 2, 3, 4].map((n) => `${phone} says ${n}`));
+      expect(said(phone)).toEqual([0, 1, 2, 3, 4].map((n) => saying(phone, n)));
     }
     // A reply overtaken by the next message of its burst was discarded, never sent late.
     const statuses = (await outbound()).map((message) => message.status);

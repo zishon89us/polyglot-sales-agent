@@ -19,6 +19,13 @@ export interface RoundTripOptions {
   readonly timeoutMs?: number;
 }
 
+export interface RoundTripText {
+  /** The text to send, in place of one made up. */
+  readonly text?: string;
+  /** The reply to wait for, in place of the text's echo. */
+  readonly reply?: string;
+}
+
 export interface RoundTrip {
   readonly sent: string;
   readonly received: string;
@@ -37,11 +44,17 @@ interface Sent {
  * Sends one message and returns when its echo has arrived. Throws, saying
  * which step did not happen, if the time runs out.
  */
-export async function echoRoundTrip(options: RoundTripOptions): Promise<RoundTrip> {
+export async function echoRoundTrip(options: RoundTripOptions & RoundTripText): Promise<RoundTrip> {
   const from = options.from ?? "+15550142";
   const timeoutMs = options.timeoutMs ?? 120_000;
   // Unlike any other message, so that an echo of an earlier run is not taken for this one's.
-  const text = `end to end ${Date.now()} ${Math.random().toString(36).slice(2, 10)}`;
+  // Letters only: the stand-in model echoes the text, and a reply with a
+  // number in it that the business never stored is held back (M3 U9).
+  const letters = Array.from({ length: 20 }, () =>
+    String.fromCharCode(97 + Math.floor(Math.random() * 26)),
+  ).join("");
+  const text = options.text ?? `end to end ${letters}`;
+  const wanted = options.reply ?? `Echo: ${text}`;
   const started = Date.now();
 
   // The webhook is delivered: the mock is up, the API is up and it stored the message.
@@ -75,7 +88,7 @@ export async function echoRoundTrip(options: RoundTripOptions): Promise<RoundTri
     const echo = sent.find(
       (message) =>
         // The first reply of a session begins with the disclosure, a blank line before the echo.
-        (message.body === `Echo: ${text}` || message.body.endsWith(`\n\nEcho: ${text}`)) &&
+        (message.body === wanted || message.body.endsWith(`\n\n${wanted}`)) &&
         message.to === from &&
         message.phoneNumberId === options.numberId,
     );
@@ -86,7 +99,9 @@ export async function echoRoundTrip(options: RoundTripOptions): Promise<RoundTri
       const again = (await (await fetch(`${options.mockUrl}/mock/sent`)).json()) as {
         sent: Sent[];
       };
-      const copies = again.sent.filter((message) => message.body === echo.body).length;
+      const copies = again.sent.filter(
+        (message) => message.body === echo.body && message.to === from,
+      ).length;
       if (copies !== 1) {
         throw new Error(`e2e: the echo arrived ${copies} times`);
       }

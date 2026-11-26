@@ -17,6 +17,7 @@ import {
   FIXED_TEXTS_VERSION,
   type FixedTextSet,
   fixedTextSet,
+  MODEL_FLAGS,
   PART_SEPARATOR,
   REPLY_MAX,
   readProfileFile,
@@ -35,7 +36,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest"
 import { createHandlers } from "./handlers.ts";
 import { loadFixedTexts } from "./texts.ts";
 import { traceRecorder } from "./traces.ts";
-import { REPLY_PROMPT } from "./turn.ts";
+import { FLAGS_FOR_LATER, givenTexts, REPLY_PROMPT, readFlags, todayIn } from "./turn.ts";
 
 const PROMPT = loadPrompt(
   fileURLToPath(new URL("../../../prompts/", import.meta.url)),
@@ -222,8 +223,8 @@ const fails = (channelMessageId: string) =>
 
 describe("the disclosure (US-C5, 1)", () => {
   test("D1, D2, D5: the first message of a session begins with it, the session is then marked, and later messages do not carry it", async () => {
-    await exchange("We open at 10:00.");
-    expect(bodies()).toEqual([`${TOLD}\n\nWe open at 10:00.`]);
+    await exchange("We open in the morning.");
+    expect(bodies()).toEqual([`${TOLD}\n\nWe open in the morning.`]);
     expect(await sessions()).toEqual([{ told: true }]);
     await exchange("Yes, on Friday too.");
     await exchange("Goodbye.");
@@ -231,7 +232,7 @@ describe("the disclosure (US-C5, 1)", () => {
     const rows = await outbound();
     // The record keeps the parts apart: the body is the model's reply alone.
     expect(rows.map((row) => [row.disclosure, row.lead, row.body])).toEqual([
-      [TOLD, null, "We open at 10:00."],
+      [TOLD, null, "We open in the morning."],
       [null, null, "Yes, on Friday too."],
       [null, null, "Goodbye."],
     ]);
@@ -433,7 +434,7 @@ describe("the disclosure (US-C5, 1)", () => {
           return result;
         },
       };
-      await exchange(`next ${round}`, [], racing);
+      await exchange(`next ${"abcde"[round]}`, [], racing);
       await webhook;
     }
     const rows = await outbound();
@@ -617,7 +618,7 @@ describe("the disclosure (US-C5, 1)", () => {
   });
 
   test("the model is never shown the disclosure or a fixed text: the next turn's request holds the reply's body alone", async () => {
-    await exchange("We open at 10:00.", ["asks-if-person"]);
+    await exchange("We open in the morning.", ["asks-if-person"]);
     const adapter = new FakeLlmAdapter([answer("Yes.")]);
     await arrives("And on Friday?");
     const handlers = createHandlers({
@@ -638,7 +639,7 @@ describe("the disclosure (US-C5, 1)", () => {
       // Until the queue is empty.
     }
     const request = JSON.stringify(adapter.calls[0]);
-    expect(request).toContain("We open at 10:00.");
+    expect(request).toContain("We open in the morning.");
     expect(request).not.toContain(TOLD);
     expect(request).not.toContain(NOT_A_PERSON);
   });
@@ -646,15 +647,15 @@ describe("the disclosure (US-C5, 1)", () => {
 
 describe('"am I talking to a person?" (US-C5, 3)', () => {
   test("P1, P4: the flag with a reply: the fixed text before the reply, after the disclosure in a first message; the message is still the assistant's reply, with its turn and language", async () => {
-    await exchange("We open at 10:00.", ["asks-if-person"]);
-    expect(bodies()).toEqual([`${TOLD}\n\n${NOT_A_PERSON}\n\nWe open at 10:00.`]);
+    await exchange("We open in the morning.", ["asks-if-person"]);
+    expect(bodies()).toEqual([`${TOLD}\n\n${NOT_A_PERSON}\n\nWe open in the morning.`]);
     await exchange("Still me.", ["asks-if-person"]);
     expect(bodies()[1]).toBe(`${NOT_A_PERSON}\n\nStill me.`);
     const rows = await outbound();
     expect(
       rows.map((row) => [row.class, row.disclosure, row.lead, row.body, row.language]),
     ).toEqual([
-      ["assistant-reply", TOLD, NOT_A_PERSON, "We open at 10:00.", "en"],
+      ["assistant-reply", TOLD, NOT_A_PERSON, "We open in the morning.", "en"],
       ["assistant-reply", null, NOT_A_PERSON, "Still me.", "en"],
     ]);
     expect(rows.every((row) => row.turn_id !== null)).toBe(true);
@@ -667,9 +668,10 @@ describe('"am I talking to a person?" (US-C5, 3)', () => {
     expect(reported).toEqual([]);
     await exchange("   ", ["asks-if-person"]);
     expect(bodies()[1]).toBe(NOT_A_PERSON);
+    // An empty reply with no flag is a failed reply: the fallback (M3 U9).
     await exchange("");
-    expect(bodies()).toHaveLength(2);
-    expect(reported).toEqual(["turn-skipped empty-reply"]);
+    expect(bodies()[2]).toBe(ENGLISH.fallback);
+    expect(reported).toEqual(["reply-blocked length-empty"]);
   });
 
   test("P3: no flag, or another flag: the reply as it is", async () => {
@@ -860,5 +862,410 @@ describe("buttons on a sent message (section 6, D9)", () => {
     ] as const) {
       await expect(insert(column, value, true)).rejects.toThrow(/messages_fixed_parts_are_sent/);
     }
+  });
+});
+
+describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)", () => {
+  const FALLBACK = ENGLISH.fallback;
+  const step = (value: Record<string, unknown>): FakeStep => ({
+    kind: "answer",
+    value: { claims: [], flags: [], toolCalls: [], language: "en", ...value },
+  });
+  /** A customer's message, and the model's scripted answer to it. */
+  async function answered(script: FakeStep, channel: Channel = mock): Promise<void> {
+    await arrives("a question");
+    await work([script], channel);
+  }
+  const count = async (): Promise<number[]> =>
+    (
+      await administrator.query<{ n: number }>(
+        "SELECT guardrail_fallbacks AS n FROM sessions ORDER BY started_at, id",
+      )
+    ).rows.map((row) => row.n);
+  const checks = async () =>
+    (
+      await administrator.query(
+        "SELECT outcome, o1, o7, o6, o3, o5 FROM reply_checks ORDER BY created_at, id",
+      )
+    ).rows;
+  const haircut = async (): Promise<{ id: string; price: string }> => {
+    const found = await administrator.query<{ id: string; price_minor: string }>(
+      "SELECT id, price_minor FROM services WHERE name = 'Haircut'",
+    );
+    const row = found.rows[0] as { id: string; price_minor: string };
+    return { id: row.id, price: String(Number(row.price_minor) / 100) };
+  };
+
+  test.each([
+    [
+      "a wrong price",
+      step({ reply: "The haircut costs 5 SAR today, zebra." }),
+      "values-amount-unclaimed",
+    ],
+    ["a foreign link", step({ reply: "Pay at zebra.example/pay to confirm." }), "contacts-link"],
+    ["the canary", step({ reply: "My zebra code is testcanary0000000000." }), "leak-canary"],
+    [
+      "a number nobody stored",
+      step({ reply: "We have 3 zebra stylists." }),
+      "values-number-unknown",
+    ],
+    ["a payment address", step({ reply: "Send it to zebra@okbank please." }), "contacts-handle"],
+    ["an empty reply", step({ reply: "  " }), "length-empty"],
+    ["an answer that does not match the schema", step({ reply: 7 }), "schema-invalid-output"],
+    ["an answer cut at the limit", { kind: "truncated" } as FakeStep, "schema-invalid-output"],
+  ])(
+    "hostile output, %s: the customer gets the fallback and no word of the reply",
+    async (_name, script, code) => {
+      await answered(script);
+      expect(bodies()).toEqual([`${TOLD}\n\n${FALLBACK}`]);
+      expect(JSON.stringify(mock.sent)).not.toContain("zebra");
+      expect(reported).toEqual([`reply-blocked ${code}`]);
+      const rows = await administrator.query(
+        `SELECT class, body, lead, fallback, language, buttons, status, turn_id IS NOT NULL AS turn
+       FROM messages WHERE direction = 'outbound'`,
+      );
+      // The turn's reply, with no body: the refused text is stored nowhere. No button: a tap does nothing yet.
+      expect(rows.rows).toEqual([
+        {
+          class: "assistant-reply",
+          body: null,
+          lead: FALLBACK,
+          fallback: true,
+          language: "und",
+          buttons: null,
+          status: "sent",
+          turn: true,
+        },
+      ]);
+      const stored = await administrator.query(
+        "SELECT body FROM messages WHERE body LIKE '%zebra%'",
+      );
+      expect(stored.rowCount).toBe(0);
+      expect(await count()).toEqual([1]);
+    },
+  );
+
+  test("T1: a reply that passes is sent, with the price it claims, and the record says each check passed", async () => {
+    const { id, price } = await haircut();
+    await answered(
+      step({
+        reply: `A haircut costs ${price} SAR.`,
+        claims: [{ kind: "price", item: id, value: `${price} SAR` }],
+      }),
+    );
+    expect(bodies()).toEqual([`${TOLD}\n\nA haircut costs ${price} SAR.`]);
+    expect(reported).toEqual([]);
+    expect(await checks()).toEqual([
+      { outcome: "passed", o1: "passed", o7: "passed", o6: "passed", o3: "passed", o5: "passed" },
+    ]);
+    // The same price with no claim, and the same claim with another price.
+    await answered(step({ reply: `A haircut costs ${price} SAR.` }));
+    await answered(
+      step({
+        reply: `A haircut costs ${Number(price) + 1} SAR.`,
+        claims: [{ kind: "price", item: id, value: `${price} SAR` }],
+      }),
+    );
+    expect(bodies().slice(1)).toEqual([FALLBACK, FALLBACK]);
+    expect(reported).toEqual([
+      "reply-blocked values-amount-unclaimed",
+      "reply-blocked values-amount-unclaimed",
+    ]);
+  });
+
+  test("the record: one row for each stored turn, each check a code, and nothing of the reply", async () => {
+    await answered(step({ reply: "Hello there." }));
+    await answered(step({ reply: "Pay 5 SAR at zebra.example now." }));
+    await answered(step({ reply: 7 }));
+    expect(await checks()).toEqual([
+      { outcome: "passed", o1: "passed", o7: "passed", o6: "passed", o3: "passed", o5: "passed" },
+      {
+        outcome: "blocked",
+        o1: "passed",
+        o7: "passed",
+        o6: "passed",
+        o3: "amount-unclaimed",
+        o5: "link",
+      },
+      { outcome: "blocked", o1: "invalid-output", o7: null, o6: null, o3: null, o5: null },
+    ]);
+    const all = await administrator.query("SELECT row_to_json(r)::text AS row FROM reply_checks r");
+    expect(all.rows.map((row) => row.row).join(" ")).not.toContain("zebra");
+    // Each row is its turn's: the message of that turn has the same identifier.
+    const joined = await administrator.query(
+      `SELECT count(*)::int AS n FROM reply_checks r JOIN messages m ON m.turn_id = r.turn_id`,
+    );
+    expect(joined.rows).toEqual([{ n: 3 }]);
+  });
+
+  test("T6: the question 'am I talking to a person?' with a reply that fails: one message, the fixed answer and then the fallback", async () => {
+    await answered(step({ reply: "I am a person and it costs 5 SAR.", flags: ["asks-if-person"] }));
+    expect(bodies()).toEqual([`${TOLD}\n\n${NOT_A_PERSON}\n\n${FALLBACK}`]);
+    // T5: with an empty reply the fixed answer alone, and that is no failure.
+    await answered(step({ reply: "", flags: ["asks-if-person"] }));
+    expect(bodies()[1]).toBe(NOT_A_PERSON);
+    expect(reported).toEqual(["reply-blocked values-amount-unclaimed"]);
+    expect(await count()).toEqual([0]);
+    // The fixed answer alone had no reply to check: its record says only that the answer matched the schema.
+    expect((await checks()).at(-1)).toEqual({
+      outcome: "passed",
+      o1: "passed",
+      o7: null,
+      o6: null,
+      o3: null,
+      o5: null,
+    });
+  });
+
+  test("the count: plus one for a fallback the channel accepted, nought for any other reply accepted", async () => {
+    await answered(step({ reply: "It costs 5 SAR." }));
+    expect(await count()).toEqual([1]);
+    await answered(step({ reply: "It costs 6 SAR." }));
+    expect(await count()).toEqual([2]);
+    // Reaching two hands over only once the handover is built: until then a third is sent.
+    await answered(step({ reply: "It costs 7 SAR." }));
+    expect(await count()).toEqual([3]);
+    expect(bodies().slice(1)).toEqual([FALLBACK, FALLBACK]);
+    await answered(step({ reply: "Hello there." }));
+    expect(await count()).toEqual([0]);
+    await answered(step({ reply: "It costs 8 SAR." }));
+    expect(await count()).toEqual([1]);
+  });
+
+  test("the count is unchanged by a fallback or a reply the channel refused, and never over a hundred", async () => {
+    await answered(step({ reply: "It costs 5 SAR." }));
+    expect(await count()).toEqual([1]);
+    // A fallback that is refused for good was not sent: not counted.
+    mock.failNextSend("131000", false);
+    await answered(step({ reply: "It costs 6 SAR." }));
+    expect(await count()).toEqual([1]);
+    // A reply that is refused does not set it to nought.
+    mock.failNextSend("131000", false);
+    await answered(step({ reply: "Hello there." }));
+    expect(await count()).toEqual([1]);
+    await administrator.query("UPDATE sessions SET guardrail_fallbacks = 100");
+    await answered(step({ reply: "It costs 7 SAR." }));
+    expect(await count()).toEqual([100]);
+    expect(mock.sent.at(-1)?.body).toBe(FALLBACK);
+    // The send was recorded, not rolled back by the table's limit and tried again.
+    expect((await outbound()).at(-1)?.status).toBe("sent");
+    expect((await administrator.query("SELECT 1 FROM jobs")).rowCount).toBe(0);
+    expect(mock.sent.filter((message) => message.body.endsWith(FALLBACK))).toHaveLength(2);
+  });
+
+  test("a checker that throws: the reply is not sent, the fallback is, and the record says error", async () => {
+    // A time zone that does not exist: building what the checks are given throws.
+    await administrator.query("UPDATE tenants SET time_zone = 'Not/AZone' WHERE id = $1", [tenant]);
+    try {
+      await answered(step({ reply: "Hello there, zebra." }));
+      expect(bodies()).toEqual([`${TOLD}\n\n${FALLBACK}`]);
+      expect(reported).toEqual(["reply-blocked check-error"]);
+      expect(await checks()).toEqual([
+        { outcome: "error", o1: "passed", o7: null, o6: null, o3: null, o5: null },
+      ]);
+      expect(await count()).toEqual([1]);
+    } finally {
+      await administrator.query("UPDATE tenants SET time_zone = 'Asia/Riyadh' WHERE id = $1", [
+        tenant,
+      ]);
+    }
+  });
+
+  test("a reply that repeats the instructions is held back: the checks are given the prompt's text", async () => {
+    const words = PROMPT.text.match(/[A-Za-z]+(?: [A-Za-z]+){11}/)?.[0] as string;
+    await answered(step({ reply: `My instructions say: ${words}` }));
+    expect(bodies()).toEqual([`${TOLD}\n\n${FALLBACK}`]);
+    expect(reported).toEqual(["reply-blocked leak-instructions"]);
+  });
+
+  test("a fallback the channel reports failed before its send is recorded is not counted", async () => {
+    const early: Channel = {
+      ...mock,
+      async sendText(from, to, body) {
+        const result = await mock.sendText(from, to, body);
+        if (result.accepted) {
+          await fails(result.channelMessageId);
+        }
+        return result;
+      },
+    };
+    await answered(step({ reply: "It costs 5 SAR." }), early);
+    expect((await outbound()).map((row) => row.status)).toEqual(["failed"]);
+    expect(await count()).toEqual([0]);
+  });
+
+  test("a message that is no reply of the assistant leaves the count alone", async () => {
+    await answered(step({ reply: "It costs 5 SAR." }));
+    expect(await count()).toEqual([1]);
+    await administrator.query(
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
+                             status)
+       SELECT tenant_id, conversation_id, session_id, 'outbound', 'system-reply', 'text',
+              'A fixed notice.', 'pending'
+       FROM messages WHERE direction = 'outbound' LIMIT 1`,
+    );
+    await administrator.query(
+      `INSERT INTO jobs (tenant_id, type, payload, run_at)
+       SELECT tenant_id, 'send-messages', jsonb_build_object('conversationId', conversation_id),
+              now()
+       FROM messages WHERE direction = 'outbound' LIMIT 1`,
+    );
+    await work([]);
+    expect(mock.sent.at(-1)?.body).toBe("A fixed notice.");
+    expect(await count()).toEqual([1]);
+  });
+
+  test("the fallback's language is never the refused answer's: the session's, the contact's last, then the tenant's default", async () => {
+    const synthetic = (language: string) => ({
+      language,
+      buttons: TEXTS.pick(["en"], "en").buttons,
+      texts: { ...ENGLISH, disclosure: `[${language}] told`, fallback: `[${language}] sorry` },
+    });
+    const many = fixedTextSet([synthetic("en"), synthetic("ar"), synthetic("ur")]) as FixedTextSet;
+    await arrives("a question");
+    await work([step({ reply: "It costs 5 SAR.", language: "ur" })], mock, 0, many);
+    // Urdu has texts and the answer said Urdu; the tenant's default, Arabic, is what is used.
+    expect(bodies()).toEqual(["[ar] told\n\n[ar] sorry"]);
+    const stored = await administrator.query(
+      "SELECT language FROM messages WHERE direction = 'outbound'",
+    );
+    expect(stored.rows).toEqual([{ language: "und" }]);
+  });
+
+  test("a new session starts at nought", async () => {
+    await answered(step({ reply: "It costs 5 SAR." }));
+    await administrator.query(
+      `UPDATE sessions SET started_at = started_at - interval '25 hours',
+                           last_message_at = last_message_at - interval '25 hours'`,
+    );
+    await answered(step({ reply: "It costs 6 SAR." }));
+    expect(await count()).toEqual([1, 1]);
+  });
+
+  test("a fallback not yet sent is discarded for a newer message, as a reply is, and the batch is answered again (US-C11, 2)", async () => {
+    mock.failNextSend("131016", true);
+    await answered(step({ reply: "It costs 5 SAR." }));
+    expect(bodies()).toEqual([]);
+    expect(await count()).toEqual([0]);
+    await endWaits();
+    await answered(step({ reply: "Hello to both." }));
+    expect(bodies()).toEqual([`${TOLD}\n\nHello to both.`]);
+    expect((await outbound()).map((row) => [row.status, row.lead === FALLBACK])).toEqual([
+      ["discarded", true],
+      ["sent", false],
+    ]);
+    expect(await count()).toEqual([0]);
+  });
+
+  test("what a refused answer said of the language is neither stored nor used", async () => {
+    await answered(step({ reply: "It costs 5 SAR.", language: "fr" }));
+    const session = await administrator.query(
+      "SELECT language, unsupported_language FROM sessions",
+    );
+    expect(session.rows).toEqual([{ language: null, unsupported_language: false }]);
+    expect((await administrator.query("SELECT last_language FROM contacts")).rows).toEqual([
+      { last_language: null },
+    ]);
+  });
+
+  test("the model is not shown the fallback or the refused reply: the next request holds neither", async () => {
+    await answered(step({ reply: "The zebra price is 5 SAR." }));
+    const adapter = new FakeLlmAdapter([step({ reply: "Hello again." })]);
+    await arrives("and now?");
+    const handlers = createHandlers({
+      app,
+      channels: { mock },
+      accessToken: MOCK_ACCESS_TOKEN,
+      texts: TEXTS,
+      model: {
+        client: bounded(adapter, { record: traceRecorder(app) }),
+        prompt: PROMPT,
+        fragments: {},
+        canary: "testcanary0000000000",
+        packs: { "faq-only": { name: "faq-only" } },
+        texts: TEXTS,
+      },
+    });
+    while ((await workOnce(cross, handlers, { clock: () => new Date(Date.now() + 50) })).ran) {
+      // Until the queue is empty.
+    }
+    const request = JSON.stringify(adapter.calls[0]);
+    expect(request).not.toContain("zebra");
+    expect(request).not.toContain(FALLBACK);
+    expect(request).toContain("a question");
+  });
+
+  test("a time the customer wrote in this batch passes, and one from no message of the batch does not", async () => {
+    await arrives("can I come at 5 pm?");
+    await work([step({ reply: "Let me note 5 pm for you." })]);
+    expect(bodies()).toEqual([`${TOLD}\n\nLet me note 5 pm for you.`]);
+    await arrives("thanks");
+    await work([step({ reply: "See you at 6 pm." })]);
+    expect(bodies()[1]).toBe(FALLBACK);
+  });
+
+  test("a turn that stores nothing leaves no record: the customer wrote again during the call", async () => {
+    await arrives("a question");
+    const adapter = new FakeLlmAdapter([step({ reply: "It costs 5 SAR." })]);
+    const client = bounded(
+      {
+        generate: async (request, signal) => {
+          await arrives("one more thing");
+          return adapter.generate(request, signal);
+        },
+        health: async () => ({ ok: true }),
+      },
+      { record: traceRecorder(app) },
+    );
+    const handlers = createHandlers({
+      app,
+      channels: { mock },
+      accessToken: MOCK_ACCESS_TOKEN,
+      report: (event, code) => reported.push(`${event} ${code}`),
+      texts: TEXTS,
+      model: {
+        client,
+        prompt: PROMPT,
+        fragments: {},
+        canary: "testcanary0000000000",
+        packs: { "faq-only": { name: "faq-only" } },
+        texts: TEXTS,
+      },
+    });
+    await workOnce(cross, handlers, { clock: () => new Date(Date.now() + 50) });
+    expect(await checks()).toEqual([]);
+    expect(reported).toEqual([]);
+    expect(await outbound()).toEqual([]);
+  });
+});
+
+describe("the flags are read in one place (guardrail policy, O2)", () => {
+  test("only the question about a person is acted on; the others are named with their unit and dropped", () => {
+    expect(readFlags(["asks-if-person", "emergency", "asks-to-stop"])).toEqual({
+      answerIsAutomated: true,
+      dropped: ["emergency", "asks-to-stop"],
+    });
+    expect(readFlags([])).toEqual({ answerIsAutomated: false, dropped: [] });
+    expect(Object.keys(FLAGS_FOR_LATER).sort()).toEqual(
+      MODEL_FLAGS.filter((flag) => flag !== "asks-if-person").sort(),
+    );
+  });
+
+  test("today's date is the business's, not the server's", () => {
+    const at = new Date("2026-11-26T21:30:00Z");
+    expect(todayIn("Asia/Riyadh", at)).toEqual({ year: 2026, month: 11, day: 27 });
+    expect(todayIn("America/Los_Angeles", at)).toEqual({ year: 2026, month: 11, day: 26 });
+    expect(() => todayIn("Not/AZone", at)).toThrow();
+  });
+
+  test("the texts given to the checks are the ones the model was given: cut where the batch was cut", () => {
+    const long = "a".repeat(20_000);
+    const given = givenTexts([
+      { kind: "text", body: long },
+      { kind: "image", body: null },
+      { kind: "text", body: "at 5 pm" },
+    ]);
+    expect(given.join("").length).toBeLessThan(long.length);
+    expect(givenTexts([{ kind: "button", body: null }])).toEqual([]);
   });
 });

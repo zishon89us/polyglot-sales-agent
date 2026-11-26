@@ -58,8 +58,16 @@ try {
     timeoutMs: DEFAULT_SEND_TIMEOUT_MS,
   });
   // Every line in the one shape (NFR-O2): no key of it can hold a sentence.
-  const report = (event: "loop-error" | "turn-skipped" | "send-failed", code: string): void =>
-    log({ level: event === "turn-skipped" ? "info" : "error", event, code });
+  const report = (
+    event: "loop-error" | "turn-skipped" | "send-failed" | "reply-blocked",
+    code: string,
+  ): void =>
+    // A reply that was held back is a warning: one is expected now and then, many are not.
+    log({
+      level: event === "turn-skipped" ? "info" : event === "reply-blocked" ? "warn" : "error",
+      event,
+      code,
+    });
   const stop = new AbortController();
   // Finish the job in hand, then let go of the database.
   process.once("SIGTERM", () => stop.abort());

@@ -211,7 +211,7 @@ A session carries these independent marks while active:
 | Disclosed | The first outbound message of the session | Never |
 | Handed over | A handover attaching to it (machine 2) | That handover leaving `waiting` or `in-progress` |
 | Awaiting retry | Machine 8 | Machine 8 |
-| Consecutive guardrail fallbacks (0, 1, 2) | A fallback sent because an output check failed | Any assistant reply that passes; reaching 2 hands over |
+| Consecutive guardrail fallbacks (0, 1, 2; as built in M3 unit U9 the count moves when the channel accepts the message, and goes on past 2 until the handover is built) | A fallback sent because an output check failed | Any assistant reply that passes; reaching 2 hands over |
 | Consecutive unreadable batches (0 to 3) | A batch with no text | Any text; reaching 3 hands over |
 | Assistant reply count | Each assistant reply | Never; reaching the turn cap hands over |
 

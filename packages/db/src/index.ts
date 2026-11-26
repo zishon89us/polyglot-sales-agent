@@ -53,6 +53,7 @@ export {
   type HistoryMessage,
   type MessageToSend,
   type NextSend,
+  type ReplyChecksRecord,
   recordSend,
   renewTurn,
   runTool,

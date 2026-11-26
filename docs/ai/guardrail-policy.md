@@ -103,6 +103,15 @@ decides the outcome.
 | O7 | The reply is not empty and not longer than 1,200 code points (#158; glossary) | Fallback |
 | O8 | Code adds the disclosure if this is the session's first outbound message, then applies the message-class checks and sends | As state machines §7 |
 
+**Built in M3 unit U9, second part:** the turn runs these checks on
+every answer; a reply that fails one, or an answer that does not match
+the schema (O1), is not sent, and the fallback is the turn's reply
+(`design/notes/m3-u9-fallback.md`). The fallback is sent **without its
+button** until a tap does something, and two in a row do **not** hand
+over yet: both are U10's and U11's. Of the flags (O2) only the question
+"am I talking to a person?" is acted on, and beside it the model's reply
+is still sent after the fixed answer, where O2 says it is discarded.
+
 **Built in M3 unit U9, first part:** O3, O5, O6 and O7 as one function
 (`packages/core/src/reply-checks.ts`; rules and cases in
 `design/notes/m3-u9-output-checks.md`). Nothing calls it yet: the turn
