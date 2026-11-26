@@ -1585,6 +1585,69 @@ describe("the handover record (M3 unit U11; US-C6)", () => {
     expect((await tellings()).map((row) => row.status)).toEqual(["failed", "sent"]);
   });
 
+  test("R1: a handover attached again whose telling fails is told again, though an earlier attachment's telling was sent", async () => {
+    await batch("TAP");
+    await run([]);
+    await administrator.query(
+      `UPDATE sessions SET started_at = started_at - interval '25 hours',
+                           last_message_at = last_message_at - interval '25 hours'`,
+    );
+    await administrator.query(
+      "UPDATE messages SET created_at = created_at - interval '25 hours' WHERE tells IS NOT NULL",
+    );
+    await batch("hello again");
+    await run([step({ reply: "Hello there." })]);
+    mock.failNextSend("131000", false);
+    await batch("TAP");
+    await run([]);
+    expect((await handovers()).map((row) => row.state)).toEqual(["waiting"]);
+    expect((await tellings()).at(-1)).toMatchObject({ tells: "handover", status: "failed" });
+    const sentBefore = bodies().length;
+    await batch("hello?");
+    expect(await run([])).toBe(0);
+    expect(bodies().slice(sentBefore)).toEqual([WILL_REPLY]);
+  });
+
+  test("an urgent handover whose emergency telling failed is told again with the emergency text, and stays urgent when another reason comes", async () => {
+    mock.failNextSend("131000", false);
+    await batch("help");
+    await run([step({ reply: "x", flags: ["emergency"] })]);
+    expect(bodies()).toEqual([]);
+    await batch("TAP");
+    expect(await run([])).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+    // The tap added its reason; the handover is urgent still.
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["emergency", "requested"], urgent: true, attached: true },
+    ]);
+  });
+
+  test("R3: a tap beside text hands over also when the provider fails, at once and with no retry", async () => {
+    await batch("TAP", "hello");
+    await run([{ kind: "provider-error", code: "unavailable" }]);
+    expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+    expect((await handovers()).map((row) => row.reasons)).toEqual([["requested"]]);
+    expect((await administrator.query("SELECT 1 FROM jobs")).rowCount).toBe(0);
+  });
+
+  test("G6: a second fallback that the channel reports failed before its send is recorded hands nothing over", async () => {
+    await batch("one");
+    await run([step({ reply: "It costs 5 SAR." })]);
+    const early: Channel = {
+      ...mock,
+      async sendButtons(from, to, body, buttons) {
+        const result = await mock.sendButtons(from, to, body, buttons);
+        if (result.accepted) {
+          await fails(result.channelMessageId);
+        }
+        return result;
+      },
+    };
+    await batch("two");
+    await run([step({ reply: "It costs 6 SAR." })], early);
+    expect(await handovers()).toEqual([]);
+  });
+
   test("S5, H-c: when the session ends the handover is detached and the assistant answers again; a new trigger attaches the same record", async () => {
     await batch("TAP");
     await run([]);
@@ -1617,6 +1680,11 @@ describe("the handover record (M3 unit U11; US-C6)", () => {
     expect(await run([step({ reply: "Hello there." })])).toBe(1);
     expect(bodies().at(-1)).toBe("Hello there.");
     expect((await handovers()).map((row) => row.state)).toEqual(["detached"]);
+    // Detached at the moment the 24 hours ran out, not when that was noticed.
+    const when = await administrator.query(
+      "SELECT round(extract(epoch FROM detached_at - attached_at) / 3600) AS hours FROM handovers",
+    );
+    expect(when.rows).toEqual([{ hours: "24" }]);
   });
 
   test("H-d: a detached handover over fourteen days old is closed as expired when a trigger finds it, and a new one is made", async () => {

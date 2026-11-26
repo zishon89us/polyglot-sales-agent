@@ -766,14 +766,20 @@ M0 Inception met its exit criteria on 2026-11-16; see
   again**. Built: the `handovers` table; the triggers that exist now
   (the person button, four of the model's flags, two fallbacks in a
   row); a handed-over session is not answered and the model is not
-  called; the customer is told once, in or out of business hours, or
-  with the emergency text; the handover is detached when the session
+  called; the customer is told when the handover is attached, in or
+  out of business hours, or with the emergency text, and again only if
+  every telling of that attachment failed; the handover is detached when the session
   ends, or 24 hours after it was attached; the fallback carries its
   button (migration 0013). **Not built: anyone to reply.** No queue, no
   screen, no notification before M4. An emergency written in a session
   that is already handed over gets nothing until U10's phrase list. No
   timers: a detached handover is closed only when a later trigger
   finds it over 14 days old.
+  A third agent reviewed the code
+  (`reviews/2026-11-27-gate4-u11-handover.md`): one High finding (a
+  handover attached again whose telling failed was never told again,
+  because an earlier attachment's telling counted), four Medium, and 6
+  of 23 mutants alive. Fixed, **checked by the author only**. What is left is #339.
 
 ## Next
 

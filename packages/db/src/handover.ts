@@ -221,7 +221,8 @@ export async function applyHandoverTrigger(
     ]);
     await tx.query(
       `UPDATE messages SET status = 'discarded', send_not_before = NULL
-       WHERE session_id = $1 AND class = 'assistant-reply' AND status = 'pending'`,
+       WHERE session_id = $1 AND class = 'assistant-reply' AND status = 'pending'
+         AND unknown_outcomes = 0`,
       [trigger.sessionId],
     );
   }

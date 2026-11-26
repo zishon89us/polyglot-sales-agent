@@ -362,6 +362,11 @@ export async function runTurn(
       // Outside any transaction: the trace is stored on a connection of its own.
       const result = await model.client.generate({ ...request, messages }, place);
       if (result.kind === "timeout" || result.kind === "provider-error") {
+        if (tapped) {
+          // The tap needs no model: the customer is handed over now, not
+          // when the provider is back. The text beside it goes unread.
+          return handOver(["requested"]);
+        }
         throw failure(`model-${result.kind}`);
       }
       const texts = model.texts;
@@ -491,6 +496,10 @@ export async function runTurn(
         };
       }
       if (round >= TOOL_ROUNDS_MAX) {
+        if (tapped) {
+          // The tap hands over whatever the model did with the text beside it.
+          return handOver(["requested"]);
+        }
         return { kind: "no-reply", code: "tool-rounds", end: await end() };
       }
       messages.push({ role: "tool-calls", toolCalls });

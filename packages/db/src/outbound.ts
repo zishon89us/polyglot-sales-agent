@@ -236,7 +236,7 @@ export type TurnEnd =
  *
  * `now` is for tests.
  */
-export function finishTurn(
+export async function finishTurn(
   app: Database,
   tenantId: string,
   conversationId: string,
@@ -281,7 +281,8 @@ export function finishTurn(
     };
   },
 ): Promise<TurnEnd> {
-  return withTenant(poolOf(app), tenantId, async (tx) => {
+  let madeHandover: HandoverResult | undefined;
+  const ended = await withTenant(poolOf(app), tenantId, async (tx) => {
     if (!(await holdsLease(tx, conversationId, turn.token))) {
       return "lost-lease";
     }
@@ -331,7 +332,7 @@ export function finishTurn(
       }
       await markHandled();
       await releaseLease(tx, conversationId, turn.token);
-      handover.done?.(result);
+      madeHandover = result;
       return "stored";
     }
     const newer = await tx.query(
@@ -447,6 +448,10 @@ export function finishTurn(
     await releaseLease(tx, conversationId, turn.token);
     return "stored";
   });
+  if (madeHandover !== undefined) {
+    made?.handover?.done?.(madeHandover);
+  }
+  return ended;
 }
 
 async function insertChecks(
@@ -519,16 +524,21 @@ export function joinHandover(
       // S2: the tap adds its reason to the handover the session already has.
       await applyHandoverTrigger(tx, { ...trigger, reasons: ["requested"] });
     }
-    // Told again only if every telling of this handover failed or expired.
-    const told = await tx.query(
-      `SELECT 1 FROM messages
-       WHERE handover_id = $1 AND status IN ('pending', 'sending', 'sent', 'delivered', 'read')
-       LIMIT 1`,
+    // Told again only if every telling of **this attachment** failed or
+    // expired: a telling of an earlier time the same record was attached
+    // does not count. An urgent handover needs the emergency text among
+    // them, unless the contact was sent it within the hour.
+    const live = await tx.query<{ tells: string }>(
+      `SELECT m.tells FROM messages m JOIN handovers h ON h.id = m.handover_id
+       WHERE h.id = $1 AND m.created_at >= h.attached_at
+         AND m.status IN ('pending', 'sending', 'sent', 'delivered', 'read')`,
       [waiting.id],
     );
-    if (told.rowCount === 0) {
-      const emergency = waiting.urgent && !(await emergencyToldLately(tx, trigger));
-      await tellCustomer(tx, trigger, waiting.id, emergency);
+    const lately = waiting.urgent && (await emergencyToldLately(tx, trigger));
+    const needsEmergency =
+      waiting.urgent && !lately && !live.rows.some((row) => row.tells === "emergency");
+    if (live.rowCount === 0 || needsEmergency) {
+      await tellCustomer(tx, trigger, waiting.id, needsEmergency);
     }
     await tx.query(
       `UPDATE messages SET handled_at = $2::timestamptz
@@ -1050,7 +1060,7 @@ export type CallResult =
  * is no longer in the call this worker started: it took so long that the
  * call was taken as lost and dealt with by another.
  */
-export function recordSend(
+export async function recordSend(
   app: Database,
   tenantId: string,
   message: Pick<MessageToSend, "id" | "attempt">,
@@ -1061,7 +1071,8 @@ export function recordSend(
   /** How the customer is told of a handover made here, and where that is reported. */
   handover?: { readonly tell: HandoverTell; readonly done?: (result: HandoverResult) => void },
 ): Promise<SendDecision | "superseded"> {
-  return withTenant(poolOf(app), tenantId, async (tx) => {
+  let madeHandover: HandoverResult | undefined;
+  const decided = await withTenant(poolOf(app), tenantId, async (tx) => {
     // The conversation first, then the message: one order of locks everywhere.
     const whose = await tx.query<{ conversation_id: string }>(
       "SELECT conversation_id FROM messages WHERE id = $1",
@@ -1153,16 +1164,14 @@ export function recordSend(
           const at = await stamp(tx, now);
           const open = await openSession(tx, conversationId, at);
           if (open?.id === sessionId) {
-            handover.done?.(
-              await applyHandoverTrigger(tx, {
-                tenantId,
-                conversationId,
-                sessionId,
-                reasons: ["repeated-failure"],
-                at,
-                tell: handover.tell,
-              }),
-            );
+            madeHandover = await applyHandoverTrigger(tx, {
+              tenantId,
+              conversationId,
+              sessionId,
+              reasons: ["repeated-failure"],
+              at,
+              tell: handover.tell,
+            });
           }
         }
       }
@@ -1173,4 +1182,9 @@ export function recordSend(
     }
     return decision;
   });
+  // Reported once the transaction has committed: a handover that was rolled back is not told of.
+  if (madeHandover !== undefined) {
+    handover?.done?.(madeHandover);
+  }
+  return decided;
 }

@@ -3,7 +3,8 @@
 Status: proposed by the agent, 2026-11-27, before any code; rewritten
 the same day after its review
 (`docs/reviews/2026-11-27-m3-u11-design-review.md`, four High findings),
-and not reviewed again. Issue #310. The maintainer answered row 29 of the decisions
+and not reviewed again. Corrected after the code's review
+(`docs/reviews/2026-11-27-gate4-u11-handover.md`). Issue #310. The maintainer answered row 29 of the decisions
 page with yes on 2026-11-27: M3 builds the record. Stories: US-C6,
 criteria 1, 2, 3, 5, 6, 8 (its first half), 9 and 10 (its part);
 US-C8, 5; US-C11, 4. State machines, sections 1 (steps 10, 11 and 15)
@@ -50,8 +51,9 @@ text hands over without the model. A batch that holds the tap **and
 text** is given to the model, so that its flags are read: "he is not
 breathing" beside a tap must be able to be an emergency. The handover
 for the tap is made whatever the model answers, and also when its
-answer does not match the schema. If the provider fails, the job is
-tried again as for any turn, and the handover waits for it.
+answer does not match the schema, when the provider fails, and when
+the model's rounds of tools run out: the tap needs no model. In those
+cases the text beside it goes unread.
 
 **G1 to G5 discard the model's reply** (guardrail policy, O2). It is
 not checked and not sent, whatever it says, and what it said of the
@@ -144,10 +146,14 @@ handed-over session.
 
 **Told once, and told again.** One telling for each time a handover
 becomes attached (H-a, H-c, H-d), and the emergency text under H-e. If
-a telling failed or expired (its status is `failed` or `expired`) and
-the handover has no telling that is `pending`, `sending`, `sent`,
-`delivered` or `read`, the customer's next message in the handed-over
-session is told again, with the text worked out anew. A telling whose
+every telling **of this attachment** failed (a telling that waited
+over 15 minutes is `failed` too, with the code `expired`), so that none
+is `pending`, `sending`, `sent`, `delivered` or `read`, the customer's
+next message in the handed-over session is told again, with the text
+worked out anew. A telling from an earlier time the same record was
+attached does not count. An urgent handover is also told again with
+the emergency text when this attachment has no emergency telling that
+lives and the contact was not sent one within the hour. A telling whose
 send's outcome is not known and was closed as unconfirmed is `failed`,
 so the customer can be told twice then.
 
@@ -170,7 +176,10 @@ Step 10 comes before step 11 in the order of checks: S2 is step 10's.
 
 The checks of steps 5 to 9 (opt-out, the rate pause, a tenant not
 answering) are other units'. A tenant that is not answering is stopped
-before any of this, as today.
+before the model is called and before a tap alone hands over, as
+today; but step 10 runs first, so in a session that is already handed
+over its messages are marked, a tap adds its reason and a failed
+telling is told again. In the follow-up issue.
 
 ## 6. The fallback's button
 
