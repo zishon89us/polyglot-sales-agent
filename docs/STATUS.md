@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 to U7 done; U8 under way)
+## Current milestone: M3 AI core (U1 to U8 done; U9 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -701,6 +701,35 @@ M0 Inception met its exit criteria on 2026-11-16; see
   for it does not force that interleaving**, so the fix rests on the
   order and not on a test. Five Low findings, fixed. **These last fixes
   are checked by the author only.** What is left is #334.
+
+- 2026-11-26 — #333 merged: U8 is done. **M3 U9, first part** (#308,
+  pull request #335): the checks on a reply, as one function that
+  nothing calls yet. The unit is split, as the plan foresaw; the second
+  part makes the turn call it, send the fallback and count. The design
+  note (`design/notes/m3-u9-output-checks.md`) was read by a second
+  agent before any code (`reviews/2026-11-26-m3-u9-design-review.md`):
+  15 findings, **five High, of one root**: a value was checked only if
+  a list of currency words recognised it, so "200 Saudi riyals", "Rs.
+  500" and the other end of "100-150 SAR" were wrong prices that
+  passed. The note was rewritten and **has not been reviewed again**.
+  It now adds a rule the guardrail policy does not have: every number
+  in a reply must be one the business's own data holds. That holds
+  back more right replies ("we have 3 stylists"); row 52 asks the
+  maintainer about the trade. The word lists for five languages are
+  the agent's and unread by a speaker.
+  A third agent then ran 426 replies through the code
+  (`reviews/2026-11-26-gate4-u9-reply-checks.md`): a crash on a
+  business's name with a hyphen, and seven ways a wrong value or a
+  foreign address passed. Fixed. A fourth agent ran 1,112 inputs
+  against the fixes (`...-verification.md`): three more High findings
+  of the same kind, a stored number passing beside a word no list
+  knew ("45 ryal", "costs 9.00", "4 (am)"). The rule was changed and
+  not the lists: a number that is no claimed value passes only before
+  the same word as in the business's own texts. **That change is
+  checked by the author only; no third round was run.** It holds back
+  more right replies, above all a number said in another language
+  than the business's texts; of twenty ordinary replies the author
+  tried, four. What is left is #336.
 
 ## Next
 
