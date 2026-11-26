@@ -25,6 +25,7 @@ import {
   recordSend,
   SEND_MESSAGES_JOB,
 } from "@polyglot-sales-agent/db";
+import { handoverTeller } from "./handover.ts";
 import { runTurn, type TurnModel } from "./turn.ts";
 
 /** How long to wait for a conversation another worker holds. */
@@ -43,7 +44,7 @@ export const SENDS_PER_RUN = 20;
  * message.
  */
 export type SendReport = (
-  event: "send-failed" | "turn-skipped" | "reply-blocked",
+  event: "send-failed" | "turn-skipped" | "reply-blocked" | "handed-over",
   code: string,
 ) => void;
 
@@ -163,6 +164,17 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
         // The customer gets nothing.
         options.report?.("turn-skipped", outcome.code);
       }
+      if (outcome.kind === "ended" && outcome.end === "handed-over") {
+        // The session was handed over while the turn ran: its reply is not sent.
+        options.report?.("turn-skipped", "handed-over");
+      }
+      if (outcome.kind === "ended" && outcome.handedOver !== undefined) {
+        // One line for each reason the handover now has: a model that
+        // hands every customer over is seen here.
+        for (const reason of outcome.handedOver) {
+          options.report?.("handed-over", reason);
+        }
+      }
       if (outcome.kind === "ended" && outcome.blocked !== undefined && outcome.end === "stored") {
         // The model's answer failed a check and the fallback is stored in
         // its place. The check and its code; nothing of the answer.
@@ -207,6 +219,17 @@ export function createHandlers(options: HandlerOptions): Record<string, JobHandl
           result,
           options.clock?.(),
           buttonsDropped,
+          texts === undefined
+            ? undefined
+            : {
+                tell: handoverTeller(texts),
+                // Two fallbacks in a row: the session is handed over.
+                done: (result) => {
+                  for (const reason of result.reasons) {
+                    options.report?.("handed-over", reason);
+                  }
+                },
+              },
         );
         if (decision !== "superseded" && decision.next === "failed") {
           options.report?.("send-failed", decision.code);

@@ -217,6 +217,13 @@ export async function seedTenant(
       [tenantId, sessionId],
     );
     await tx.query(
+      `INSERT INTO handovers (tenant_id, contact_id, session_id, state, reasons, attached_at)
+       SELECT $1, c.contact_id, s.id, 'waiting', ARRAY['requested'], now()
+       FROM sessions s JOIN conversations c ON c.id = s.conversation_id
+       WHERE s.tenant_id = $1 LIMIT 1`,
+      [tenantId],
+    );
+    await tx.query(
       `INSERT INTO reply_checks (tenant_id, session_id, turn_id, outcome, o1)
        SELECT $1, id, gen_random_uuid(), 'passed', 'passed' FROM sessions WHERE tenant_id = $1
        LIMIT 1`,

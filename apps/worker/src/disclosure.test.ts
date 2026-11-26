@@ -34,9 +34,17 @@ import { adopt, createTestDatabase, type TestDatabase } from "@polyglot-sales-ag
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { createHandlers } from "./handlers.ts";
+import { handoverTeller } from "./handover.ts";
 import { loadFixedTexts } from "./texts.ts";
 import { traceRecorder } from "./traces.ts";
-import { FLAGS_FOR_LATER, givenTexts, REPLY_PROMPT, readFlags, todayIn } from "./turn.ts";
+import {
+  FLAGS_FOR_LATER,
+  givenTexts,
+  HANDOVER_FLAGS,
+  REPLY_PROMPT,
+  readFlags,
+  todayIn,
+} from "./turn.ts";
 
 const PROMPT = loadPrompt(
   fileURLToPath(new URL("../../../prompts/", import.meta.url)),
@@ -64,6 +72,11 @@ const SALON = (() => {
   return read.profile;
 })();
 const CUSTOMER = "+15550143";
+const ALWAYS_OPEN = [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
+  weekday,
+  opens: "00:00",
+  closes: "24:00",
+}));
 const NUMBER = "100000000000041";
 
 let database: TestDatabase;
@@ -94,6 +107,11 @@ beforeAll(async () => {
     [tenant, NUMBER],
   );
   await replaceProfile(app, tenant, SALON, { operator: "test" });
+  // Open at every hour, so that what a handover says does not turn on when the tests run.
+  await administrator.query("UPDATE tenants SET business_hours = $2::jsonb WHERE id = $1", [
+    tenant,
+    JSON.stringify(ALWAYS_OPEN),
+  ]);
 }, 30_000);
 
 afterAll(async () => {
@@ -104,7 +122,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await administrator.query(
-    "TRUNCATE early_receipts, messages, conversations, contacts, jobs CASCADE",
+    "TRUNCATE early_receipts, handovers, messages, conversations, contacts, jobs CASCADE",
   );
   mock = createMockChannel();
   reported.length = 0;
@@ -211,6 +229,13 @@ const endWaits = () =>
   administrator.query(
     "UPDATE messages SET send_not_before = clock_timestamp() WHERE send_not_before IS NOT NULL",
   );
+const handovers = async () =>
+  (
+    await administrator.query(
+      `SELECT state, reasons, urgent, session_id IS NOT NULL AS attached
+       FROM handovers ORDER BY created_at, id`,
+    )
+  ).rows;
 const bodies = (): string[] => mock.sent.map((message) => message.body);
 const fails = (channelMessageId: string) =>
   storeInbound(
@@ -676,13 +701,13 @@ describe('"am I talking to a person?" (US-C5, 3)', () => {
 
   test("P3: no flag, or another flag: the reply as it is", async () => {
     await exchange("first");
-    await exchange("second", ["sensitive-topic", "asks-for-person"]);
+    await exchange("second", ["asks-to-stop", "asks-to-resume"]);
     expect(bodies().slice(1)).toEqual(["second"]);
     expect((await outbound()).map((row) => row.lead)).toEqual([null, null]);
   });
 
   test("the flag beside other flags still gets the fixed text: the others are dropped until their unit", async () => {
-    await exchange("Reply.", ["emergency", "asks-if-person", "asks-to-stop"]);
+    await exchange("Reply.", ["asks-to-resume", "asks-if-person", "asks-to-stop"]);
     expect(bodies()).toEqual([`${TOLD}\n\n${NOT_A_PERSON}\n\nReply.`]);
   });
 
@@ -924,7 +949,7 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
         `SELECT class, body, lead, fallback, language, buttons, status, turn_id IS NOT NULL AS turn
        FROM messages WHERE direction = 'outbound'`,
       );
-      // The turn's reply, with no body: the refused text is stored nowhere. No button: a tap does nothing yet.
+      // The turn's reply, with no body: the refused text is stored nowhere. Its button asks for a person.
       expect(rows.rows).toEqual([
         {
           class: "assistant-reply",
@@ -932,7 +957,7 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
           lead: FALLBACK,
           fallback: true,
           language: "und",
-          buttons: null,
+          buttons: [{ payload: "core.person", title: "Talk to a person" }],
           status: "sent",
           turn: true,
         },
@@ -966,10 +991,12 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
         claims: [{ kind: "price", item: id, value: `${price} SAR` }],
       }),
     );
-    expect(bodies().slice(1)).toEqual([FALLBACK, FALLBACK]);
+    // Two fallbacks in a row: after the second the session is handed over, and the customer told.
+    expect(bodies().slice(1)).toEqual([FALLBACK, FALLBACK, ENGLISH["handover-in-hours"]]);
     expect(reported).toEqual([
       "reply-blocked values-amount-unclaimed",
       "reply-blocked values-amount-unclaimed",
+      "handed-over repeated-failure",
     ]);
   });
 
@@ -1020,19 +1047,20 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
   test("the count: plus one for a fallback the channel accepted, nought for any other reply accepted", async () => {
     await answered(step({ reply: "It costs 5 SAR." }));
     expect(await count()).toEqual([1]);
-    await answered(step({ reply: "It costs 6 SAR." }));
-    expect(await count()).toEqual([2]);
-    // Reaching two hands over only once the handover is built: until then a third is sent.
-    await answered(step({ reply: "It costs 7 SAR." }));
-    expect(await count()).toEqual([3]);
-    expect(bodies().slice(1)).toEqual([FALLBACK, FALLBACK]);
     await answered(step({ reply: "Hello there." }));
     expect(await count()).toEqual([0]);
-    await answered(step({ reply: "It costs 8 SAR." }));
+    await answered(step({ reply: "It costs 6 SAR." }));
     expect(await count()).toEqual([1]);
+    // The second in a row hands the session over, and the count starts again.
+    await answered(step({ reply: "It costs 7 SAR." }));
+    expect(await count()).toEqual([0]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["repeated-failure"], urgent: false, attached: true },
+    ]);
+    expect(bodies().slice(-2)).toEqual([FALLBACK, ENGLISH["handover-in-hours"]]);
   });
 
-  test("the count is unchanged by a fallback or a reply the channel refused, and never over a hundred", async () => {
+  test("the count is unchanged by a fallback or a reply the channel refused, and no handover is made for them", async () => {
     await answered(step({ reply: "It costs 5 SAR." }));
     expect(await count()).toEqual([1]);
     // A fallback that is refused for good was not sent: not counted.
@@ -1043,14 +1071,7 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
     mock.failNextSend("131000", false);
     await answered(step({ reply: "Hello there." }));
     expect(await count()).toEqual([1]);
-    await administrator.query("UPDATE sessions SET guardrail_fallbacks = 100");
-    await answered(step({ reply: "It costs 7 SAR." }));
-    expect(await count()).toEqual([100]);
-    expect(mock.sent.at(-1)?.body).toBe(FALLBACK);
-    // The send was recorded, not rolled back by the table's limit and tried again.
-    expect((await outbound()).at(-1)?.status).toBe("sent");
-    expect((await administrator.query("SELECT 1 FROM jobs")).rowCount).toBe(0);
-    expect(mock.sent.filter((message) => message.body.endsWith(FALLBACK))).toHaveLength(2);
+    expect(await handovers()).toEqual([]);
   });
 
   test("a checker that throws: the reply is not sent, the fallback is, and the record says error", async () => {
@@ -1081,8 +1102,8 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
   test("a fallback the channel reports failed before its send is recorded is not counted", async () => {
     const early: Channel = {
       ...mock,
-      async sendText(from, to, body) {
-        const result = await mock.sendText(from, to, body);
+      async sendButtons(from, to, body, buttons) {
+        const result = await mock.sendButtons(from, to, body, buttons);
         if (result.accepted) {
           await fails(result.channelMessageId);
         }
@@ -1240,15 +1261,21 @@ describe("a reply that fails a check sends the fallback (M3 unit U9; US-C4, 10)"
 });
 
 describe("the flags are read in one place (guardrail policy, O2)", () => {
-  test("only the question about a person is acted on; the others are named with their unit and dropped", () => {
-    expect(readFlags(["asks-if-person", "emergency", "asks-to-stop"])).toEqual({
+  test("the question about a person, the four flags that hand over, and the two that are named for a later unit", () => {
+    expect(readFlags(["asks-if-person", "emergency", "asks-to-stop", "asks-for-person"])).toEqual({
       answerIsAutomated: true,
-      dropped: ["emergency", "asks-to-stop"],
+      handover: ["requested", "emergency"],
+      dropped: ["asks-to-stop"],
     });
-    expect(readFlags([])).toEqual({ answerIsAutomated: false, dropped: [] });
-    expect(Object.keys(FLAGS_FOR_LATER).sort()).toEqual(
-      MODEL_FLAGS.filter((flag) => flag !== "asks-if-person").sort(),
-    );
+    expect(readFlags([])).toEqual({ answerIsAutomated: false, handover: [], dropped: [] });
+    // Every flag the model can set is either acted on, hands over, or is named for a later unit.
+    expect(
+      [
+        "asks-if-person",
+        ...HANDOVER_FLAGS.map(([flag]) => flag),
+        ...Object.keys(FLAGS_FOR_LATER),
+      ].sort(),
+    ).toEqual([...MODEL_FLAGS].sort());
   });
 
   test("today's date is the business's, not the server's", () => {
@@ -1267,5 +1294,464 @@ describe("the flags are read in one place (guardrail policy, O2)", () => {
     ]);
     expect(given.join("").length).toBeLessThan(long.length);
     expect(givenTexts([{ kind: "button", body: null }])).toEqual([]);
+  });
+});
+
+describe("the handover record (M3 unit U11; US-C6)", () => {
+  const FALLBACK = ENGLISH.fallback;
+  const WILL_REPLY = ENGLISH["handover-in-hours"];
+  const step = (value: Record<string, unknown>): FakeStep => ({
+    kind: "answer",
+    value: { claims: [], flags: [], toolCalls: [], language: "en", ...value },
+  });
+  /** The customer's messages of one batch: texts, and "TAP" for a tap on the person button. */
+  async function batch(...parts: string[]): Promise<void> {
+    serial += 1;
+    await storeInbound(
+      app,
+      tenant,
+      NUMBER,
+      parts.map((part, index) => ({
+        channelMessageId: `wamid.HANDOVER${serial}.${index}`,
+        phone: CUSTOMER,
+        userId: null,
+        kind: part === "TAP" ? "button" : "text",
+        body: part === "TAP" ? null : part,
+        ...(part === "TAP" ? { buttonPayload: "core.person" } : {}),
+        sentAt: new Date(),
+      })),
+      [],
+      settled(),
+    );
+  }
+  /** Runs the queue with a model that counts its calls. */
+  async function run(script: FakeStep[], channel: Channel = mock, ahead = 0): Promise<number> {
+    const adapter = new FakeLlmAdapter(script);
+    const handlers = createHandlers({
+      app,
+      channels: { mock: channel },
+      accessToken: MOCK_ACCESS_TOKEN,
+      report: (event, code) => reported.push(`${event} ${code}`),
+      texts: TEXTS,
+      model: {
+        client: bounded(adapter, { record: traceRecorder(app) }),
+        prompt: PROMPT,
+        fragments: {},
+        canary: "testcanary0000000000",
+        packs: { "faq-only": { name: "faq-only" } },
+        texts: TEXTS,
+      },
+    });
+    for (let runs = 0; runs < 50; runs += 1) {
+      const clock = () => new Date(Date.now() + ahead + 50);
+      if (!(await workOnce(cross, handlers, { clock })).ran) {
+        return adapter.calls.length;
+      }
+    }
+    throw new Error("the queue did not empty");
+  }
+  const tellings = async () =>
+    (
+      await administrator.query(
+        `SELECT class, tells, status, handover_id IS NOT NULL AS of FROM messages
+         WHERE direction = 'outbound' ORDER BY created_at, id`,
+      )
+    ).rows;
+  const unhandled = async (): Promise<number> =>
+    (
+      await administrator.query(
+        "SELECT 1 FROM messages WHERE direction = 'inbound' AND handled_at IS NULL",
+      )
+    ).rowCount ?? 0;
+  const setHours = (hours: unknown) =>
+    administrator.query("UPDATE tenants SET business_hours = $2::jsonb WHERE id = $1", [
+      tenant,
+      JSON.stringify(hours),
+    ]);
+
+  test("G1: a tap on the person button alone hands over without the model, and the customer is told once", async () => {
+    await batch("TAP");
+    expect(await run([])).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["requested"], urgent: false, attached: true },
+    ]);
+    expect(await tellings()).toEqual([
+      { class: "system-reply", tells: "handover", status: "sent", of: true },
+    ]);
+    expect(reported).toEqual(["handed-over requested"]);
+    expect(await unhandled()).toBe(0);
+  });
+
+  test("G1 with text beside the tap: the model is given the text so that its flags are read, and the handover is made whatever it answers", async () => {
+    await batch("TAP", "he is not breathing");
+    expect(await run([step({ reply: "Call for help.", flags: ["emergency"] })])).toBe(1);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["requested", "emergency"], urgent: true, attached: true },
+    ]);
+    expect(reported).toEqual(["handed-over requested", "handed-over emergency"]);
+  });
+
+  test("G1 with text, and an answer that does not match the schema: handed over all the same, with no fallback", async () => {
+    await batch("TAP", "hello");
+    expect(await run([step({ reply: 7 })])).toBe(1);
+    expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+    expect((await handovers()).map((row) => row.reasons)).toEqual([["requested"]]);
+    const checks = await administrator.query("SELECT outcome, o1 FROM reply_checks");
+    expect(checks.rows).toEqual([{ outcome: "handed-over", o1: "invalid-output" }]);
+  });
+
+  test.each([
+    ["G2", ["asks-for-person"], ["requested"]],
+    ["G3", ["sensitive-topic"], ["sensitive-topic"]],
+    ["G4", ["data-request"], ["data-request"]],
+    [
+      "G2 to G4 together",
+      ["data-request", "asks-for-person", "sensitive-topic"],
+      ["requested", "sensitive-topic", "data-request"],
+    ],
+  ])(
+    "%s: the flag hands over, and the model's reply is discarded unchecked (O2; US-C11, 4)",
+    async (_name, flags, reasons) => {
+      await batch("I want a refund and a person, zebra");
+      await run([step({ reply: "Your zebra refund of 5 SAR is at evil.example", flags })]);
+      expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+      expect(JSON.stringify(mock.sent)).not.toContain("zebra");
+      expect(await handovers()).toEqual([
+        { state: "waiting", reasons, urgent: false, attached: true },
+      ]);
+      expect(reported).toEqual(reasons.map((reason) => `handed-over ${reason}`));
+      // The record: the answer matched the schema, and no other check ran.
+      const checks = await administrator.query("SELECT outcome, o1, o3 FROM reply_checks");
+      expect(checks.rows).toEqual([{ outcome: "handed-over", o1: "passed", o3: null }]);
+      // What the refused answer said of the language is not kept.
+      expect((await administrator.query("SELECT language FROM sessions")).rows).toEqual([
+        { language: null },
+      ]);
+    },
+  );
+
+  test("G5: the emergency flag hands over as urgent and sends the emergency text, in place of the handover text", async () => {
+    await batch("my friend collapsed");
+    await run([step({ reply: "Oh no.", flags: ["emergency"] })]);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["emergency"], urgent: true, attached: true },
+    ]);
+    expect((await tellings()).map((row) => row.tells)).toEqual(["emergency"]);
+  });
+
+  test("with the question 'am I talking to a person?' beside a handover flag, the fixed answer goes first, in the one message", async () => {
+    await batch("are you a bot? get me a human");
+    await run([step({ reply: "x", flags: ["asks-if-person", "asks-for-person"] })]);
+    expect(bodies()).toEqual([`${TOLD}\n\n${NOT_A_PERSON}\n\n${WILL_REPLY}`]);
+  });
+
+  test("S1, H3: a handed-over session is not answered: no model call, no reply, the batch marked, one line", async () => {
+    await batch("TAP");
+    await run([]);
+    reported.length = 0;
+    await batch("hello? anyone?");
+    expect(await run([step({ reply: "Hello!" })])).toBe(0);
+    expect(bodies()).toHaveLength(1);
+    expect(await unhandled()).toBe(0);
+    expect(reported).toEqual(["turn-skipped handed-over"]);
+    // S2: a tap there adds its reason, once, and tells nothing more.
+    await batch("my data please");
+    await administrator.query("UPDATE handovers SET reasons = ARRAY['data-request']");
+    await batch("TAP");
+    expect(await run([])).toBe(0);
+    await batch("TAP");
+    await run([]);
+    expect((await handovers()).map((row) => row.reasons)).toEqual([["data-request", "requested"]]);
+    expect(bodies()).toHaveLength(1);
+  });
+
+  test("G6: two fallbacks in a row hand over when the second is sent, the customer is told, and the count starts again", async () => {
+    await batch("one");
+    await run([step({ reply: "It costs 5 SAR." })]);
+    expect(await handovers()).toEqual([]);
+    await batch("two");
+    await run([step({ reply: "It costs 6 SAR." })]);
+    expect(bodies()).toEqual([`${TOLD}\n\n${FALLBACK}`, FALLBACK, WILL_REPLY]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["repeated-failure"], urgent: false, attached: true },
+    ]);
+    expect(reported.at(-1)).toBe("handed-over repeated-failure");
+    const session = await administrator.query("SELECT guardrail_fallbacks AS n FROM sessions");
+    expect(session.rows).toEqual([{ n: 0 }]);
+  });
+
+  test("G6: a second fallback the channel refused hands nothing over", async () => {
+    await batch("one");
+    await run([step({ reply: "It costs 5 SAR." })]);
+    mock.failNextSend("131000", false);
+    await batch("two");
+    await run([step({ reply: "It costs 6 SAR." })]);
+    expect(await handovers()).toEqual([]);
+  });
+
+  test("S3: a turn that was calling the model when the session was handed over has its reply refused, and its flags applied", async () => {
+    await batch("a question");
+    const adapter = new FakeLlmAdapter([step({ reply: "Hello there." })]);
+    const meanwhile = (flags: string[]) =>
+      bounded(
+        {
+          generate: async (request, signal) => {
+            // Handed over by another path while the model is being called.
+            await administrator.query(
+              `INSERT INTO handovers (tenant_id, contact_id, session_id, state, reasons, attached_at)
+               SELECT s.tenant_id, c.contact_id, s.id, 'waiting', ARRAY['repeated-failure'], now()
+               FROM sessions s JOIN conversations c ON c.id = s.conversation_id
+               ON CONFLICT DO NOTHING`,
+            );
+            return new FakeLlmAdapter([step({ reply: "Hello there.", flags })]).generate(
+              request,
+              signal,
+            );
+          },
+          health: async () => ({ ok: true }),
+        },
+        { record: traceRecorder(app) },
+      );
+    const handlersWith = (flags: string[]) =>
+      createHandlers({
+        app,
+        channels: { mock },
+        accessToken: MOCK_ACCESS_TOKEN,
+        report: (event, code) => reported.push(`${event} ${code}`),
+        texts: TEXTS,
+        model: {
+          client: meanwhile(flags),
+          prompt: PROMPT,
+          fragments: {},
+          canary: "testcanary0000000000",
+          packs: { "faq-only": { name: "faq-only" } },
+          texts: TEXTS,
+        },
+      });
+    expect(adapter.calls).toHaveLength(0);
+    while (
+      (await workOnce(cross, handlersWith([]), { clock: () => new Date(Date.now() + 50) })).ran
+    ) {
+      // Until the queue is empty.
+    }
+    expect(bodies()).toEqual([]);
+    expect(await unhandled()).toBe(0);
+    expect(reported).toEqual(["turn-skipped handed-over"]);
+  });
+
+  test("S4: a reply of the assistant still waiting when the handover is made is discarded, not sent after 'a person will reply'", async () => {
+    mock.failNextSend("131016", true);
+    await batch("one");
+    await run([step({ reply: "Hello there." })]);
+    expect((await outbound()).map((row) => row.status)).toEqual(["pending"]);
+    // The tap's turn discards the waiting reply and reopens its message, which the model is
+    // then given beside the tap; the handover is made whatever it answers.
+    await batch("TAP");
+    await endWaits();
+    await run([step({ reply: "Hello again." })], mock, 120_000);
+    expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+    expect((await outbound()).map((row) => [row.class, row.status])).toEqual([
+      ["assistant-reply", "discarded"],
+      ["system-reply", "sent"],
+    ]);
+  });
+
+  test("a telling is not held back or discarded for a newer message of the customer", async () => {
+    mock.failNextSend("131016", true);
+    await batch("TAP");
+    await run([]);
+    expect(bodies()).toEqual([]);
+    await batch("hello?");
+    await endWaits();
+    expect(await run([], mock, 120_000)).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+    expect((await tellings()).map((row) => row.status)).toEqual(["sent"]);
+  });
+
+  test("told again only when every telling failed: the customer's next message gets the text anew", async () => {
+    mock.failNextSend("131000", false);
+    await batch("TAP");
+    await run([]);
+    expect(bodies()).toEqual([]);
+    await batch("hello?");
+    expect(await run([])).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+    await batch("hello again?");
+    await run([]);
+    expect(bodies()).toHaveLength(1);
+    expect((await tellings()).map((row) => row.status)).toEqual(["failed", "sent"]);
+  });
+
+  test("S5, H-c: when the session ends the handover is detached and the assistant answers again; a new trigger attaches the same record", async () => {
+    await batch("TAP");
+    await run([]);
+    await administrator.query(
+      `UPDATE sessions SET started_at = started_at - interval '25 hours',
+                           last_message_at = last_message_at - interval '25 hours'`,
+    );
+    await batch("hello again");
+    expect(await run([step({ reply: "Hello there." })])).toBe(1);
+    expect(bodies().at(-1)).toBe(`${TOLD}\n\nHello there.`);
+    expect(await handovers()).toEqual([
+      { state: "detached", reasons: ["requested"], urgent: false, attached: false },
+    ]);
+    await batch("my data please");
+    await run([step({ reply: "x", flags: ["data-request"] })]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["requested", "data-request"], urgent: false, attached: true },
+    ]);
+    expect(bodies().at(-1)).toBe(WILL_REPLY);
+  });
+
+  test("S5a: in M3 a handover is detached 24 hours after it was attached, though the customer went on writing", async () => {
+    await batch("TAP");
+    await run([]);
+    await administrator.query("UPDATE handovers SET attached_at = now() - interval '23 hours'");
+    await batch("hello?");
+    expect(await run([step({ reply: "Hello there." })])).toBe(0);
+    await administrator.query("UPDATE handovers SET attached_at = now() - interval '25 hours'");
+    await batch("hello??");
+    expect(await run([step({ reply: "Hello there." })])).toBe(1);
+    expect(bodies().at(-1)).toBe("Hello there.");
+    expect((await handovers()).map((row) => row.state)).toEqual(["detached"]);
+  });
+
+  test("H-d: a detached handover over fourteen days old is closed as expired when a trigger finds it, and a new one is made", async () => {
+    await batch("TAP");
+    await run([]);
+    await administrator.query(
+      `UPDATE handovers SET state = 'detached', session_id = NULL,
+                            detached_at = now() - interval '15 days'`,
+    );
+    await batch("TAP");
+    await run([]);
+    const rows = await administrator.query(
+      "SELECT state, closed_reason FROM handovers ORDER BY created_at, id",
+    );
+    expect(rows.rows).toEqual([
+      { state: "closed-unanswered", closed_reason: "expired" },
+      { state: "waiting", closed_reason: null },
+    ]);
+  });
+
+  test("H-e: the emergency text goes to a contact at most once in sixty minutes", async () => {
+    await batch("help");
+    await run([step({ reply: "x", flags: ["emergency"] })]);
+    // Detached, and an emergency again at once: the handover is attached, with the ordinary text.
+    await administrator.query(
+      "UPDATE handovers SET state = 'detached', session_id = NULL, detached_at = now()",
+    );
+    await batch("help again");
+    await run([step({ reply: "x", flags: ["emergency"] })]);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`, WILL_REPLY]);
+    // More than an hour after the last emergency text: it is sent again.
+    await administrator.query(
+      `UPDATE messages SET created_at = created_at - interval '61 minutes' WHERE tells = 'emergency'`,
+    );
+    await administrator.query(
+      "UPDATE handovers SET state = 'detached', session_id = NULL, detached_at = now()",
+    );
+    await batch("help once more");
+    await run([step({ reply: "x", flags: ["emergency"] })]);
+    expect(bodies().at(-1)).toBe(ENGLISH.emergency);
+  });
+
+  test("outside business hours the customer is given the next opening and the support contact; with no hours at all, only that a person will reply", async () => {
+    try {
+      // Closed every day but one minute of Monday: closed now, whenever this runs, bar that minute.
+      await setHours([{ weekday: 1, opens: "03:07", closes: "03:08" }]);
+      await batch("TAP");
+      await run([]);
+      expect(bodies()[0]).toMatch(
+        /^You are chatting with an automated assistant\.\n\nWe are closed right now\. A person will reply after we open: \d{4}-\d{2}-\d{2} 03:07\. You can also reach us at \+15550100\.$/,
+      );
+      await administrator.query(
+        "TRUNCATE handovers, messages, conversations, contacts, jobs CASCADE",
+      );
+      mock = createMockChannel();
+      await setHours([]);
+      await batch("TAP");
+      await run([]);
+      expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`]);
+    } finally {
+      await setHours(ALWAYS_OPEN);
+    }
+  });
+
+  test("the fallback's button: a tap on it hands over", async () => {
+    await batch("one");
+    await run([step({ reply: "It costs 5 SAR." })]);
+    expect(mock.sent[0]?.buttons).toEqual([{ payload: "core.person", title: "Talk to a person" }]);
+    await batch("TAP");
+    await run([]);
+    expect(bodies().at(-1)).toBe(WILL_REPLY);
+  });
+
+  test("the table: one open handover for a contact, a session exactly while waiting, no reason twice, an end exactly when closed", async () => {
+    await batch("TAP");
+    await run([]);
+    const again = (set: string) =>
+      administrator.query(
+        `INSERT INTO handovers (tenant_id, contact_id, session_id, state, reasons, attached_at, ended_at)
+         SELECT tenant_id, contact_id, ${set} FROM handovers LIMIT 1`,
+      );
+    await expect(again("session_id, 'waiting', ARRAY['requested'], now(), NULL")).rejects.toThrow(
+      /handovers_one_open_for_a_contact/,
+    );
+    await expect(again("NULL, 'detached', ARRAY['requested'], now(), NULL")).rejects.toThrow(
+      /handovers_one_open_for_a_contact/,
+    );
+    await expect(again("NULL, 'waiting', ARRAY['requested'], now(), NULL")).rejects.toThrow(
+      /attached_exactly/,
+    );
+    await expect(
+      again("NULL, 'closed-unanswered', ARRAY['requested', 'requested'], now(), now()"),
+    ).rejects.toThrow(/no_reason_twice/);
+    await expect(again("NULL, 'closed-unanswered', ARRAY[]::text[], now(), now()")).rejects.toThrow(
+      /check/,
+    );
+    await expect(
+      again("NULL, 'closed-unanswered', ARRAY['Not A Reason'], now(), now()"),
+    ).rejects.toThrow(/no_reason_twice/);
+    await expect(
+      again("NULL, 'closed-unanswered', ARRAY['requested'], now(), NULL"),
+    ).rejects.toThrow(/closed_has_its_end/);
+    await expect(
+      again("NULL, 'closed-unanswered', ARRAY['requested'], now(), now()"),
+    ).resolves.toBeDefined();
+  });
+
+  test("the longest telling fits every channel: the disclosure, the fixed answer and a filled text", () => {
+    const tell = handoverTeller(TEXTS);
+    const longest = tell({
+      preferred: ["en"],
+      tenantDefault: "en",
+      emergency: false,
+      answerIsAutomated: true,
+      timeZone: "Asia/Riyadh",
+      businessHours: [{ weekday: 1, opens: "03:07", closes: "03:08" }],
+      supportContact: "x".repeat(254),
+      at: new Date("2026-11-27T12:00:00Z"),
+    });
+    expect(longest).toContain("x".repeat(254));
+    expect(`${TOLD}\n\n${longest}`.length).toBeLessThanOrEqual(mock.limits.textMax);
+    // A contact the filler refuses, and a time zone that cannot be read: the text that says only that a person will reply.
+    const base = {
+      preferred: ["en"],
+      tenantDefault: "en",
+      emergency: false,
+      answerIsAutomated: false,
+      timeZone: "Asia/Riyadh",
+      businessHours: [{ weekday: 1, opens: "03:07", closes: "03:08" }],
+      supportContact: "+15550100",
+      at: new Date("2026-11-27T12:00:00Z"),
+    };
+    expect(tell({ ...base, supportContact: "a{b}" })).toBe(WILL_REPLY);
+    expect(tell({ ...base, supportContact: null })).toBe(WILL_REPLY);
+    expect(tell({ ...base, timeZone: "Not/AZone" })).toBe(WILL_REPLY);
+    expect(tell({ ...base, emergency: true })).toBe(ENGLISH.emergency);
   });
 });

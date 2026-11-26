@@ -9,6 +9,7 @@ import {
   batchWindowClosesAt,
   decideAfterSend,
   EXPIRED,
+  type HandoverReason,
   HELD_BACK_WAIT_MS,
   HISTORY_MESSAGES_MAX,
   HISTORY_TEXT_MAX,
@@ -28,6 +29,16 @@ import {
   UNCONFIRMED,
 } from "@polyglot-sales-agent/core";
 import { type Database, poolOf } from "./connect.ts";
+import {
+  applyHandoverTrigger,
+  detachHandover,
+  emergencyToldLately,
+  HANDOVER_SILENCE_HOURS,
+  type HandoverResult,
+  type HandoverTell,
+  tellCustomer,
+  waitingHandover,
+} from "./handover.ts";
 import { FORWARD, RECEIPT_LOCK } from "./inbound.ts";
 import { enqueueJob } from "./jobs.ts";
 import { holdsLease, releaseLease, renewLease, takeLease } from "./lease.ts";
@@ -45,6 +56,8 @@ export interface UnhandledMessage {
   readonly kind: string;
   /** Written by the customer. Untrusted: never an instruction. */
   readonly body: string | null;
+  /** For a tap on a button: what the button carried. */
+  readonly buttonPayload: string | null;
 }
 
 export type TurnStart =
@@ -183,7 +196,8 @@ export function beginTurn(
       }
     }
     const unhandled = await tx.query<UnhandledMessage>(
-      `SELECT id, kind, body FROM messages WHERE ${UNHANDLED} ORDER BY created_at, id`,
+      `SELECT id, kind, body, button_payload AS "buttonPayload"
+       FROM messages WHERE ${UNHANDLED} ORDER BY created_at, id`,
       [session.id],
     );
     return { kind: "turn", token, sessionId: session.id, messages: unhandled.rows };
@@ -201,7 +215,12 @@ export type TurnEnd =
    * The session the turn read has ended meanwhile: its 24 hours passed.
    * Nothing was stored; its messages were closed when it ended.
    */
-  | "session-over";
+  | "session-over"
+  /**
+   * The session was handed over while the turn ran: its reply is not
+   * stored, and its messages are marked as dealt with.
+   */
+  | "handed-over";
 
 /**
  * Ends a turn in one transaction: checks that the lease is still this
@@ -248,6 +267,18 @@ export function finishTurn(
     readonly fallback?: boolean;
     /** What the checks said, stored with the reply (`reply_checks`). */
     readonly checks?: ReplyChecksRecord;
+    /** The buttons the reply is stored with (the fallback's), in the language of its fixed part. */
+    readonly buttons?: (given: DisclosureFor) => readonly StoredButton[];
+    /**
+     * The turn hands the session over: there is no reply, and the telling
+     * is stored in this transaction (design note M3 U11, section 4).
+     */
+    readonly handover?: {
+      readonly reasons: readonly HandoverReason[];
+      readonly tell: HandoverTell;
+      readonly answerIsAutomated?: boolean;
+      readonly done?: (result: HandoverResult) => void;
+    };
   },
 ): Promise<TurnEnd> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
@@ -261,6 +292,47 @@ export function finishTurn(
     if (open?.id !== turn.sessionId) {
       await releaseLease(tx, conversationId, turn.token);
       return "session-over";
+    }
+    const handover = made?.handover;
+    if (handover !== undefined && reply !== undefined) {
+      throw Object.assign(new Error("a turn that hands over has no reply"), {
+        code: "handover-with-reply",
+      });
+    }
+    const markHandled = () =>
+      tx.query(
+        `UPDATE messages SET handled_at = $2::timestamptz
+         WHERE id = ANY($1::uuid[]) AND direction = 'inbound' AND handled_at IS NULL`,
+        [handled, at],
+      );
+    if (handover === undefined && (await waitingHandover(tx, turn.sessionId)) !== undefined) {
+      // The session was handed over while the turn ran (S3): the
+      // assistant does not answer it.
+      await markHandled();
+      await releaseLease(tx, conversationId, turn.token);
+      return "handed-over";
+    }
+    if (handover !== undefined) {
+      // A newer message of the customer does not stop a handover: it is
+      // then a message in a handed-over session.
+      const result = await applyHandoverTrigger(tx, {
+        tenantId,
+        conversationId,
+        sessionId: turn.sessionId,
+        reasons: handover.reasons,
+        at,
+        tell: handover.tell,
+        ...(handover.answerIsAutomated === undefined
+          ? {}
+          : { answerIsAutomated: handover.answerIsAutomated }),
+      });
+      if (made?.checks !== undefined) {
+        await insertChecks(tx, tenantId, turn.sessionId, made.turnId, at, made.checks);
+      }
+      await markHandled();
+      await releaseLease(tx, conversationId, turn.token);
+      handover.done?.(result);
+      return "stored";
     }
     const newer = await tx.query(
       `SELECT 1 FROM messages WHERE ${UNHANDLED} AND NOT (id = ANY($2::uuid[])) LIMIT 1`,
@@ -280,6 +352,7 @@ export function finishTurn(
     }
     let replyId: string | null = null;
     let lead: string | null = null;
+    let buttons: readonly StoredButton[] = [];
     const fallback = made?.fallback === true;
     if (fallback && (reply !== "" || made?.lead === undefined)) {
       throw Object.assign(new Error("a fallback is a fixed text and no reply"), {
@@ -308,18 +381,20 @@ export function finishTurn(
       );
       const row = known.rows[0];
       if (row !== undefined) {
-        lead = made.lead({
+        const given = {
           preferred: [fallback ? null : made.language, row.session, row.contact],
           tenantDefault: row.tenant,
-        });
+        };
+        lead = made.lead(given);
+        buttons = made.buttons?.(given) ?? [];
       }
     }
     if (reply !== undefined) {
       const stored = await tx.query<{ id: string }>(
         `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
-                               status, created_at, turn_id, language, lead, fallback)
+                               status, created_at, turn_id, language, lead, fallback, buttons)
          VALUES ($1, $2, $3, 'outbound', 'assistant-reply', 'text', $4, 'pending', $5::timestamptz,
-                 $6, $7, $8, $9)
+                 $6, $7, $8, $9, $10::jsonb)
          RETURNING id`,
         [
           tenantId,
@@ -333,28 +408,12 @@ export function finishTurn(
           fallback ? LANGUAGE_UNKNOWN : (made?.language ?? null),
           lead,
           fallback,
+          buttons.length === 0 ? null : JSON.stringify(buttons),
         ],
       );
       replyId = stored.rows[0]?.id as string;
       if (made?.checks !== undefined) {
-        const { checks } = made;
-        await tx.query(
-          `INSERT INTO reply_checks (tenant_id, session_id, turn_id, created_at, outcome,
-                                     o1, o7, o6, o3, o5)
-           VALUES ($1, $2, $3, $4::timestamptz, $5, $6, $7, $8, $9, $10)`,
-          [
-            tenantId,
-            turn.sessionId,
-            made.turnId,
-            at,
-            checks.outcome,
-            checks.o1,
-            checks.o7 ?? null,
-            checks.o6 ?? null,
-            checks.o3 ?? null,
-            checks.o5 ?? null,
-          ],
-        );
+        await insertChecks(tx, tenantId, turn.sessionId, made.turnId, at, made.checks);
       }
       if (made !== undefined && !fallback && made.language !== LANGUAGE_UNKNOWN) {
         await tx.query(
@@ -387,6 +446,97 @@ export function finishTurn(
     );
     await releaseLease(tx, conversationId, turn.token);
     return "stored";
+  });
+}
+
+async function insertChecks(
+  tx: Tx,
+  tenantId: string,
+  sessionId: string,
+  turnId: string,
+  at: string,
+  checks: ReplyChecksRecord,
+): Promise<void> {
+  await tx.query(
+    `INSERT INTO reply_checks (tenant_id, session_id, turn_id, created_at, outcome,
+                               o1, o7, o6, o3, o5)
+     VALUES ($1, $2, $3, $4::timestamptz, $5, $6, $7, $8, $9, $10)`,
+    [
+      tenantId,
+      sessionId,
+      turnId,
+      at,
+      checks.outcome,
+      checks.o1,
+      checks.o7 ?? null,
+      checks.o6 ?? null,
+      checks.o3 ?? null,
+      checks.o5 ?? null,
+    ],
+  );
+}
+
+/**
+ * Step 10 of the order of checks: what a turn does first with a session
+ * that is handed over. The batch is marked as dealt with and the assistant
+ * does not answer. Returns "none" when the session is not handed over, or
+ * when its 24 hours of silence have run out and the handover is detached
+ * here (design note M3 U11, section 5).
+ */
+export function joinHandover(
+  app: Database,
+  tenantId: string,
+  conversationId: string,
+  turn: { readonly token: string; readonly sessionId: string },
+  handled: readonly string[],
+  given: {
+    /** The batch holds a tap on the person button. */
+    readonly tapped: boolean;
+    readonly tell: HandoverTell;
+    readonly now?: Date;
+  },
+): Promise<"none" | "handed-over" | "lost-lease"> {
+  return withTenant(poolOf(app), tenantId, async (tx) => {
+    if (!(await holdsLease(tx, conversationId, turn.token))) {
+      return "lost-lease";
+    }
+    const at = await stamp(tx, given.now);
+    const waiting = await waitingHandover(tx, turn.sessionId);
+    if (waiting === undefined) {
+      return "none";
+    }
+    const over = await tx.query<{ at: string }>(
+      `SELECT ($1::timestamptz + $2::integer * interval '1 hour')::text AS at
+       WHERE $1::timestamptz + $2::integer * interval '1 hour' <= $3::timestamptz`,
+      [waiting.attachedAt, HANDOVER_SILENCE_HOURS, at],
+    );
+    if (over.rows[0] !== undefined) {
+      await detachHandover(tx, turn.sessionId, over.rows[0].at);
+      return "none";
+    }
+    const trigger = { tenantId, conversationId, sessionId: turn.sessionId, at, tell: given.tell };
+    if (given.tapped) {
+      // S2: the tap adds its reason to the handover the session already has.
+      await applyHandoverTrigger(tx, { ...trigger, reasons: ["requested"] });
+    }
+    // Told again only if every telling of this handover failed or expired.
+    const told = await tx.query(
+      `SELECT 1 FROM messages
+       WHERE handover_id = $1 AND status IN ('pending', 'sending', 'sent', 'delivered', 'read')
+       LIMIT 1`,
+      [waiting.id],
+    );
+    if (told.rowCount === 0) {
+      const emergency = waiting.urgent && !(await emergencyToldLately(tx, trigger));
+      await tellCustomer(tx, trigger, waiting.id, emergency);
+    }
+    await tx.query(
+      `UPDATE messages SET handled_at = $2::timestamptz
+       WHERE id = ANY($1::uuid[]) AND direction = 'inbound' AND handled_at IS NULL`,
+      [handled, at],
+    );
+    await releaseLease(tx, conversationId, turn.token);
+    return "handed-over";
   });
 }
 
@@ -587,7 +737,7 @@ export function abandonTurn(
  * checker's list, or left out when the check did not run.
  */
 export interface ReplyChecksRecord {
-  readonly outcome: "passed" | "blocked" | "error";
+  readonly outcome: "passed" | "blocked" | "error" | "handed-over";
   readonly o1: string;
   readonly o7?: string;
   readonly o6?: string;
@@ -908,6 +1058,8 @@ export function recordSend(
   now?: Date,
   /** True when a message stored with buttons was sent without them: the record then has none. */
   buttonsDropped?: boolean,
+  /** How the customer is told of a handover made here, and where that is reported. */
+  handover?: { readonly tell: HandoverTell; readonly done?: (result: HandoverResult) => void },
 ): Promise<SendDecision | "superseded"> {
   return withTenant(poolOf(app), tenantId, async (tx) => {
     // The conversation first, then the message: one order of locks everywhere.
@@ -986,6 +1138,34 @@ export function recordSend(
            AND s.id = m.session_id`,
         [message.id],
       );
+      // Two fallbacks in a row that the customer was sent: the session is
+      // handed over (US-C6, 2), here, under the conversation's lock, and
+      // only while the fallback's session is still the open one.
+      if (handover !== undefined) {
+        const twice = await tx.query<{ session_id: string }>(
+          `SELECT m.session_id FROM messages m JOIN sessions s ON s.id = m.session_id
+           WHERE m.id = $1 AND m.fallback AND m.status <> 'failed'
+             AND s.guardrail_fallbacks >= 2`,
+          [message.id],
+        );
+        const sessionId = twice.rows[0]?.session_id;
+        if (sessionId !== undefined) {
+          const at = await stamp(tx, now);
+          const open = await openSession(tx, conversationId, at);
+          if (open?.id === sessionId) {
+            handover.done?.(
+              await applyHandoverTrigger(tx, {
+                tenantId,
+                conversationId,
+                sessionId,
+                reasons: ["repeated-failure"],
+                at,
+                tell: handover.tell,
+              }),
+            );
+          }
+        }
+      }
       // The text went without its buttons: the record says what was shown.
       if (buttonsDropped === true) {
         await tx.query("UPDATE messages SET buttons = NULL WHERE id = $1", [message.id]);

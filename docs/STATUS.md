@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 to U8 done; U9 under way)
+## Current milestone: M3 AI core (U1 to U9 done; U11 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -750,6 +750,30 @@ M0 Inception met its exit criteria on 2026-11-16; see
   flags. **Now felt by customers:** the checks hold back right replies
   (row 52, #336), and the stand-in model's echo of any message with a
   number in it is held back.
+  The code's review found no path by which a failed or unchecked reply
+  is sent (`reviews/2026-11-27-gate4-u9-fallback.md`); its fixes were
+  checked by the author only.
+
+- 2026-11-27 — #337 merged: U9 is done. The maintainer answered row 29
+  with yes: M3 builds the handover record. **M3 U11** (#310, pull
+  request #338). The design note (`design/notes/m3-u11-handover.md`)
+  was read by a second agent before any code
+  (`reviews/2026-11-27-m3-u11-design-review.md`): 13 findings, four
+  High (the telling would have been discarded for a newer message; a
+  customer who kept writing was left in silence without end; an
+  emergency beside a tap got the ordinary text; a fixed part could pass
+  its limit). The note was rewritten and **has not been reviewed
+  again**. Built: the `handovers` table; the triggers that exist now
+  (the person button, four of the model's flags, two fallbacks in a
+  row); a handed-over session is not answered and the model is not
+  called; the customer is told once, in or out of business hours, or
+  with the emergency text; the handover is detached when the session
+  ends, or 24 hours after it was attached; the fallback carries its
+  button (migration 0013). **Not built: anyone to reply.** No queue, no
+  screen, no notification before M4. An emergency written in a session
+  that is already handed over gets nothing until U10's phrase list. No
+  timers: a detached handover is closed only when a later trigger
+  finds it over 14 days old.
 
 ## Next
 

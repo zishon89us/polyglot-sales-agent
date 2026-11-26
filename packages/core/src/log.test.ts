@@ -78,6 +78,7 @@ describe("a log line", () => {
       "turn-skipped",
       "send-failed",
       "reply-blocked",
+      "handed-over",
     ]);
     expect(LOG_NUMBERS).toEqual(["status", "durationMs", "attempts", "port"]);
   });

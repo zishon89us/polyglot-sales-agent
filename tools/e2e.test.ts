@@ -212,6 +212,63 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
     expect(after.sent).toHaveLength(before.sent.length);
   }, 30_000);
 
+  test("a tap on the fallback's button hands the session over: the customer is told a person will reply, and the next message is not answered (US-C6, 1)", async () => {
+    const all = async () =>
+      (
+        (await (await fetch(`${mockUrl}/mock/sent`)).json()) as {
+          sent: {
+            id: string;
+            to: string | null;
+            body: string;
+            buttons?: { id: string; title: string }[];
+          }[];
+        }
+      ).sent;
+    // A reply that fails gets the fallback, which carries the button.
+    const fallback = await echoRoundTrip({
+      mockUrl,
+      numberId: NUMBER,
+      from: CUSTOMER,
+      timeoutMs: 30_000,
+      text: "is it 7 SAR then?",
+      reply:
+        "Sorry, I could not answer that. If you would like a person to reply, tap the button below or ask for a person.",
+    });
+    expect(fallback.received).toContain("Sorry");
+    const withButton = (await all()).filter((message) => (message.buttons ?? []).length > 0).at(-1);
+    expect(withButton?.buttons).toEqual([{ id: "core.person", title: "Talk to a person" }]);
+    const before = (await all()).length;
+    const tapped = await fetch(`${mockUrl}/mock/inbound`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        phoneNumberId: NUMBER,
+        from: CUSTOMER,
+        button: { id: "core.person", title: "Talk to a person", replyTo: withButton?.id },
+      }),
+    });
+    expect(tapped.ok).toBe(true);
+    // In or out of the demo business's hours, whenever this runs.
+    const told =
+      /^(A person will reply to you here\.|We are closed right now\. A person will reply after we open: \d{4}-\d{2}-\d{2} \d{2}:\d{2}\. You can also reach us at .+\.)$/;
+    await expect
+      .poll(async () => (await all()).slice(before).map((message) => message.body), {
+        timeout: 30_000,
+        interval: 250,
+      })
+      .toEqual([expect.stringMatching(told)]);
+    // The session is handed over: the next message is taken, and the assistant does not answer it.
+    const after = (await all()).length;
+    const next = await fetch(`${mockUrl}/mock/inbound`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ phoneNumberId: NUMBER, from: CUSTOMER, text: "hello, anyone" }),
+    });
+    expect(next.ok).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    expect((await all()).length).toBe(after);
+  }, 90_000);
+
   test("the product is healthy and ready, and nothing it printed holds the customer's number or words", async () => {
     const api = `http://127.0.0.1:${settings["PSA_API_PORT"]}`;
     expect((await fetch(`${api}/healthz`)).status).toBe(200);

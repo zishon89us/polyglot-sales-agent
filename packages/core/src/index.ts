@@ -1,6 +1,7 @@
 export * from "./buttons.ts";
 export * from "./conversation.ts";
 export * from "./environment.ts";
+export * from "./hours.ts";
 export * from "./jobs.ts";
 export * from "./log.ts";
 export * from "./model.ts";

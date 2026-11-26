@@ -6,6 +6,14 @@ export {
   databaseReady,
   openDatabase,
 } from "./connect.ts";
+export {
+  EMERGENCY_TEXT_MINUTES,
+  HANDOVER_DETACHED_DAYS,
+  HANDOVER_SILENCE_HOURS,
+  type HandoverResult,
+  type HandoverTell,
+  type HandoverTellFor,
+} from "./handover.ts";
 export { recordHeartbeat, type WorkerReadiness, workerReadiness } from "./heartbeat.ts";
 export {
   type IncomingMessage,
@@ -51,6 +59,7 @@ export {
   type DisclosureFor,
   finishTurn,
   type HistoryMessage,
+  joinHandover,
   type MessageToSend,
   type NextSend,
   type ReplyChecksRecord,
