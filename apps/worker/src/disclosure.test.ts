@@ -44,6 +44,7 @@ import {
   REPLY_PROMPT,
   readFlags,
   todayIn,
+  UNREADABLE_KINDS,
 } from "./turn.ts";
 
 const PROMPT = loadPrompt(
@@ -1384,7 +1385,7 @@ describe("the handover record (M3 unit U11; US-C6)", () => {
   });
 
   test("G1 with text beside the tap: the model is given the text so that its flags are read, and the handover is made whatever it answers", async () => {
-    await batch("TAP", "he is not breathing");
+    await batch("TAP", "he fell and will not wake");
     expect(await run([step({ reply: "Call for help.", flags: ["emergency"] })])).toBe(1);
     expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
     expect(await handovers()).toEqual([
@@ -1821,5 +1822,269 @@ describe("the handover record (M3 unit U11; US-C6)", () => {
     expect(tell({ ...base, supportContact: null })).toBe(WILL_REPLY);
     expect(tell({ ...base, timeZone: "Not/AZone" })).toBe(WILL_REPLY);
     expect(tell({ ...base, emergency: true })).toBe(ENGLISH.emergency);
+  });
+});
+
+describe("an emergency phrase and a batch that cannot be read (M3 unit U10, first part)", () => {
+  const WILL_REPLY = ENGLISH["handover-in-hours"];
+  const CANNOT_READ = ENGLISH["unsupported-type"];
+  const step = (value: Record<string, unknown>): FakeStep => ({
+    kind: "answer",
+    value: { claims: [], flags: [], toolCalls: [], language: "en", ...value },
+  });
+  /** One batch: a text, "TAP" for the person button, or `kind:` and a stored kind for anything else. */
+  async function batch(...parts: string[]): Promise<void> {
+    serial += 1;
+    await storeInbound(
+      app,
+      tenant,
+      NUMBER,
+      parts.map((part, index) => ({
+        channelMessageId: `wamid.URGENT${serial}.${index}`,
+        phone: CUSTOMER,
+        userId: null,
+        kind: part === "TAP" ? "button" : part.startsWith("kind:") ? part.slice(5) : "text",
+        body: part === "TAP" || part.startsWith("kind:") ? null : part,
+        ...(part === "TAP" ? { buttonPayload: "core.person" } : {}),
+        sentAt: new Date(),
+      })),
+      [],
+      settled(),
+    );
+  }
+  async function run(script: FakeStep[] = [], channel: Channel = mock): Promise<number> {
+    const adapter = new FakeLlmAdapter(script);
+    const handlers = createHandlers({
+      app,
+      channels: { mock: channel },
+      accessToken: MOCK_ACCESS_TOKEN,
+      report: (event, code) => reported.push(`${event} ${code}`),
+      texts: TEXTS,
+      model: {
+        client: bounded(adapter, { record: traceRecorder(app) }),
+        prompt: PROMPT,
+        fragments: {},
+        canary: "testcanary0000000000",
+        packs: { "faq-only": { name: "faq-only" } },
+        texts: TEXTS,
+      },
+    });
+    for (let runs = 0; runs < 50; runs += 1) {
+      if (!(await workOnce(cross, handlers, { clock: () => new Date(Date.now() + 50) })).ran) {
+        return adapter.calls.length;
+      }
+    }
+    throw new Error("the queue did not empty");
+  }
+  const unhandled = async (): Promise<number> =>
+    (
+      await administrator.query(
+        "SELECT 1 FROM messages WHERE direction = 'inbound' AND handled_at IS NULL",
+      )
+    ).rowCount ?? 0;
+  const count = async (): Promise<number[]> =>
+    (
+      await administrator.query<{ unreadable_batches: number }>(
+        "SELECT unreadable_batches FROM sessions ORDER BY started_at, id",
+      )
+    ).rows.map((row) => row.unreadable_batches);
+  const PERSON = [{ payload: "core.person", title: "Talk to a person" }];
+
+  test("E1: a phrase hands the session over as urgent and sends the emergency text, and the model is not called", async () => {
+    await batch("Please help, he is NOT breathing!! Also what are your prices?");
+    expect(await run([step({ reply: "Our prices are low." })])).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["emergency"], urgent: true, attached: true },
+    ]);
+    expect(reported).toEqual(["handed-over emergency"]);
+    expect(await unhandled()).toBe(0);
+    // No turn with the model: no trace, no record of checks.
+    expect((await administrator.query("SELECT 1 FROM reply_checks")).rowCount).toBe(0);
+  });
+
+  test("E1: a phrase written over two messages of a batch is found, and a tap beside it keeps its reason", async () => {
+    await batch("he is not", "TAP", "breathing");
+    expect(await run()).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+    expect((await handovers()).map((row) => row.reasons)).toEqual([["emergency", "requested"]]);
+  });
+
+  test("E1: a phrase in another language than the session's is found", async () => {
+    await batch("أمي لا تتنفس");
+    expect(await run()).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+  });
+
+  test("E2: in a session that is handed over, a phrase adds the reason, makes it urgent and sends the text (#339)", async () => {
+    await batch("TAP");
+    await run();
+    await batch("she has stopped breathing");
+    expect(await run([step({ reply: "x" })])).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${WILL_REPLY}`, ENGLISH.emergency]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["requested", "emergency"], urgent: true, attached: true },
+    ]);
+    expect(await unhandled()).toBe(0);
+  });
+
+  test("E2a: a phrase in a session handed over more than 24 hours ago keeps it handed over, and the assistant does not answer", async () => {
+    await batch("TAP");
+    await run();
+    await administrator.query("UPDATE handovers SET attached_at = now() - interval '25 hours'");
+    await batch("I think this is a heart attack");
+    expect(await run([step({ reply: "Hello there." })])).toBe(0);
+    expect(bodies().at(-1)).toBe(ENGLISH.emergency);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["requested", "emergency"], urgent: true, attached: true },
+    ]);
+    // Attached again now: the next message is still not answered by the assistant.
+    await batch("hello?");
+    expect(await run([step({ reply: "Hello there." })])).toBe(0);
+    expect(await unhandled()).toBe(0);
+  });
+
+  test("E3: a tenant that is not answering sends the text all the same, and the batch is not left to be tried again", async () => {
+    await administrator.query("UPDATE tenants SET business_hours = NULL WHERE id = $1", [tenant]);
+    try {
+      await batch("he is unconscious");
+      expect(await run()).toBe(0);
+      expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+      expect(await unhandled()).toBe(0);
+      expect((await handovers()).length).toBe(1);
+    } finally {
+      await administrator.query("UPDATE tenants SET business_hours = $2::jsonb WHERE id = $1", [
+        tenant,
+        JSON.stringify(ALWAYS_OPEN),
+      ]);
+    }
+  });
+
+  test("E4: a phrase again within sixty minutes sends nothing more", async () => {
+    await batch("he is not breathing");
+    await run();
+    await batch("still not breathing");
+    expect(await run()).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
+    expect((await handovers()).map((row) => row.reasons)).toEqual([["emergency"]]);
+    expect(await unhandled()).toBe(0);
+  });
+
+  test("E5: a message with no phrase goes to the model as before, the word emergency included", async () => {
+    await batch("Do you take emergency appointments?");
+    expect(await run([step({ reply: "Please ask the salon." })])).toBe(1);
+    expect(bodies()).toEqual([`${TOLD}\n\nPlease ask the salon.`]);
+    expect(await handovers()).toEqual([]);
+  });
+
+  test.each(UNREADABLE_KINDS)(
+    "N1: a batch of kind %s and no text gets the unsupported-type reply with the person button",
+    async (kind) => {
+      await batch(`kind:${kind}`);
+      expect(await run()).toBe(0);
+      expect(bodies()).toEqual([`${TOLD}\n\n${CANNOT_READ}`]);
+      const rows = await outbound();
+      expect(rows.map((row) => [row.class, row.buttons, row.turn_id])).toEqual([
+        ["system-reply", PERSON, null],
+      ]);
+      expect(mock.sent[0]?.buttons?.map((button) => button.title)).toEqual(["Talk to a person"]);
+      expect(await count()).toEqual([1]);
+      expect(await unhandled()).toBe(0);
+      expect(reported).toEqual([]);
+    },
+  );
+
+  test.each(["reaction", "interactive", "quick-reply", "order", "system", "unknown", "poll"])(
+    "N4: a batch of kind %s alone is marked and ignored: no reply, not counted",
+    async (kind) => {
+      await batch(`kind:${kind}`);
+      expect(await run()).toBe(0);
+      expect(bodies()).toEqual([]);
+      expect(await count()).toEqual([0]);
+      expect(await unhandled()).toBe(0);
+    },
+  );
+
+  test("N4: an ignored kind beside one that cannot be read: the reply", async () => {
+    await batch("kind:reaction", "kind:audio");
+    await run();
+    expect(bodies()).toEqual([`${TOLD}\n\n${CANNOT_READ}`]);
+    expect(await count()).toEqual([1]);
+  });
+
+  test("N2: the third batch in a row hands over with its own reason, and the customer gets the handover text and not the reply; the count starts again", async () => {
+    await batch("kind:image");
+    await run();
+    await batch("kind:audio");
+    await run();
+    expect(await count()).toEqual([2]);
+    await batch("kind:sticker");
+    expect(await run()).toBe(0);
+    expect(bodies()).toEqual([`${TOLD}\n\n${CANNOT_READ}`, CANNOT_READ, WILL_REPLY]);
+    expect(await handovers()).toEqual([
+      { state: "waiting", reasons: ["unsupported-content"], urgent: false, attached: true },
+    ]);
+    expect(reported).toEqual(["handed-over unsupported-content"]);
+    expect(await count()).toEqual([0]);
+    // N5: handed over now, a fourth picture gets nothing and is not counted.
+    await batch("kind:image");
+    await run();
+    expect(bodies().length).toBe(3);
+    expect(await count()).toEqual([0]);
+    expect(await unhandled()).toBe(0);
+  });
+
+  test("N3: a batch with text between sets the count to 0, whatever the turn stores", async () => {
+    await batch("kind:image");
+    await run();
+    await batch("kind:image");
+    await run();
+    await batch("What are your hours?");
+    expect(await run([step({ reply: "Please ask the salon." })])).toBe(1);
+    expect(await count()).toEqual([0]);
+    await batch("kind:image");
+    await run();
+    expect(await count()).toEqual([1]);
+    expect(await handovers()).toEqual([]);
+  });
+
+  test("N3: a picture with text in the same batch is a batch with text: the model answers and nothing is counted", async () => {
+    await batch("kind:image", "Is this style possible?");
+    expect(await run([step({ reply: "Please ask the salon." })])).toBe(1);
+    expect(bodies()).toEqual([`${TOLD}\n\nPlease ask the salon.`]);
+    expect(await count()).toEqual([0]);
+  });
+
+  test("N6: for a tenant that is not answering, a batch that cannot be read is marked, with no reply and no count", async () => {
+    await administrator.query("UPDATE tenants SET business_hours = NULL WHERE id = $1", [tenant]);
+    try {
+      await batch("kind:image");
+      expect(await run()).toBe(0);
+      expect(bodies()).toEqual([]);
+      expect(await count()).toEqual([0]);
+      expect(await unhandled()).toBe(0);
+    } finally {
+      await administrator.query("UPDATE tenants SET business_hours = $2::jsonb WHERE id = $1", [
+        tenant,
+        JSON.stringify(ALWAYS_OPEN),
+      ]);
+    }
+  });
+
+  test("N1: the reply is not held back for a newer message, and the disclosure goes with the first only", async () => {
+    await batch("kind:image");
+    await batch("kind:image");
+    await run();
+    // Two messages of one batch: one reply.
+    expect(bodies()).toEqual([`${TOLD}\n\n${CANNOT_READ}`]);
+    expect(await count()).toEqual([1]);
+  });
+
+  test("the count cannot leave 0 to 3", async () => {
+    await batch("kind:image");
+    await run();
+    await expect(administrator.query("UPDATE sessions SET unreadable_batches = 4")).rejects.toThrow(
+      /check/,
+    );
   });
 });

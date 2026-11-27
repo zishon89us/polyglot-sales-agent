@@ -25,6 +25,7 @@ import {
   coreButton,
   type FixedTextName,
   type FixedTextSet,
+  findEmergency,
   type HandoverReason,
   LANGUAGE_UNKNOWN,
   MODEL_CALL_TIMEOUT_MS,
@@ -36,6 +37,7 @@ import {
 import {
   abandonTurn,
   answering,
+  answerUnreadable,
   type Database,
   type DisclosureFor,
   finishTurn,
@@ -45,6 +47,7 @@ import {
   loadBusinessProfile,
   packOf,
   type ReplyChecksRecord,
+  raiseEmergency,
   renewTurn,
   runTool,
   sessionHistory,
@@ -213,6 +216,22 @@ export function buildRequest(parts: {
 }
 
 /** How a turn with the model ended. */
+/**
+ * The kinds of message a person sends to say something and that are not
+ * read (design note M3 U10a, section 3): a batch of these and no text gets
+ * the unsupported-type reply. Every other kind that is not text is ignored.
+ */
+export const UNREADABLE_KINDS: readonly string[] = [
+  "image",
+  "video",
+  "audio",
+  "document",
+  "sticker",
+  "location",
+  "contacts",
+  "unsupported",
+];
+
 export type TurnOutcome =
   /**
    * The reply is stored, or was dropped for a newer message: what
@@ -298,6 +317,31 @@ export async function runTurn(
         (message) => message.kind === "button" && message.buttonPayload === coreButton("person"),
       );
     if (tell !== undefined) {
+      // Step 4a, before anything else: an emergency phrase in what the
+      // customer wrote. The texts of the batch are read as one, in their
+      // order. On a match the turn ends here, and the model is not called.
+      const texts = at.messages.flatMap((message) =>
+        message.kind === "text" && typeof message.body === "string" ? [message.body] : [],
+      );
+      if (findEmergency(texts) !== undefined) {
+        const raised = await raiseEmergency(
+          app,
+          tenantId,
+          conversationId,
+          { token, sessionId },
+          handled,
+          { tapped, tell, ...(now === undefined ? {} : { now }) },
+        );
+        if (raised === "lost-lease") {
+          return { kind: "lost-lease" };
+        }
+        if (raised === "session-over") {
+          return { kind: "ended", end: "session-over" };
+        }
+        return { kind: "ended", end: "stored", handedOver: raised.reasons };
+      }
+    }
+    if (tell !== undefined) {
       // Step 10: a session that is handed over is not answered by the assistant.
       const joined = await joinHandover(
         app,
@@ -319,7 +363,47 @@ export async function runTurn(
         message.kind === "text" && typeof message.body === "string" && message.body !== "",
     );
     if (!hasText && !tapped) {
-      // Step 13 is a later unit's: for now the batch is only marked.
+      const texts = model.texts;
+      if (
+        tell !== undefined &&
+        texts !== undefined &&
+        at.messages.some((message) => UNREADABLE_KINDS.includes(message.kind)) &&
+        (await answering(app, tenantId)).settingsMissing.length === 0
+      ) {
+        // Step 13: the customer said something that is not read. The fixed
+        // reply, with the person button; the third in a row hands over.
+        const answered = await answerUnreadable(
+          app,
+          tenantId,
+          conversationId,
+          { token, sessionId },
+          handled,
+          {
+            reply: (given) => {
+              const picked = texts.pick(given.preferred, given.tenantDefault);
+              return {
+                body: picked.texts["unsupported-type"],
+                buttons: [{ payload: coreButton("person"), title: picked.buttons.person }],
+              };
+            },
+            tell,
+            ...(now === undefined ? {} : { now }),
+          },
+        );
+        switch (answered.kind) {
+          case "lost-lease":
+            return { kind: "lost-lease" };
+          case "session-over":
+            return { kind: "ended", end: "session-over" };
+          case "already-handed-over":
+            return { kind: "ended", end: "handed-over" };
+          case "handed-over":
+            return { kind: "ended", end: "stored", handedOver: answered.result.reasons };
+          default:
+            return { kind: "ended", end: "stored" };
+        }
+      }
+      // Kinds that are ignored, or a tenant that is not answering: only marked.
       return { kind: "no-reply", code: "no-text", end: await end() };
     }
     if ((await answering(app, tenantId)).settingsMissing.length > 0) {

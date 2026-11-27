@@ -213,12 +213,13 @@ export async function applyHandoverTrigger(
     );
   }
   if (made !== "added") {
-    // The session is now handed over. Its count of fallbacks in a row
-    // starts again, and a reply of the assistant that was still waiting is
+    // The session is now handed over. Its counts of fallbacks and of
+    // unreadable batches in a row start again, and a reply of the assistant that was still waiting is
     // not sent after "a person will reply".
-    await tx.query("UPDATE sessions SET guardrail_fallbacks = 0 WHERE id = $1", [
-      trigger.sessionId,
-    ]);
+    await tx.query(
+      "UPDATE sessions SET guardrail_fallbacks = 0, unreadable_batches = 0 WHERE id = $1",
+      [trigger.sessionId],
+    );
     await tx.query(
       `UPDATE messages SET status = 'discarded', send_not_before = NULL
        WHERE session_id = $1 AND class = 'assistant-reply' AND status = 'pending'

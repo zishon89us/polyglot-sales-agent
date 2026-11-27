@@ -2,7 +2,7 @@
 
 Living progress log. The agent updates this at the end of every session.
 
-## Current milestone: M3 AI core (U1 to U9 done; U11 under way)
+## Current milestone: M3 AI core (U1 to U9 and U11 done; U10 under way)
 
 Exit criteria: grounded multilingual answers pass the eval thresholds; the
 eval job runs in CI. The plan is `plans/m3-ai-core.md`. M2 is tagged
@@ -780,6 +780,26 @@ M0 Inception met its exit criteria on 2026-11-16; see
   handover attached again whose telling failed was never told again,
   because an earlier attachment's telling counted), four Medium, and 6
   of 23 mutants alive. Fixed, **checked by the author only**. What is left is #339.
+- **M3 U10, first part** (#309, pull request #340; the unit is split,
+  and opting out and in is the second part). The design note
+  (`design/notes/m3-u10a-emergency-unsupported.md`) was reviewed by a
+  second agent before any code
+  (`reviews/2026-11-28-m3-u10a-design.md`): three High findings (an
+  emergency in a session handed over a day ago reached the model; the
+  matching missed ordinary spellings; what a false alarm costs was not
+  said). The note was rewritten and **not reviewed again as a note**.
+  Built: the emergency phrase lists in the core, **written by the agent
+  and read by no speaker** (decisions, row 53), checked by code when a
+  turn starts, in a handed-over session too; a match hands over as
+  urgent, sends the emergency text and the model is not called. And the
+  unsupported-type reply: a batch with no text that holds a picture, a
+  voice note, a document and the like gets one fixed reply with the
+  person button; the third in a row hands over (migration 0014).
+  **A match silences the assistant for that customer for up to 24
+  hours, and nobody can reply before M4.** Not built: the check at
+  store time, the emergency email, an alert when the emergency text
+  fails, a document's caption (#341). No eval has measured what the
+  lists miss (U16).
 
 ## Next
 

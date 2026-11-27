@@ -440,6 +440,14 @@ export async function finishTurn(
         ...(now === undefined ? {} : { runAt: now }),
       });
     }
+    // A batch with text ends a run of batches that could not be read (U10a, N3).
+    await tx.query(
+      `UPDATE sessions SET unreadable_batches = 0
+       WHERE id = $1 AND unreadable_batches <> 0
+         AND EXISTS (SELECT 1 FROM messages
+                     WHERE id = ANY($2::uuid[]) AND direction = 'inbound' AND kind = 'text')`,
+      [turn.sessionId, handled],
+    );
     await tx.query(
       `UPDATE messages SET handled_at = $2::timestamptz, answered_by = $3
        WHERE id = ANY($1::uuid[]) AND direction = 'inbound' AND handled_at IS NULL`,
@@ -547,6 +555,183 @@ export function joinHandover(
     );
     await releaseLease(tx, conversationId, turn.token);
     return "handed-over";
+  });
+}
+
+/** How many batches in a row may go unread before the session is handed over. */
+export const UNREADABLE_BATCHES_MAX = 3;
+
+/**
+ * An emergency (order of checks, step 4a; design note M3 U10a, section
+ * 2.3): ends the turn in one transaction. A handover whose 24 hours are
+ * over is detached first, so that the trigger attaches it again with a
+ * new time and the session stays handed over; the trigger is applied; the
+ * batch is marked as dealt with. The model is not called.
+ */
+export function raiseEmergency(
+  app: Database,
+  tenantId: string,
+  conversationId: string,
+  turn: { readonly token: string; readonly sessionId: string },
+  handled: readonly string[],
+  given: {
+    /** The batch holds a tap on the person button too: its reason is not lost. */
+    readonly tapped: boolean;
+    readonly tell: HandoverTell;
+    readonly now?: Date;
+  },
+): Promise<HandoverResult | "lost-lease" | "session-over"> {
+  return withTenant(poolOf(app), tenantId, async (tx) => {
+    if (!(await holdsLease(tx, conversationId, turn.token))) {
+      return "lost-lease";
+    }
+    const at = await stamp(tx, given.now);
+    const open = await openSession(tx, conversationId, at);
+    if (open?.id !== turn.sessionId) {
+      // The session ended while the turn waited: nothing is stored in it.
+      // The batch is left, and the next turn reads it again.
+      await releaseLease(tx, conversationId, turn.token);
+      return "session-over";
+    }
+    const waiting = await waitingHandover(tx, turn.sessionId);
+    if (waiting !== undefined) {
+      const over = await tx.query<{ at: string }>(
+        `SELECT ($1::timestamptz + $2::integer * interval '1 hour')::text AS at
+         WHERE $1::timestamptz + $2::integer * interval '1 hour' <= $3::timestamptz`,
+        [waiting.attachedAt, HANDOVER_SILENCE_HOURS, at],
+      );
+      if (over.rows[0] !== undefined) {
+        await detachHandover(tx, turn.sessionId, over.rows[0].at);
+      }
+    }
+    const result = await applyHandoverTrigger(tx, {
+      tenantId,
+      conversationId,
+      sessionId: turn.sessionId,
+      reasons: given.tapped ? ["emergency", "requested"] : ["emergency"],
+      at,
+      tell: given.tell,
+    });
+    await tx.query(
+      `UPDATE messages SET handled_at = $2::timestamptz
+       WHERE id = ANY($1::uuid[]) AND direction = 'inbound' AND handled_at IS NULL`,
+      [handled, at],
+    );
+    await releaseLease(tx, conversationId, turn.token);
+    return result;
+  });
+}
+
+/** What the unsupported-type reply is made from: the session's language, the contact's last. */
+export type UnreadableReply = (given: DisclosureFor) => {
+  readonly body: string;
+  readonly buttons: readonly StoredButton[];
+};
+
+/**
+ * A batch that cannot be read (order of checks, step 13; design note M3
+ * U10a, section 3): the fixed reply is stored to be sent and the session's
+ * count goes up; the third such batch in a row hands the session over
+ * instead, and the customer is told that and not the reply.
+ */
+export function answerUnreadable(
+  app: Database,
+  tenantId: string,
+  conversationId: string,
+  turn: { readonly token: string; readonly sessionId: string },
+  handled: readonly string[],
+  given: { readonly reply: UnreadableReply; readonly tell: HandoverTell; readonly now?: Date },
+): Promise<
+  | { readonly kind: "replied"; readonly count: number }
+  | { readonly kind: "handed-over"; readonly result: HandoverResult }
+  | { readonly kind: "already-handed-over" | "lost-lease" | "session-over" }
+> {
+  return withTenant(poolOf(app), tenantId, async (tx) => {
+    if (!(await holdsLease(tx, conversationId, turn.token))) {
+      return { kind: "lost-lease" } as const;
+    }
+    const at = await stamp(tx, given.now);
+    const open = await openSession(tx, conversationId, at);
+    if (open?.id !== turn.sessionId) {
+      await releaseLease(tx, conversationId, turn.token);
+      return { kind: "session-over" } as const;
+    }
+    const markHandled = (answeredBy: string | null) =>
+      tx.query(
+        `UPDATE messages SET handled_at = $2::timestamptz, answered_by = $3
+         WHERE id = ANY($1::uuid[]) AND direction = 'inbound' AND handled_at IS NULL`,
+        [handled, at, answeredBy],
+      );
+    if ((await waitingHandover(tx, turn.sessionId)) !== undefined) {
+      // Handed over since the turn looked (step 10): nothing is sent, nothing counted.
+      await markHandled(null);
+      await releaseLease(tx, conversationId, turn.token);
+      return { kind: "already-handed-over" } as const;
+    }
+    const known = await tx.query<{
+      count: number;
+      session: string | null;
+      contact: string | null;
+      tenant: string;
+    }>(
+      `SELECT s.unreadable_batches AS count, s.language AS session, p.last_language AS contact,
+              t.default_language AS tenant
+       FROM sessions s
+       JOIN conversations c ON c.id = s.conversation_id
+       JOIN contacts p ON p.id = c.contact_id
+       JOIN tenants t ON t.id = c.tenant_id
+       WHERE s.id = $1
+       FOR UPDATE OF s`,
+      [turn.sessionId],
+    );
+    const row = known.rows[0];
+    if (row === undefined) {
+      throw new Error("a turn for a session that is not there");
+    }
+    if (row.count + 1 >= UNREADABLE_BATCHES_MAX) {
+      // The trigger sets the count to 0: the session is handed over now.
+      const result = await applyHandoverTrigger(tx, {
+        tenantId,
+        conversationId,
+        sessionId: turn.sessionId,
+        reasons: ["unsupported-content"],
+        at,
+        tell: given.tell,
+      });
+      await markHandled(null);
+      await releaseLease(tx, conversationId, turn.token);
+      return { kind: "handed-over", result } as const;
+    }
+    const reply = given.reply({ preferred: [row.session, row.contact], tenantDefault: row.tenant });
+    const stored = await tx.query<{ id: string }>(
+      `INSERT INTO messages (tenant_id, conversation_id, session_id, direction, class, kind, body,
+                             status, created_at, buttons)
+       VALUES ($1, $2, $3, 'outbound', 'system-reply', 'text', $4, 'pending', $5::timestamptz,
+               $6::jsonb)
+       RETURNING id`,
+      [
+        tenantId,
+        conversationId,
+        turn.sessionId,
+        reply.body,
+        at,
+        reply.buttons.length === 0 ? null : JSON.stringify(reply.buttons),
+      ],
+    );
+    await tx.query("UPDATE sessions SET unreadable_batches = $2 WHERE id = $1", [
+      turn.sessionId,
+      row.count + 1,
+    ]);
+    await enqueueJob(tx, {
+      type: SEND_MESSAGES_JOB,
+      tenantId,
+      subjectId: conversationId,
+      payload: { conversationId },
+      ...(given.now === undefined ? {} : { runAt: given.now }),
+    });
+    await markHandled(stored.rows[0]?.id as string);
+    await releaseLease(tx, conversationId, turn.token);
+    return { kind: "replied", count: row.count + 1 } as const;
   });
 }
 

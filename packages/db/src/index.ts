@@ -53,6 +53,7 @@ export {
 } from "./migrate.ts";
 export {
   abandonTurn,
+  answerUnreadable,
   beginTurn,
   type CallResult,
   claimNextSend,
@@ -63,6 +64,7 @@ export {
   type MessageToSend,
   type NextSend,
   type ReplyChecksRecord,
+  raiseEmergency,
   recordSend,
   renewTurn,
   runTool,
@@ -73,7 +75,9 @@ export {
   type ToolRun,
   type TurnEnd,
   type TurnStart,
+  UNREADABLE_BATCHES_MAX,
   type UnhandledMessage,
+  type UnreadableReply,
 } from "./outbound.ts";
 export { findIsolationProblems, tenantColumn, tenantOwnedTables } from "./policy-check.ts";
 export {
