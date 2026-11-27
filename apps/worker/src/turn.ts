@@ -215,7 +215,6 @@ export function buildRequest(parts: {
   };
 }
 
-/** How a turn with the model ended. */
 /**
  * The kinds of message a person sends to say something and that are not
  * read (design note M3 U10a, section 3): a batch of these and no text gets
@@ -232,6 +231,7 @@ export const UNREADABLE_KINDS: readonly string[] = [
   "unsupported",
 ];
 
+/** How a turn with the model ended. */
 export type TurnOutcome =
   /**
    * The reply is stored, or was dropped for a newer message: what
@@ -338,7 +338,12 @@ export async function runTurn(
         if (raised === "session-over") {
           return { kind: "ended", end: "session-over" };
         }
-        return { kind: "ended", end: "stored", handedOver: raised.reasons };
+        // Reported when something happened: the session became handed
+        // over, or the text was stored. A phrase again within the hour
+        // adds nothing and is not reported as a handover.
+        return raised.made === "added" && raised.told === null
+          ? { kind: "ended", end: "stored" }
+          : { kind: "ended", end: "stored", handedOver: raised.reasons };
       }
     }
     if (tell !== undefined) {

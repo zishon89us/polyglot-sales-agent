@@ -588,8 +588,9 @@ export function raiseEmergency(
     const at = await stamp(tx, given.now);
     const open = await openSession(tx, conversationId, at);
     if (open?.id !== turn.sessionId) {
-      // The session ended while the turn waited: nothing is stored in it.
-      // The batch is left, and the next turn reads it again.
+      // The session ended while the turn waited: its messages were marked
+      // as dealt with when it was ended, and nothing is stored in it. An
+      // emergency in that batch gets nothing (the note, 2.4; #341).
       await releaseLease(tx, conversationId, turn.token);
       return "session-over";
     }

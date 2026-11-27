@@ -23,7 +23,9 @@ Bengali and Tagalog were read by no speaker (decisions, row 53).
   voice note: none is found. That customer gets an ordinary reply, or,
   in a handed-over session, nothing.
 - **It fires on harmless messages.** "My mother had a heart attack
-  last year, can I move my booking?" holds a phrase.
+  last year, can I move my booking?" holds a phrase. So do "that
+  price nearly gave me a heart attack lol", "I could kill myself for
+  forgetting the coupon" and "do you treat chest pain?".
 - **What either gets in this milestone.** One fixed text in English
   that says to contact the local emergency services, and then **no
   answer to anything for up to 24 hours**: the session is handed over,
@@ -60,19 +62,27 @@ compared:
    lower case;
 2. apostrophes of every form removed ("can't" and "can’t" and "cant"
    are one);
-3. the forms of the Arabic alef made one, the final yeh forms one, teh
-   marbuta and the Urdu he made the Arabic heh; the Hindi nasal marks
-   made one;
+3. the forms of the Arabic alef made one, the yeh forms one, the Urdu
+   kaf made the Arabic kaf, teh marbuta and the Urdu he made the
+   Arabic heh, the Urdu noon without a dot made noon; the Hindi nasal
+   marks made one and the dot below a Hindi letter taken out;
 4. every run of anything that is not a letter, a mark or a digit made
    one space.
 
 A phrase matches where it stands with no letter, mark or digit
-directly before it and no letter or mark directly after it; before an
-Arabic phrase the one-letter "and" (waw or feh) may stand. Where a
+directly before it and no letter or mark directly after it; before a
+phrase of the Arabic or the Urdu list one letter written onto it may
+stand: the "and" (waw or feh) or the "with" (beh). Where a
 language writes a phrase both joined and apart, both are listed.
 
 The texts of a batch are checked **joined by a space, in the order
-they came**, so a phrase written over two messages is found.
+they came**, so a phrase written over two messages is found. So is one
+that two unrelated messages make between them ("It has not" and
+"breathing fabric?"): a false alarm the join costs. Of a batch longer
+than 20,000 characters, the first and the last 10,000 are read.
+
+An unseen character inside a word is taken out, not made a space: a
+phrase whose two words are joined by one is not found.
 
 ### 2.3 Where, and what happens
 
@@ -115,6 +125,10 @@ checks at the start of the turn that deals with the message. So:
   with a channel time outside the 24-hour window (it could not be
   answered in any case), and one left unread in a session that a new
   session ends.
+- **A session that ends between the start of the turn and the
+  emergency's transaction** had its messages marked when it ended: the
+  emergency gets nothing. The window is the moment the session's 24
+  hours run out.
 
 Checking at store time is #341's.
 

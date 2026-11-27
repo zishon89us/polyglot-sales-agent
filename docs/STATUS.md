@@ -799,7 +799,13 @@ M0 Inception met its exit criteria on 2026-11-16; see
   hours, and nobody can reply before M4.** Not built: the check at
   store time, the emergency email, an alert when the emergency text
   fails, a document's caption (#341). No eval has measured what the
-  lists miss (U16).
+  lists miss (U16). A third agent reviewed the code
+  (`reviews/2026-11-28-gate4-u10a-emergency.md`): two High findings
+  (the list missed "he isn't breathing" and "he's choking" by its own
+  folding; it fired on many more harmless messages than was said), and
+  6 of 22 mutants alive. Fixed in part, **checked by the author
+  only**: "heart attack", "kill myself", "overdose" and "chest pain"
+  still fire in harmless sentences. What is left is #341.
 
 ## Next
 

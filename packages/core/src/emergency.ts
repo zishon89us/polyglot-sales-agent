@@ -23,22 +23,35 @@ export const EMERGENCY_PHRASES: Readonly<Record<string, readonly string[]>> = {
     "cannot breath",
     "can not breath",
     "stopped breathing",
+    "isnt breathing",
+    "arent breathing",
+    "wasnt breathing",
     "heart attack",
     "chest pain",
     "having a stroke",
+    "had a stroke",
     "having a seizure",
     "overdose",
     "overdosed",
-    "unconscious",
-    "passed out",
-    "is choking",
-    "am choking",
+    "overdosing",
+    "is unconscious",
+    "are unconscious",
+    "hes unconscious",
+    "shes unconscious",
+    "fell unconscious",
+    "he is choking",
+    "she is choking",
+    "hes choking",
+    "shes choking",
+    "baby is choking",
+    "child is choking",
+    "i am choking",
+    "im choking",
     "anaphylaxis",
     "anaphylactic",
     "severe allergic reaction",
     "severe bleeding",
     "bleeding heavily",
-    "bleeding badly",
     "wont stop bleeding",
     "kill myself",
     "killing myself",
@@ -46,12 +59,15 @@ export const EMERGENCY_PHRASES: Readonly<Record<string, readonly string[]>> = {
     "suicidal",
     "commit suicide",
     "committing suicide",
+    "committed suicide",
+    "send an ambulance",
     "call an ambulance",
     "need an ambulance",
   ],
   ar: [
     "لا يتنفس",
     "لا تتنفس",
+    "لا يتنفسون",
     "لا أستطيع التنفس",
     "لا اقدر اتنفس",
     "ما اقدر اتنفس",
@@ -62,6 +78,10 @@ export const EMERGENCY_PHRASES: Readonly<Record<string, readonly string[]>> = {
     "جلطة قلبية",
     "أزمة قلبية",
     "سكتة دماغية",
+    "النوبة القلبية",
+    "الجلطة القلبية",
+    "الأزمة القلبية",
+    "السكتة الدماغية",
     "ألم في الصدر",
     "فاقد الوعي",
     "فاقدة الوعي",
@@ -105,7 +125,6 @@ export const EMERGENCY_PHRASES: Readonly<Record<string, readonly string[]>> = {
     "خود کشی کرنا",
     "خودکشی کر لوں",
     "خود کشی کر لوں",
-    "جان دے دوں",
     "ایمبولینس بھیجیں",
     "ایمبولینس چاہیے",
   ],
@@ -126,7 +145,13 @@ export const EMERGENCY_PHRASES: Readonly<Record<string, readonly string[]>> = {
     "खून नहीं रुक रहा",
     "आत्महत्या करना",
     "आत्महत्या कर लूं",
-    "जान दे दूं",
+    // The same with the short spelling of the word for not.
+    "सांस नही आ रही",
+    "सांस नही ले रहा",
+    "सांस नही ले रही",
+    "सांस नही ले पा रहा",
+    "सांस नही ले पा रही",
+    "खून नही रुक रहा",
     "एम्बुलेंस भेजो",
     "एम्बुलेंस चाहिए",
   ],
@@ -165,8 +190,6 @@ export const EMERGENCY_PHRASES: Readonly<Record<string, readonly string[]>> = {
     "masakit ang dibdib",
     "naninikip ang dibdib",
     "nawalan ng malay",
-    "walang malay",
-    "maraming dugo",
     "magpapakamatay",
     "magpakamatay",
     "gusto ko nang mamatay",
@@ -178,6 +201,11 @@ export const EMERGENCY_PHRASES: Readonly<Record<string, readonly string[]>> = {
     "saans nahi aa rahi",
     "saans nahin aa rahi",
     "sans nahi aa rahi",
+    "sans nahin aa rahi",
+    "saans nahin le raha",
+    "saans nahin le rahi",
+    "sans nahi le raha",
+    "sans nahi le rahi",
     "saans nahi le raha",
     "saans nahi le rahi",
     "saans ruk gayi",
@@ -214,7 +242,7 @@ const ONE_FORM = new Map<string, string>([
   [at(0x901), at(0x902)],
 ]);
 /** Apostrophes of every form, and the Devanagari dot below: taken out. */
-const TAKEN_OUT = new Set([0x27, 0x2019, 0x2018, 0x2bc, 0x60, 0xb4, 0x93c].map(at));
+const TAKEN_OUT = new Set([0x27, 0x2019, 0x2018, 0x2bc, 0x2032, 0x60, 0xb4, 0x93c].map(at));
 const NOT_A_WORD = /[^\p{L}\p{M}\p{N}]+/gu;
 
 /** A text or a phrase as it is compared (the note, 2.2). */
@@ -228,8 +256,12 @@ export function emergencyFolded(text: string): string {
   return out.replace(NOT_A_WORD, " ").trim();
 }
 
-/** Before an Arabic or Urdu phrase the one-letter "and" may stand. */
-const AND_BEFORE = `[${at(0x648)}${at(0x641)}]?`;
+/**
+ * Before a phrase of the Arabic or the Urdu list one letter written onto
+ * it may stand: the "and" (waw, feh) or the "with" (beh), as in "struck
+ * with a heart attack".
+ */
+const AND_BEFORE = `[${at(0x648)}${at(0x641)}${at(0x628)}]?`;
 const FINDERS: readonly { readonly list: string; readonly finder: RegExp }[] = Object.entries(
   EMERGENCY_PHRASES,
 ).map(([list, phrases]) => ({
@@ -244,19 +276,27 @@ const FINDERS: readonly { readonly list: string; readonly finder: RegExp }[] = O
   ),
 }));
 
+/** Of a batch longer than twice this, in UTF-16 units, this much of its beginning and of its end is read. */
+export const EMERGENCY_READ_MAX = 10_000;
+
 /**
  * Whether what a customer wrote holds a phrase of the lists: the texts of
  * one batch, in the order they came, read as one text. Says which list,
  * never the text.
  */
 export function findEmergency(texts: readonly string[]): { readonly list: string } | undefined {
-  const folded = emergencyFolded(texts.join(" "));
-  if (folded === "") {
-    return undefined;
-  }
-  for (const { list, finder } of FINDERS) {
-    if (finder.test(folded)) {
-      return { list };
+  const joined = texts.join(" ");
+  // What is read is bounded: of a very long batch, its beginning and its end.
+  const parts =
+    joined.length <= 2 * EMERGENCY_READ_MAX
+      ? [joined]
+      : [joined.slice(0, EMERGENCY_READ_MAX), joined.slice(-EMERGENCY_READ_MAX)];
+  for (const part of parts) {
+    const folded = emergencyFolded(part);
+    for (const { list, finder } of FINDERS) {
+      if (finder.test(folded)) {
+        return { list };
+      }
     }
   }
   return undefined;

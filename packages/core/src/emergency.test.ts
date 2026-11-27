@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { EMERGENCY_PHRASES, emergencyFolded, findEmergency } from "./emergency.ts";
+import {
+  EMERGENCY_PHRASES,
+  EMERGENCY_READ_MAX,
+  emergencyFolded,
+  findEmergency,
+} from "./emergency.ts";
 
 const at = (codePoint: number): string => String.fromCodePoint(codePoint);
 const every = Object.entries(EMERGENCY_PHRASES).flatMap(([list, phrases]) =>
@@ -55,6 +60,13 @@ describe("the emergency phrase lists (design note M3 U10a, section 2)", () => {
       "I'm dying to try the new facial",
       "Can I book a haircut on Friday at 5?",
       "patay ang phone ko",
+      // Narrowed after the code review (R2): these fired and no longer do.
+      "I passed out flyers yesterday",
+      "do you run unconscious bias training?",
+      "the red dye is bleeding badly in the wash",
+      "my car engine is choking on idle",
+      "Walang Malay version ng menu?",
+      "maraming dugo ang karne na binili ko",
       "my card was declined, I can breathe again once it works",
       "the pain in my back is better",
       "do you sell breathing masks",
@@ -66,10 +78,44 @@ describe("the emergency phrase lists (design note M3 U10a, section 2)", () => {
     }
   });
 
-  it("fires on a harmless message that holds a phrase: the list leans that way", () => {
-    expect(
-      findEmergency(["My mother had a heart attack last year, can I move my booking?"]),
-    ).toEqual({ list: "en" });
+  it("fires on harmless messages that hold a phrase: the list leans that way (decisions, row 53)", () => {
+    for (const text of [
+      "My mother had a heart attack last year, can I move my booking?",
+      "that price nearly gave me a heart attack lol",
+      "I could kill myself for forgetting the coupon",
+      "caffeine overdose tee in size M?",
+      "do you treat chest pain?",
+    ]) {
+      expect(findEmergency([text])).toEqual({ list: "en" });
+    }
+    // Across two messages that have nothing to do with each other.
+    expect(findEmergency(["It has not", "breathing fabric?"])).toEqual({ list: "en" });
+  });
+
+  it("finds the contracted and the other forms of its own phrases (code review, R1)", () => {
+    for (const text of [
+      "he isn't breathing",
+      "she isnt breathing",
+      "they aren't breathing",
+      "he's choking",
+      "I'm choking on food",
+      "she is overdosing",
+      "he committed suicide",
+      "he had a stroke just now",
+      "send an ambulance please",
+      "he is unconscious",
+      `i can${at(0x2032)}t breathe`,
+    ]) {
+      expect(findEmergency([text])).toEqual({ list: "en" });
+    }
+  });
+
+  it("reads the beginning and the end of a very long batch, and not its middle", () => {
+    const filler = "a ".repeat(EMERGENCY_READ_MAX);
+    expect(findEmergency([`not breathing ${filler}${filler}`])).toBeDefined();
+    expect(findEmergency([`${filler}${filler} not breathing`])).toBeDefined();
+    expect(findEmergency([`${filler}${filler} not breathing ${filler}${filler}`])).toBeUndefined();
+    expect(findEmergency([filler, "not breathing"])).toBeDefined();
   });
 
   it("folds case, apostrophes of every form, punctuation and spaces", () => {
@@ -119,7 +165,10 @@ describe("the emergency phrase lists (design note M3 U10a, section 2)", () => {
   it("lets the one-letter and stand before an Arabic or an Urdu phrase, and nothing else", () => {
     expect(findEmergency(["تعبان ومش قادر اتنفس"])).toEqual({ list: "ar" });
     expect(findEmergency(["فلا يتنفس"])).toEqual({ list: "ar" });
-    expect(findEmergency(["بنزيف حاد"])).toBeUndefined();
+    // The one-letter with, too: "struck with a heart attack".
+    expect(findEmergency(["أصيب بنوبة قلبية"])).toEqual({ list: "ar" });
+    expect(findEmergency(["عنده السكتة الدماغية"])).toEqual({ list: "ar" });
+    expect(findEmergency(["لنزيف حاد"])).toBeUndefined();
     expect(findEmergency(["wnot breathing"])).toBeUndefined();
   });
 
@@ -133,6 +182,15 @@ describe("the emergency phrase lists (design note M3 U10a, section 2)", () => {
   it("makes the Hindi nasal marks one", () => {
     expect(findEmergency(["साँस नहीं आ रही"])).toEqual({ list: "hi" });
     expect(findEmergency(["सांस नहीं आ रही"])).toEqual({ list: "hi" });
+    expect(findEmergency(["सांस नही ले रहा"])).toEqual({ list: "hi" });
+    // The dot below a letter is taken out: written with it, a listed word is the same word.
+    expect(findEmergency([`ख${at(0x93c)}ून नहीं रुक रहा`])).toEqual({ list: "hi" });
+  });
+
+  it("reads Urdu written with the Arabic kaf", () => {
+    // The list has the Urdu keheh; this has the Arabic kaf.
+    expect(findEmergency([`دل ${at(0x643)}ا دورہ`])).toEqual({ list: "ur" });
+    expect(findEmergency([`دل ${at(0x6a9)}ا دورہ`])).toEqual({ list: "ur" });
   });
 
   it("reads Bengali joined and apart, and Tagalog short and long", () => {

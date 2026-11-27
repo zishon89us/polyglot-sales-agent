@@ -1968,6 +1968,8 @@ describe("an emergency phrase and a batch that cannot be read (M3 unit U10, firs
     expect(bodies()).toEqual([`${TOLD}\n\n${ENGLISH.emergency}`]);
     expect((await handovers()).map((row) => row.reasons)).toEqual([["emergency"]]);
     expect(await unhandled()).toBe(0);
+    // Reported once: the second phrase made no handover and sent nothing.
+    expect(reported).toEqual(["handed-over emergency"]);
   });
 
   test("E5: a message with no phrase goes to the model as before, the word emergency included", async () => {
@@ -1975,6 +1977,19 @@ describe("an emergency phrase and a batch that cannot be read (M3 unit U10, firs
     expect(await run([step({ reply: "Please ask the salon." })])).toBe(1);
     expect(bodies()).toEqual([`${TOLD}\n\nPlease ask the salon.`]);
     expect(await handovers()).toEqual([]);
+  });
+
+  test("the kinds that get the reply are these and no other", () => {
+    expect([...UNREADABLE_KINDS].sort()).toEqual([
+      "audio",
+      "contacts",
+      "document",
+      "image",
+      "location",
+      "sticker",
+      "unsupported",
+      "video",
+    ]);
   });
 
   test.each(UNREADABLE_KINDS)(
