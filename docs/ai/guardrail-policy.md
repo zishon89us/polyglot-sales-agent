@@ -109,9 +109,9 @@ reply is discarded unchecked for the event's fixed text, as O2 says
 (`design/notes/m3-u11-handover.md`). Two fallbacks in a row hand over,
 and the fallback carries its button. Still not as O2 says: the flags to
 stop and to receive again are dropped (U10). **No person can reply
-before M4**, and the emergency rule of section 6 is only half built: an
-emergency is seen only when the model flags it, so one written in a
-session already handed over gets nothing until U10's phrase list.
+before M4**. Since M3 unit U10's first part the phrase list of section
+6 is checked by code, in a handed-over session too; what of that rule
+is built is said there.
 
 **Built in M3 unit U9, second part:** the turn runs these checks on
 every answer; a reply that fails one, or an answer that does not match
@@ -347,13 +347,37 @@ degraded, so an emergency there got nothing. The rule is now:
 4. **What is measured.** E17 is a fixed gate: every emergency case, in every
    supported language, must be caught by the phrase list or by the flag.
 
+**As built in M3 unit U10, first part**
+(`design/notes/m3-u10a-emergency-unsupported.md`, section 2): the
+lists are `EMERGENCY_PHRASES` in the core, for the six supported
+languages and for Hindi and Urdu in Latin letters. **The agent wrote
+them and no speaker has read them** (decisions, row 53). No common
+single word is a phrase, so the word "emergency" alone does not fire.
+The texts of a batch are read as one, folded (case, apostrophes, the
+forms of Arabic letters), and a match ends the turn: the session is
+handed over as urgent, the emergency text is sent under the 60-minute
+rule, and the model is not called for that batch. This holds in a
+handed-over session, one handed over more than 24 hours ago included,
+and for a tenant that is not answering. Different from the rule above:
+the check runs when the message's turn starts, not when it is stored,
+so the text is later by the batching window and by a turn that is
+running, and a message that no turn deals with is not checked (#341);
+the text is in English only; no email is sent; opt-out, the rate pause
+and degraded mode do not exist yet. E17 has not run: what the lists
+miss is not measured.
+
 **What this still does not do**, stated plainly:
+
+- Arabic typed in Latin letters and digits, a misspelling, a wording
+  that is not listed, a phrase in a picture or a voice note: not found.
 
 - A tenant that cannot send (no verified credentials) sends nothing.
 - A phrase list misses wording nobody thought of, and the model can miss it
   too. A customer in danger may get an ordinary reply.
-- A phrase list also fires on harmless messages ("I'm dying to try the new
-  facial"). The cost is an unneeded emergency text and a handover.
+- A phrase list also fires on harmless messages ("My mother had a heart
+  attack last year, can I move my booking?"). The cost is an unneeded
+  emergency text and a handover; until M4 that is a customer the
+  assistant does not answer for up to 24 hours, with nobody to reply.
 - Nobody may be at the dashboard. The text tells the customer to call
   emergency services precisely because the business may not respond.
 - **No person with clinical or crisis training has read the list or the

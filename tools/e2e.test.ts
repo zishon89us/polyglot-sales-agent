@@ -212,7 +212,7 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
     expect(after.sent).toHaveLength(before.sent.length);
   }, 30_000);
 
-  test("a tap on the fallback's button hands the session over: the customer is told a person will reply, and the next message is not answered (US-C6, 1)", async () => {
+  test("a tap on the fallback's button hands the session over: the customer is told a person will reply, the next message is not answered, and an emergency phrase still gets the emergency text (US-C6, 1 and 10)", async () => {
     const all = async () =>
       (
         (await (await fetch(`${mockUrl}/mock/sent`)).json()) as {
@@ -267,7 +267,22 @@ describe("the walking skeleton, end to end (M2 exit criterion)", () => {
     expect(next.ok).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 6_000));
     expect((await all()).length).toBe(after);
-  }, 90_000);
+    // An emergency phrase is read by code in a handed-over session too
+    // (order of checks, step 4a): the emergency text, and no echo.
+    const urgent = await echoRoundTrip({
+      mockUrl,
+      numberId: NUMBER,
+      from: CUSTOMER,
+      timeoutMs: 30_000,
+      text: "please help he is not breathing",
+      reply:
+        "If this is an emergency, please contact your local emergency services now. This assistant cannot help with emergencies.",
+    });
+    expect(urgent.received).toBe(
+      "If this is an emergency, please contact your local emergency services now. This assistant cannot help with emergencies.",
+    );
+    expect((await all()).some((message) => message.body.includes("Echo: please help"))).toBe(false);
+  }, 120_000);
 
   test("the product is healthy and ready, and nothing it printed holds the customer's number or words", async () => {
     const api = `http://127.0.0.1:${settings["PSA_API_PORT"]}`;
